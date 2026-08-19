@@ -9,5 +9,8 @@ export const cities: City[] = [
   { id: 'ie-waterford', name: 'Waterford', countryCode: 'IE', coordinates: [-7.1101, 52.2593], mapZoom: 12 },
 ]
 
-export const irelandOverview = { center: [-8.1, 53.25] as const, zoom: 5.7 }
+export const irelandOverview = {
+  center: [-8.1, 53.25] as [number, number],
+  zoom: 5.7,
+}
 export const getCity = (id: string | null) => cities.find((city) => city.id === id)

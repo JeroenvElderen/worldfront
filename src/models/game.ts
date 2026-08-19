@@ -1,4 +1,4 @@
-export type Coordinates = readonly [longitude: number, latitude: number]
+export type Coordinates = [longitude: number, latitude: number]
 export type VehicleStatus = 'available' | 'on-job' | 'maintenance'
 
 export interface City { id: string; name: string; countryCode: string; coordinates: Coordinates; mapZoom: number }

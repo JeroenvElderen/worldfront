@@ -22,6 +22,40 @@ const routePosition = (coordinates: number[][], progress: number): Coordinates =
   return [start[0] + (end[0] - start[0]) * amount, start[1] + (end[1] - start[1]) * amount]
 }
 
+const remainingRoute = (coordinates: number[][], progress: number) => {
+  if (coordinates.length < 2 || progress >= 1) {
+    const end = routePosition(coordinates, 1)
+    return [end, end]
+  }
+  const lengths = coordinates.slice(1).map((coordinate, index) => Math.hypot(coordinate[0] - coordinates[index][0], coordinate[1] - coordinates[index][1]))
+  let target = Math.max(0, progress) * lengths.reduce((sum, length) => sum + length, 0)
+  let segment = 0
+  while (segment < lengths.length - 1 && target > lengths[segment]) target -= lengths[segment++]
+  return [routePosition(coordinates, progress), ...coordinates.slice(segment + 1)]
+}
+
+const mapIcon = (kind: 'vehicle' | 'person') => {
+  const canvas = document.createElement('canvas')
+  canvas.width = 64
+  canvas.height = 64
+  const context = canvas.getContext('2d')!
+  context.fillStyle = kind === 'vehicle' ? '#0f766e' : '#f59e0b'
+  context.beginPath(); context.arc(32, 32, 29, 0, Math.PI * 2); context.fill()
+  context.strokeStyle = '#fff'; context.lineWidth = 4; context.stroke()
+  context.fillStyle = '#fff'
+  if (kind === 'vehicle') {
+    context.fillRect(13, 29, 38, 15)
+    context.beginPath(); context.moveTo(20, 29); context.lineTo(25, 20); context.lineTo(41, 20); context.lineTo(47, 29); context.fill()
+    context.fillStyle = '#0f766e'; context.fillRect(27, 23, 12, 7)
+    context.fillStyle = '#fff'; context.beginPath(); context.arc(21, 46, 5, 0, Math.PI * 2); context.arc(44, 46, 5, 0, Math.PI * 2); context.fill()
+  } else {
+    context.beginPath(); context.arc(32, 20, 8, 0, Math.PI * 2); context.fill()
+    context.fillRect(25, 29, 14, 20)
+    context.lineWidth = 7; context.lineCap = 'round'; context.beginPath(); context.moveTo(27, 35); context.lineTo(19, 44); context.moveTo(37, 35); context.lineTo(45, 44); context.moveTo(28, 47); context.lineTo(24, 55); context.moveTo(36, 47); context.lineTo(40, 55); context.stroke()
+  }
+  return context.getImageData(0, 0, 64, 64)
+}
+
 const jobColors = ['#38bdf8', '#f97316', '#a78bfa', '#22c55e', '#f43f5e', '#eab308']
 type RouteSpeedLimit = { speed: number; unit: 'km/h' | 'mph' } | { unknown: true } | { none: true }
 type RouteDetails = { coordinates: number[][]; speedLimits: RouteSpeedLimit[] }
@@ -62,6 +96,8 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
     instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right')
     instance.on('load', async () => {
+      instance.addImage('vehicle-marker', mapIcon('vehicle'), { pixelRatio: 2 })
+      instance.addImage('person-marker', mapIcon('person'), { pixelRatio: 2 })
       instance.addSource('company-base', { type: 'geojson', data: featureCollection(selected ? [point(selected.coordinates)] : []) })
       instance.addLayer({ id: 'base-halo', type: 'circle', source: 'company-base', paint: { 'circle-radius': 22, 'circle-color': '#22d3a7', 'circle-opacity': 0.22, 'circle-stroke-width': 1, 'circle-stroke-color': '#5eead4' } })
       instance.addLayer({ id: 'base', type: 'circle', source: 'company-base', paint: { 'circle-radius': 9, 'circle-color': '#0f766e', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } })
@@ -87,7 +123,7 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
         }
         const sourceId = `taxi-${index}`
         instance.addSource(sourceId, { type: 'geojson', data: point(start, { name: vehicle.name }) })
-        instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 9, 'circle-color': job ? '#fbbf24' : '#22d3a7', 'circle-stroke-width': 3, 'circle-stroke-color': '#fff' } })
+        instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': 'vehicle-marker', 'icon-size': 1, 'icon-allow-overlap': true } })
         if (!job) continue
         const color = jobColors[jobs.filter((candidate) => candidate.status === 'accepted').findIndex((candidate) => candidate.id === job.id) % jobColors.length]
         const pickupRouteId = `pickup-route-${index}`
@@ -106,6 +142,11 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
             : Math.max(0, Math.min(1, (time - journey.pickupAt) / (journey.arrivesAt - journey.pickupAt)))
           const activeRoute = pickingUp ? pickupRoute : passengerRoute
           ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(activeRoute.coordinates, progress), { name: vehicle.name }))
+          const activeRouteId = pickingUp ? pickupRouteId : passengerRouteId
+          ;(instance.getSource(activeRouteId) as mapboxgl.GeoJSONSource | undefined)?.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: remainingRoute(activeRoute.coordinates, progress) } })
+          if (!pickingUp) {
+            ;(instance.getSource(pickupRouteId) as mapboxgl.GeoJSONSource | undefined)?.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: remainingRoute(pickupRoute.coordinates, 1) } })
+          }
           instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
           instance.setLayoutProperty(`pickup-${job.id}-label`, 'visibility', pickingUp ? 'visible' : 'none')
           instance.setPaintProperty(pickupRouteId, 'line-opacity', pickingUp ? 0.9 : 0.15)
@@ -153,7 +194,7 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
       if (pickupJobIds.current.has(job.id)) continue
       const sourceId = `pickup-${job.id}`
       instance.addSource(sourceId, { type: 'geojson', data: point(job.pickup, { title: job.pickupLabel }) })
-      instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 10, 'circle-color': '#fbbf24', 'circle-stroke-width': 3, 'circle-stroke-color': '#fff' } })
+      instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': 'person-marker', 'icon-size': 1, 'icon-allow-overlap': true } })
       instance.addLayer({ id: `${sourceId}-label`, type: 'symbol', source: sourceId, layout: { 'text-field': '● PICKUP', 'text-size': 10, 'text-offset': [0, 1.8], 'text-anchor': 'top' }, paint: { 'text-color': '#fff', 'text-halo-color': '#15252f', 'text-halo-width': 2 } })
       const handlers = {
         enter: () => { instance.getCanvas().style.cursor = 'pointer' },

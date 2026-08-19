@@ -3,8 +3,8 @@ import { levelForReputation } from './companyProgression'
 
 export const JOB_REQUEST_INTERVAL_MS = 30_000
 export const MAX_JOB_OFFERS = 6
-// Journey durations use wall-clock minutes so taxis move at real-world speed.
-export const SIMULATED_MINUTE_MS = 60_000
+// The game clock runs at 2x speed: one simulated minute takes 30 seconds.
+export const SIMULATED_MINUTE_MS = 30_000
 
 const distanceSquared = (from: [number, number], to: [number, number]) => {
   const longitudeScale = Math.cos(((from[1] + to[1]) / 2) * Math.PI / 180)
@@ -25,8 +25,11 @@ export const taxiFareForDistance = (distanceKm: number) =>
 export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {
   const acceptedAt = job.acceptedAt ? new Date(job.acceptedAt).getTime() : Date.now()
   const start = vehicle.position ?? job.pickup
-  const urbanSpeedKmh = Math.min(vehicle.topSpeedKmh ?? 155, 45)
-  const pickupMinutes = distanceKmBetween(start, job.pickup) / urbanSpeedKmh * 60
+  const pickupDistanceKm = distanceKmBetween(start, job.pickup)
+  // Use the job's average journey speed for the empty drive to the passenger too.
+  const pickupMinutes = job.distanceKm > 0
+    ? pickupDistanceKm * job.durationMinutes / job.distanceKm
+    : 0
   const pickupDurationMs = Math.max(2_000, pickupMinutes * SIMULATED_MINUTE_MS)
   const passengerDurationMs = Math.max(5_000, job.durationMinutes * SIMULATED_MINUTE_MS)
   return {

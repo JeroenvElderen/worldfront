@@ -34,7 +34,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     set({ jobsLoading: true, jobsError: null })
     try {
       const generated = await generateJobOffers(city, 4, state.jobRequestHistory ?? [])
-      set((latest) => ({ jobs: generated.jobs, passengers: generated.passengers, jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }))
+      set((latest) => ({ jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...generated.jobs], passengers: [...latest.passengers, ...generated.passengers], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }))
     } catch (error) {
       set({ jobsLoading: false, jobsError: error instanceof Error ? error.message : 'Could not generate AI requests.' })
     }

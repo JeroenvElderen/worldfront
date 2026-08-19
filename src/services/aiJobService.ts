@@ -11,6 +11,7 @@ interface GeneratedJob {
 }
 
 const endpoint = (import.meta.env.VITE_AI_JOBS_ENDPOINT as string | undefined) || '/api/jobs'
+export const MIN_JOB_DISTANCE_KM = 6
 
 const isCoordinates = (value: unknown): value is Coordinates =>
   Array.isArray(value) && value.length === 2 && value.every((part) => typeof part === 'number' && Number.isFinite(part))
@@ -47,7 +48,7 @@ export async function generateJobOffers(
       city: { name: city.name, countryCode: city.countryCode, center: city.coordinates },
       count,
       excludeRoutes: excludedRoutes,
-      instructions: 'Create varied taxi requests between real, currently mapped places in this city. Use each place’s actual longitude/latitude position; never invent a place or estimate its coordinates. Never repeat an excluded route.',
+      instructions: `Create varied taxi requests between real, currently mapped places in this city. Each destination must be at least ${MIN_JOB_DISTANCE_KM} km from its pickup. Use each place’s actual longitude/latitude position; never invent a place or estimate its coordinates. Never repeat an excluded route.`,
     }),
     signal,
   })
@@ -63,12 +64,13 @@ export async function generateJobOffers(
   const generated = payload.jobs.map(parseJob).filter((job): job is GeneratedJob => job !== null)
   const unique = generated.filter((job) => {
     if (distance(city.coordinates, job.pickup) > 80 || distance(city.coordinates, job.destination) > 80) return false
+    if (distance(job.pickup, job.destination) < MIN_JOB_DISTANCE_KM) return false
     const signature = routeSignature(job.pickupLabel, job.destinationLabel)
     if (excluded.has(signature)) return false
     excluded.add(signature)
     return true
   }).slice(0, count)
-  if (!unique.length) throw new Error('The AI did not return any new valid requests. Please try again.')
+  if (!unique.length) throw new Error(`The AI did not return any new requests at least ${MIN_JOB_DISTANCE_KM} km long. Please try again.`)
 
   const passengers = unique.map((job) => ({ id: crypto.randomUUID(), name: job.passengerName.trim(), partySize: job.partySize }))
   const jobs = unique.map((job, index) => {

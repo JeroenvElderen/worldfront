@@ -2,9 +2,8 @@ import type { Company, TaxiJob, Vehicle } from '../models/game'
 
 export const JOB_REQUEST_INTERVAL_MS = 30_000
 export const MAX_JOB_OFFERS = 6
-// One simulated minute passes each second so journeys remain visible without
-// asking the player to wait for the full real-world trip time.
-export const SIMULATED_MINUTE_MS = 1_000
+// Journey durations use wall-clock minutes so taxis move at real-world speed.
+export const SIMULATED_MINUTE_MS = 60_000
 
 const distanceSquared = (from: [number, number], to: [number, number]) => {
   const longitudeScale = Math.cos(((from[1] + to[1]) / 2) * Math.PI / 180)

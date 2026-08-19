@@ -4,60 +4,26 @@ A mobile-first transport and travel management game foundation built around the 
 
 ## Getting started
 
-1. Install [Ollama](https://ollama.com), then download the free local model:
-
-   ```bash
-   ollama pull llama3.2
-   ```
-
-2. Copy the environment template and optionally add a Mapbox key:
+1. Copy the environment template and optionally add a Mapbox key:
 
    ```bash
    cp .env.example .env
    ```
 
-3. Install and start the browser build (leave Ollama running):
+2. Install and start the browser build:
 
    ```bash
    pnpm install
    pnpm dev
    ```
 
-Vite prints the local URL (normally `http://localhost:5173`). Without a Mapbox token the game remains usable with a clearly labelled map fallback, but Mapbox streets and navigation are only loaded once `VITE_MAPBOX_ACCESS_TOKEN` is configured.
+Vite prints the local URL (normally `http://localhost:5173`). Configure `VITE_MAPBOX_ACCESS_TOKEN` to load the map and generate taxi requests from real Mapbox places.
 
-## AI-generated taxi requests
+## Taxi requests
 
-You do **not** need an API key, subscription, paid AI service, or separate endpoint for private local use. The Vite development server provides `/api/jobs` and talks to [Ollama](https://ollama.com) on your computer. The default `llama3.2` model runs locally, so job prompts and results are not sent to a hosted AI provider.
+The phone searches Mapbox directly for real points of interest up to 100 km from the selected city's starting station, then the game's own on-device selection logic creates varied journeys from those authoritative names and coordinates. No Ollama installation, AI provider, game server, custom HTTP endpoint, tunnel, or curated location list is required. Routes range from 6 km to 100 km, Mapbox results are cached for the current app session, and the last 100 route signatures remain in the autosave to keep offers varied.
 
-The built-in endpoint exists while running `pnpm dev`, which is the recommended setup for private play. It first loads named points of interest within 15 km of the city from OpenStreetMap's Overpass API, then requires Ollama to select from those IDs. Labels and coordinates are copied from the map data rather than invented by the model, so shops, stations, landmarks, and other venues appear at their real mapped positions. Results are cached for six hours. You can change `OLLAMA_MODEL`, `OLLAMA_BASE_URL`, or `OVERPASS_API_URL` in `.env`. A standalone deployed web or Android build cannot reach the development server; that use case still needs an accessible backend set through `VITE_AI_JOBS_ENDPOINT`; custom backends should apply equivalent location grounding.
-
-The app sends a `POST` request like this:
-
-```json
-{
-  "city": { "name": "Dublin", "countryCode": "IE", "center": [-6.2603, 53.3498] },
-  "count": 4,
-  "excludeRoutes": ["central station→riverside hotel"],
-  "instructions": "Create varied taxi requests between real, currently mapped places..."
-}
-```
-
-The endpoint must return JSON in this shape (coordinates are `[longitude, latitude]`):
-
-```json
-{
-  "jobs": [{
-    "passengerName": "Maya O'Brien",
-    "partySize": 2,
-    "pickupLabel": "Chester Beatty Library",
-    "pickup": [-6.2675, 53.3421],
-    "destinationLabel": "Clontarf Promenade",
-    "destination": [-6.1911, 53.3632]
-  }]
-}
-```
-
-The built-in handler gives Ollama a catalog of real OpenStreetMap place IDs, validates the selected IDs, and replaces them with the authoritative mapped labels and coordinates before responding in the public shape above. The client validates every result, calculates gameplay values itself, rejects duplicate routes, and retains the last 100 route signatures in the autosave so future prompts can avoid them.
+The Mapbox public token is embedded in the app and should use URL/app restrictions appropriate for a public client. Mapbox network access is required when a city is first searched; previously loaded offers and saved game data remain on the device.
 
 ## Android
 
@@ -86,4 +52,4 @@ pnpm build
 
 ## Current milestone
 
-The game includes the first-time city flow, local autosave, starter company, fleet purchasing, map base marker, HUD, and navigable game sections. An AI-generated taxi request arrives every 30 seconds (up to six open offers), and each available taxi can take its own metered fare, calculated from the passenger's actual journey distance. Generated passenger journeys are at least 6 km long, keeping destinations meaningfully separated from their pickup points. Every taxi remains visible on the map; when dispatched it drives from its current position to the pickup before continuing to the destination on an accelerated game clock. With a Mapbox token these routes use `driving-traffic`, so they follow drivable roads and current traffic-aware restrictions rather than drawing straight lines. Hiring, travel agencies and multiple save-slot UI are reserved for future milestones. The IndexedDB save schema uses a named `autosave` key so additional slots can be introduced without replacing the persistence layer.
+The game includes the first-time city flow, local autosave, starter company, fleet purchasing, map base marker, HUD, and navigable game sections. A locally generated taxi request arrives every 30 seconds (up to six open offers), and each available taxi can take its own metered fare, calculated from the passenger's actual journey distance. Generated passenger journeys range from 6 km to 100 km. Every taxi remains visible on the map; when dispatched it drives from its current position to the pickup before continuing to the destination on an accelerated game clock. With a Mapbox token these routes use `driving-traffic`, so they follow drivable roads and current traffic-aware restrictions rather than drawing straight lines. Hiring, travel agencies and multiple save-slot UI are reserved for future milestones. The IndexedDB save schema uses a named `autosave` key so additional slots can be introduced without replacing the persistence layer.

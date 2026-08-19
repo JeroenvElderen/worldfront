@@ -1,0 +1,1 @@
+import {View} from 'react-native';import {GameMap} from '@/components/map/GameMap';import {Hud} from '@/components/game/Hud';import {TripPanel} from '@/components/game/TripPanel';export default function MapScreen(){return <View style={{flex:1}}><GameMap/><Hud/><TripPanel/></View>}

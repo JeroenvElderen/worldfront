@@ -206,9 +206,7 @@ export function acceptJobState(
   jobId: string
 ) {
   if (
-    jobs.some(
-      (job) => job.status === 'accepted'
-    )
+    jobs.some((job) => job.id === jobId && job.status === 'accepted')
   ) {
     return null
   }
@@ -234,6 +232,7 @@ export function acceptJobState(
         ? {
             ...candidate,
             status: 'accepted' as const,
+            assignedVehicleId: vehicle.id,
           }
         : candidate
     ),
@@ -283,10 +282,11 @@ export function completeJobState(
     ),
 
     vehicles: vehicles.map((candidate) =>
-      candidate.status === 'on-job'
+      candidate.id === job.assignedVehicleId || (!job.assignedVehicleId && candidate.status === 'on-job')
         ? {
             ...candidate,
             status: 'available' as const,
+            position: job.destination,
           }
         : candidate
     ),

@@ -3,6 +3,7 @@ import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 
 export const MIN_JOB_DISTANCE_KM = 6
+export const MAX_PICKUP_DISTANCE_KM = 5
 
 const passengerNames = [
   'Aoife Murphy', 'Cian Kelly', 'Niamh Byrne', 'Oisín Walsh', 'Saoirse Doyle', 'Fionn Ryan',
@@ -139,7 +140,8 @@ export async function generateJobOffers(
   count: number,
   excludedRoutes: string[],
   maxDistanceKm = BASE_JOB_DISTANCE_KM,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  taxiPositions: Coordinates[] = [city.coordinates]
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
   const places = await findMapboxPlaces(city, maxDistanceKm, signal)
   const excluded = new Set(excludedRoutes)
@@ -147,6 +149,7 @@ export async function generateJobOffers(
     const distanceKm = Math.round(distanceKmBetween(pickup.coordinates, destination.coordinates) * 10) / 10
     const signature = routeSignature(pickup.name, destination.name)
     return pickup.id !== destination.id &&
+      taxiPositions.every((position) => distanceKmBetween(position, pickup.coordinates) <= MAX_PICKUP_DISTANCE_KM) &&
       distanceKmBetween(city.coordinates, pickup.coordinates) <= maxDistanceKm &&
       distanceKmBetween(city.coordinates, destination.coordinates) <= maxDistanceKm &&
       distanceKm >= MIN_JOB_DISTANCE_KM && distanceKm <= maxDistanceKm &&
@@ -155,7 +158,7 @@ export async function generateJobOffers(
       : []
   }))).slice(0, count)
 
-  if (!routes.length) throw new Error('No new local routes are available yet. Complete a journey and try again.')
+  if (!routes.length) throw new Error(`No new routes have a pickup within ${MAX_PICKUP_DISTANCE_KM} km of every available taxi. Try again when your taxis are closer together.`)
 
   const passengers = routes.map(() => ({
     id: crypto.randomUUID(),

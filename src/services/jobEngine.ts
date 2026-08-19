@@ -7,6 +7,8 @@ const locations = [
   ['Airport Terminal', 0.035, 0.025], ['Old Town', -0.019, 0.002],
 ] as const
 const passengerNames = ['Aisling Murphy', 'Conor Byrne', 'Sophie Kelly', 'Liam Walsh', 'Niamh Ryan', 'Jack Doyle']
+export const JOB_REQUEST_INTERVAL_MS = 30_000
+export const MAX_JOB_OFFERS = 6
 
 const offset = (origin: Coordinates, longitude: number, latitude: number): Coordinates => [origin[0] + longitude, origin[1] + latitude]
 const distance = (a: Coordinates, b: Coordinates) => {
@@ -32,6 +34,32 @@ export function createJobOffers(cityId: string, id = crypto.randomUUID): { jobs:
     }
   })
   return { jobs, passengers }
+}
+
+export function createRandomJobOffer(cityId: string, id = crypto.randomUUID, random = Math.random): { job: TaxiJob; passenger: Passenger } | null {
+  const city = getCity(cityId)
+  if (!city) return null
+  const pickupIndex = Math.floor(random() * locations.length)
+  let destinationIndex = Math.floor(random() * (locations.length - 1))
+  if (destinationIndex >= pickupIndex) destinationIndex += 1
+  const pickupPlace = locations[pickupIndex]
+  const destinationPlace = locations[destinationIndex]
+  const pickup = offset(city.coordinates, pickupPlace[1], pickupPlace[2])
+  const destination = offset(city.coordinates, destinationPlace[1], destinationPlace[2])
+  const distanceKm = distance(pickup, destination)
+  const passenger: Passenger = {
+    id: id(),
+    name: passengerNames[Math.floor(random() * passengerNames.length)],
+    partySize: Math.floor(random() * 3) + 1,
+  }
+  return {
+    passenger,
+    job: {
+      id: id(), cityId, pickup, destination, pickupLabel: pickupPlace[0], destinationLabel: destinationPlace[0],
+      passengerIds: [passenger.id], fare: Math.round(5 + distanceKm * 2.4 + passenger.partySize * 1.5),
+      distanceKm, durationMinutes: Math.max(5, Math.round(distanceKm * 3.2)), status: 'offered',
+    },
+  }
 }
 
 export function acceptJobState(jobs: TaxiJob[], vehicles: Vehicle[], jobId: string) {

@@ -3,10 +3,10 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 import { getCity } from '../data/cities'
 import type { Company, GameSave, Vehicle } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
-import { acceptJobState, completeJobState, createJobOffers } from '../services/jobEngine'
+import { acceptJobState, completeJobState, createJobOffers, createRandomJobOffer, MAX_JOB_OFFERS } from '../services/jobEngine'
 
 type Section = 'map' | 'jobs' | 'fleet' | 'travel' | 'company'
-interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; refreshJobs: () => void; acceptJob: (jobId: string) => void; completeJob: (jobId: string) => void; resetGame: () => void }
+interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; refreshJobs: () => void; addRandomJob: () => void; acceptJob: (jobId: string) => void; completeJob: (jobId: string) => void; resetGame: () => void }
 interface GameState extends GameSave { activeSection: Section; hasHydrated: boolean; setHasHydrated: (value: boolean) => void }
 
 const blankSave: GameSave = { id: 'autosave', version: 1, updatedAt: new Date(0).toISOString(), company: null, startingCityId: null, vehicles: [], drivers: [], jobs: [], agencies: [], tours: [], passengers: [] }
@@ -26,6 +26,16 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   refreshJobs: () => set((state) => {
     if (!state.startingCityId || state.jobs.some((job) => job.status === 'accepted')) return state
     return { ...createJobOffers(state.startingCityId), updatedAt: new Date().toISOString() }
+  }),
+  addRandomJob: () => set((state) => {
+    if (!state.startingCityId || state.jobs.filter((job) => job.status === 'offered').length >= MAX_JOB_OFFERS) return state
+    const offer = createRandomJobOffer(state.startingCityId)
+    if (!offer) return state
+    return {
+      jobs: [...state.jobs.filter((job) => job.status !== 'complete'), offer.job],
+      passengers: [...state.passengers, offer.passenger],
+      updatedAt: new Date().toISOString(),
+    }
   }),
   acceptJob: (jobId) => set((state) => {
     const result = acceptJobState(state.jobs, state.vehicles, jobId)

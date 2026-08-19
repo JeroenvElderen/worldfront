@@ -1,5 +1,6 @@
 import type { Section } from '../../stores/gameStore'
 import type { Passenger, TaxiJob, Vehicle } from '../../models/game'
+import { JOB_REQUEST_INTERVAL_MS } from '../../services/jobEngine'
 
 interface SectionSheetProps { section: Exclude<Section, 'map'>; vehicles: Vehicle[]; jobs: TaxiJob[]; passengers: Passenger[]; onClose: () => void; onReset: () => void; onRefreshJobs: () => void; onAcceptJob: (jobId: string) => void; onCompleteJob: (jobId: string) => void }
 const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
@@ -16,7 +17,7 @@ export function SectionSheet({ section, vehicles, jobs, passengers, onClose, onR
         <div className="job-meta"><span>{activeJob.distanceKm} km</span><span>~{activeJob.durationMinutes} min</span><b>{money.format(activeJob.fare)}</b></div>
         <button className="primary-action" onClick={() => onCompleteJob(activeJob.id)}>Complete trip</button>
       </article> : <>
-        <p>Choose a fare for your available taxi.</p>
+        <p>Choose a fare for your available taxi. A new request arrives every {JOB_REQUEST_INTERVAL_MS / 1000} seconds.</p>
         <div className="job-list">{offers.map((job) => {
           const passenger = passengers.find((candidate) => job.passengerIds.includes(candidate.id))
           return <article className="job-card" key={job.id}>

@@ -11,9 +11,11 @@ export default function App() {
   const game = useGameStore()
   useEffect(() => {
     if (!game.company) return
+    // Hydrated saves with no offers should not wait for the first interval.
+    if (!game.jobs.some((job) => job.status === 'offered' || job.status === 'accepted')) game.refreshJobs()
     const interval = window.setInterval(game.addRandomJob, JOB_REQUEST_INTERVAL_MS)
     return () => window.clearInterval(interval)
-  }, [game.company, game.addRandomJob])
+  }, [game.company, game.jobs, game.refreshJobs, game.addRandomJob])
   const activeJob = game.jobs.find((job) => job.status === 'accepted')
   if (!game.hasHydrated) return <div className="loading">TRAVEL EMPIRE</div>
   return <div className="game-shell">

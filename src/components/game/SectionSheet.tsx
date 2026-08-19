@@ -18,7 +18,7 @@ export function SectionSheet({ section, vehicles, jobs, passengers, onClose, onR
         <button className="primary-action" onClick={() => onCompleteJob(activeJob.id)}>Complete trip</button>
       </article> : <>
         <p>Choose a fare for your available taxi. A new request arrives every {JOB_REQUEST_INTERVAL_MS / 1000} seconds.</p>
-        <div className="job-list">{offers.map((job) => {
+        <div className="job-list">{offers.length === 0 && <p className="job-empty" role="status">Looking for a nearby passenger…</p>}{offers.map((job) => {
           const passenger = passengers.find((candidate) => job.passengerIds.includes(candidate.id))
           return <article className="job-card" key={job.id}>
             <div><strong>{job.pickupLabel} → {job.destinationLabel}</strong><small>{passenger?.name ?? 'Passenger'} · party of {passenger?.partySize ?? 1}</small></div>

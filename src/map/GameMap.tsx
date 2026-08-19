@@ -34,12 +34,12 @@ const remainingRoute = (coordinates: number[][], progress: number) => {
   return [routePosition(coordinates, progress), ...coordinates.slice(segment + 1)]
 }
 
-const mapIcon = (kind: 'vehicle' | 'person') => {
+const mapIcon = (kind: 'vehicle' | 'pickup' | 'destination') => {
   const canvas = document.createElement('canvas')
   canvas.width = 64
   canvas.height = 64
   const context = canvas.getContext('2d')!
-  context.fillStyle = kind === 'vehicle' ? '#0f766e' : '#f59e0b'
+  context.fillStyle = kind === 'vehicle' ? '#0f766e' : kind === 'pickup' ? '#f59e0b' : '#ef4444'
   context.beginPath(); context.arc(32, 32, 29, 0, Math.PI * 2); context.fill()
   context.strokeStyle = '#fff'; context.lineWidth = 4; context.stroke()
   context.fillStyle = '#fff'
@@ -48,10 +48,10 @@ const mapIcon = (kind: 'vehicle' | 'person') => {
     context.beginPath(); context.moveTo(20, 29); context.lineTo(25, 20); context.lineTo(41, 20); context.lineTo(47, 29); context.fill()
     context.fillStyle = '#0f766e'; context.fillRect(27, 23, 12, 7)
     context.fillStyle = '#fff'; context.beginPath(); context.arc(21, 46, 5, 0, Math.PI * 2); context.arc(44, 46, 5, 0, Math.PI * 2); context.fill()
+  } else if (kind === 'pickup') {
+    context.font = '900 43px sans-serif'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText('!', 32, 34)
   } else {
-    context.beginPath(); context.arc(32, 20, 8, 0, Math.PI * 2); context.fill()
-    context.fillRect(25, 29, 14, 20)
-    context.lineWidth = 7; context.lineCap = 'round'; context.beginPath(); context.moveTo(27, 35); context.lineTo(19, 44); context.moveTo(37, 35); context.lineTo(45, 44); context.moveTo(28, 47); context.lineTo(24, 55); context.moveTo(36, 47); context.lineTo(40, 55); context.stroke()
+    context.beginPath(); context.arc(32, 32, 15, 0, Math.PI * 2); context.fill()
   }
   return context.getImageData(0, 0, 64, 64)
 }
@@ -65,12 +65,21 @@ const speedLimitKmh = (limit: RouteSpeedLimit | undefined) => {
   return Math.round(limit.unit === 'mph' ? limit.speed * 1.609344 : limit.speed)
 }
 
-const speedLimitAt = (route: RouteDetails, progress: number) => {
+const routeMotion = (route: RouteDetails, elapsed: number, fallbackSpeedKmh: number, topSpeedKmh: number) => {
   const lengths = route.coordinates.slice(1).map((coordinate, index) => Math.hypot(coordinate[0] - route.coordinates[index][0], coordinate[1] - route.coordinates[index][1]))
-  let target = progress * lengths.reduce((sum, length) => sum + length, 0)
+  const speeds = lengths.map((_, index) => Math.min(topSpeedKmh, speedLimitKmh(route.speedLimits[index]) ?? fallbackSpeedKmh))
+  const durations = lengths.map((length, index) => length / Math.max(1, speeds[index]))
+  const totalDuration = durations.reduce((sum, duration) => sum + duration, 0)
+  let remaining = Math.max(0, Math.min(1, elapsed)) * totalDuration
   let segment = 0
-  while (segment < lengths.length - 1 && target > lengths[segment]) target -= lengths[segment++]
-  return speedLimitKmh(route.speedLimits[segment])
+  while (segment < durations.length - 1 && remaining > durations[segment]) remaining -= durations[segment++]
+  const segmentProgress = durations[segment] ? remaining / durations[segment] : 1
+  const distanceBefore = lengths.slice(0, segment).reduce((sum, length) => sum + length, 0)
+  const totalLength = lengths.reduce((sum, length) => sum + length, 0)
+  return {
+    progress: totalLength ? (distanceBefore + (lengths[segment] ?? 0) * segmentProgress) / totalLength : 1,
+    speedKmh: elapsed >= 1 ? 0 : Math.round(speeds[segment] ?? 0),
+  }
 }
 
 function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
@@ -79,8 +88,6 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
   const pickupJobIds = useRef(new Set<string>())
   const pickupHandlers = useRef(new Map<string, { enter: () => void; leave: () => void; click: (event: mapboxgl.MapMouseEvent) => void }>())
   const [mapRevision, setMapRevision] = useState(0)
-  const [routeCount, setRouteCount] = useState(0)
-  const [liveSpeeds, setLiveSpeeds] = useState<Record<string, number>>({})
   const acceptedJobsKey = jobs.filter((job) => job.status === 'accepted').map((job) => `${job.id}:${job.acceptedAt ?? ''}`).join('|')
 
   useEffect(() => {
@@ -97,7 +104,8 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
     instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right')
     instance.on('load', async () => {
       instance.addImage('vehicle-marker', mapIcon('vehicle'), { pixelRatio: 2 })
-      instance.addImage('person-marker', mapIcon('person'), { pixelRatio: 2 })
+      instance.addImage('pickup-marker', mapIcon('pickup'), { pixelRatio: 2 })
+      instance.addImage('destination-marker', mapIcon('destination'), { pixelRatio: 2 })
       instance.addSource('company-base', { type: 'geojson', data: featureCollection(selected ? [point(selected.coordinates)] : []) })
       instance.addLayer({ id: 'base-halo', type: 'circle', source: 'company-base', paint: { 'circle-radius': 22, 'circle-color': '#22d3a7', 'circle-opacity': 0.22, 'circle-stroke-width': 1, 'circle-stroke-color': '#5eead4' } })
       instance.addLayer({ id: 'base', type: 'circle', source: 'company-base', paint: { 'circle-radius': 9, 'circle-color': '#0f766e', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } })
@@ -122,8 +130,8 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
           } catch (error) { if ((error as Error).name === 'AbortError') return }
         }
         const sourceId = `taxi-${index}`
-        instance.addSource(sourceId, { type: 'geojson', data: point(start, { name: vehicle.name }) })
-        instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': 'vehicle-marker', 'icon-size': 1, 'icon-allow-overlap': true } })
+        instance.addSource(sourceId, { type: 'geojson', data: point(start, { speedLabel: '0 km/h' }) })
+        instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': 'vehicle-marker', 'icon-size': 1, 'icon-allow-overlap': true, 'text-field': ['get', 'speedLabel'], 'text-size': 11, 'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'], 'text-offset': [0, 2.25], 'text-anchor': 'top', 'text-allow-overlap': true }, paint: { 'text-color': '#ffffff', 'text-halo-color': '#10252d', 'text-halo-width': 2 } })
         if (!job) continue
         const color = jobColors[jobs.filter((candidate) => candidate.status === 'accepted').findIndex((candidate) => candidate.id === job.id) % jobColors.length]
         const pickupRouteId = `pickup-route-${index}`
@@ -133,15 +141,17 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
         instance.addLayer({ id: pickupRouteId, type: 'line', source: pickupRouteId, paint: { 'line-color': color, 'line-width': 6, 'line-opacity': 0.9, 'line-dasharray': [1.5, 1] } }, sourceId)
         instance.addLayer({ id: passengerRouteId, type: 'line', source: passengerRouteId, paint: { 'line-color': color, 'line-width': 6, 'line-opacity': 0.25 } }, sourceId)
         const journey = getJobJourney(job, vehicle)
-        let lastSpeedUpdate = 0
-        const animate = (now: number) => {
+        const animate = () => {
           const time = Date.now()
           const pickingUp = time < journey.pickupAt
-          const progress = pickingUp
+          const elapsed = pickingUp
             ? Math.max(0, Math.min(1, (time - journey.acceptedAt) / (journey.pickupAt - journey.acceptedAt)))
             : Math.max(0, Math.min(1, (time - journey.pickupAt) / (journey.arrivesAt - journey.pickupAt)))
           const activeRoute = pickingUp ? pickupRoute : passengerRoute
-          ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(activeRoute.coordinates, progress), { name: vehicle.name }))
+          const fallbackSpeedKmh = job.durationMinutes > 0 ? job.distanceKm / (job.durationMinutes / 60) : 30
+          const motion = routeMotion(activeRoute, elapsed, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
+          const progress = motion.progress
+          ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(activeRoute.coordinates, progress), { speedLabel: `${motion.speedKmh} km/h` }))
           const activeRouteId = pickingUp ? pickupRouteId : passengerRouteId
           ;(instance.getSource(activeRouteId) as mapboxgl.GeoJSONSource | undefined)?.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: remainingRoute(activeRoute.coordinates, progress) } })
           if (!pickingUp) {
@@ -151,19 +161,13 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
           instance.setLayoutProperty(`pickup-${job.id}-label`, 'visibility', pickingUp ? 'visible' : 'none')
           instance.setPaintProperty(pickupRouteId, 'line-opacity', pickingUp ? 0.9 : 0.15)
           instance.setPaintProperty(passengerRouteId, 'line-opacity', pickingUp ? 0.25 : 0.9)
-          if (now - lastSpeedUpdate > 1000) {
-            lastSpeedUpdate = now
-            const speedKmh = time < journey.arrivesAt ? speedLimitAt(activeRoute, progress) ?? 0 : 0
-            setLiveSpeeds((current) => current[vehicle.id] === speedKmh ? current : { ...current, [vehicle.id]: speedKmh })
-          }
           if (time < journey.arrivesAt) animationFrames.push(requestAnimationFrame(animate))
         }
         animationFrames.push(requestAnimationFrame(animate))
       }
-      setRouteCount(jobs.filter((job) => job.status === 'accepted').length)
       setMapRevision((revision) => revision + 1)
     })
-    return () => { abortController.abort(); animationFrames.forEach(cancelAnimationFrame); map.current = null; instance.remove(); setLiveSpeeds({}) }
+    return () => { abortController.abort(); animationFrames.forEach(cancelAnimationFrame); map.current = null; instance.remove() }
     // Offered jobs are synchronized separately so background arrivals do not recreate the map.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cityId, vehicles, acceptedJobsKey])
@@ -183,8 +187,9 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
         instance.off('mouseleave', sourceId, handlers.leave)
         instance.off('click', sourceId, handlers.click)
       }
-      if (instance.getLayer(`${sourceId}-label`)) instance.removeLayer(`${sourceId}-label`)
+      for (const layerId of [`${sourceId}-label`, `offer-route-${jobId}`, `destination-${jobId}-label`, `destination-${jobId}`]) if (instance.getLayer(layerId)) instance.removeLayer(layerId)
       if (instance.getLayer(sourceId)) instance.removeLayer(sourceId)
+      for (const extraSourceId of [`offer-route-${jobId}`, `destination-${jobId}`]) if (instance.getSource(extraSourceId)) instance.removeSource(extraSourceId)
       if (instance.getSource(sourceId)) instance.removeSource(sourceId)
       pickupJobIds.current.delete(jobId)
       pickupHandlers.current.delete(jobId)
@@ -194,8 +199,22 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
       if (pickupJobIds.current.has(job.id)) continue
       const sourceId = `pickup-${job.id}`
       instance.addSource(sourceId, { type: 'geojson', data: point(job.pickup, { title: job.pickupLabel }) })
-      instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': 'person-marker', 'icon-size': 1, 'icon-allow-overlap': true } })
-      instance.addLayer({ id: `${sourceId}-label`, type: 'symbol', source: sourceId, layout: { 'text-field': '● PICKUP', 'text-size': 10, 'text-offset': [0, 1.8], 'text-anchor': 'top' }, paint: { 'text-color': '#fff', 'text-halo-color': '#15252f', 'text-halo-width': 2 } })
+      instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': 'pickup-marker', 'icon-size': 1, 'icon-allow-overlap': true } })
+      instance.addLayer({ id: `${sourceId}-label`, type: 'symbol', source: sourceId, layout: { 'text-field': 'PICKUP', 'text-size': 10, 'text-offset': [0, 1.8], 'text-anchor': 'top' }, paint: { 'text-color': '#fff', 'text-halo-color': '#15252f', 'text-halo-width': 2 } })
+      const destinationId = `destination-${job.id}`
+      instance.addSource(destinationId, { type: 'geojson', data: point(job.destination, { title: job.destinationLabel }) })
+      instance.addLayer({ id: destinationId, type: 'symbol', source: destinationId, layout: { 'icon-image': 'destination-marker', 'icon-size': 0.8, 'icon-allow-overlap': true } })
+      instance.addLayer({ id: `${destinationId}-label`, type: 'symbol', source: destinationId, layout: { 'text-field': 'DESTINATION', 'text-size': 10, 'text-offset': [0, 1.6], 'text-anchor': 'top' }, paint: { 'text-color': '#fff', 'text-halo-color': '#15252f', 'text-halo-width': 2 } })
+      const routeId = `offer-route-${job.id}`
+      instance.addSource(routeId, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [job.pickup, job.destination] } } })
+      instance.addLayer({ id: routeId, type: 'line', source: routeId, paint: { 'line-color': '#f59e0b', 'line-width': 5, 'line-opacity': 0.75, 'line-dasharray': [2, 1] } }, sourceId)
+      if (token && job.status === 'offered') fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${job.pickup.join(',')};${job.destination.join(',')}?geometries=geojson&overview=full&access_token=${token}`)
+        .then((response) => response.ok ? response.json() : null)
+        .then((result: { routes?: Array<{ geometry: { coordinates: number[][] } }> } | null) => {
+          const source = instance.getSource(routeId) as mapboxgl.GeoJSONSource | undefined
+          const coordinates = result?.routes?.[0]?.geometry.coordinates
+          if (source && coordinates) source.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } })
+        }).catch(() => undefined)
       const handlers = {
         enter: () => { instance.getCanvas().style.cursor = 'pointer' },
         leave: () => { instance.getCanvas().style.cursor = '' },
@@ -209,15 +228,7 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
     }
   }, [jobs, mapRevision, onOpenJob])
 
-  return <div ref={container} className="absolute inset-0" aria-label="Interactive game map">
-    {routeCount > 0 && <div className="route-legend" aria-label="Taxi route legend">
-      {jobs.filter((job) => job.status === 'accepted').map((job, index) => {
-        const vehicle = vehicles.find((candidate) => candidate.id === job.assignedVehicleId)
-        const speed = vehicle && liveSpeeds[vehicle.id]
-        return <div key={job.id}><i style={{ backgroundColor: jobColors[index % jobColors.length] }} /><span>{vehicle?.name ?? 'Taxi'}</span><b>{speed ? `${speed} KM/H LIMIT` : token ? 'LIMIT UNKNOWN' : 'LIMIT UNAVAILABLE'}</b></div>
-      })}
-    </div>}
-  </div>
+  return <div ref={container} className="absolute inset-0" aria-label="Interactive game map" />
 }
 
 export const GameMap = memo(GameMapView, (previous, next) =>

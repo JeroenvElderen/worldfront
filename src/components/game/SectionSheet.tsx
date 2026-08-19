@@ -32,9 +32,9 @@ export function SectionSheet({ section, focusedJobId, vehicles, jobs, passengers
         <button className="primary-action" disabled>{pickingUp ? 'Driving to pickup' : 'Passenger on board'} · {Math.ceil(secondsRemaining / 60)} min</button>
       </article> })}
       <>
-        <p>Every request is invented by AI for your city. A new one arrives every {JOB_REQUEST_INTERVAL_MS / 1000} seconds.</p>
+        <p>Every request connects places found by Mapbox in your city. A new one arrives every {JOB_REQUEST_INTERVAL_MS / 1000} seconds.</p>
         {jobsError && <p className="job-error" role="alert">{jobsError}</p>}
-        <div className="job-list">{offers.length === 0 && <p className="job-empty" role="status">{jobsLoading ? 'AI is finding a nearby passenger…' : 'No open requests yet.'}</p>}{offers.map((job) => {
+        <div className="job-list">{offers.length === 0 && <p className="job-empty" role="status">{jobsLoading ? 'Searching Mapbox for nearby passengers…' : 'No open requests yet.'}</p>}{offers.map((job) => {
           const passenger = passengers.find((candidate) => job.passengerIds.includes(candidate.id))
           const nearbyTaxis = vehicles.filter((vehicle) => vehicle.status === 'available' && vehicle.position).map((vehicle) => ({ vehicle, distance: distanceKm(vehicle.position!, job.pickup) })).sort((left, right) => left.distance - right.distance).slice(0, 3)
           return <article className={`job-card${job.id === focusedJobId ? ' focused' : ''}`} key={job.id}>

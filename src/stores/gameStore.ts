@@ -4,7 +4,7 @@ import { getCity } from '../data/cities'
 import { getTaxiModel } from '../data/taxis'
 import type { Company, GameSave, TaxiPowertrain, Vehicle } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
-import { generateJobOffers } from '../services/aiJobService'
+import { generateJobOffers } from '../services/jobOfferService'
 import { acceptJobState, completeArrivedJobsState, completeJobState, MAX_JOB_OFFERS } from '../services/jobEngine'
 
 type Section = 'map' | 'jobs' | 'fleet' | 'travel' | 'company'
@@ -36,7 +36,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
       const generated = await generateJobOffers(city, 4, state.jobRequestHistory ?? [])
       set((latest) => ({ jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...generated.jobs], passengers: [...latest.passengers, ...generated.passengers], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }))
     } catch (error) {
-      set({ jobsLoading: false, jobsError: error instanceof Error ? error.message : 'Could not generate AI requests.' })
+      set({ jobsLoading: false, jobsError: error instanceof Error ? error.message : 'Could not generate requests.' })
     }
   },
   addRandomJob: async () => {
@@ -49,7 +49,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
       const generated = await generateJobOffers(city, 1, state.jobRequestHistory ?? [])
       set((latest) => ({ jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...generated.jobs], passengers: [...latest.passengers, ...generated.passengers], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }))
     } catch (error) {
-      set({ jobsLoading: false, jobsError: error instanceof Error ? error.message : 'Could not generate an AI request.' })
+      set({ jobsLoading: false, jobsError: error instanceof Error ? error.message : 'Could not generate a request.' })
     }
   },
   acceptJob: (jobId) => set((state) => {

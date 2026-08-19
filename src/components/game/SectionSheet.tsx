@@ -29,7 +29,7 @@ export function SectionSheet({ section, focusedJobId, vehicles, jobs, passengers
       {activeJobs.map((activeJob) => { const vehicle = vehicles.find((candidate) => candidate.id === activeJob.assignedVehicleId); const journey = vehicle ? getJobJourney(activeJob, vehicle) : null; const pickingUp = Boolean(journey && now < journey.pickupAt); const secondsRemaining = journey ? Math.max(0, Math.ceil((journey.arrivesAt - now) / 1_000)) : 0; return <article className="active-job" key={activeJob.id}>
         <div className="job-route"><span>●</span><div><strong>{activeJob.pickupLabel}</strong><i /><strong>{activeJob.destinationLabel}</strong></div></div>
         <div className="job-meta"><span>{vehicles.find((vehicle) => vehicle.id === activeJob.assignedVehicleId)?.name ?? 'Taxi'}</span><span>{activeJob.distanceKm} km</span><span>~{activeJob.durationMinutes} min</span><b>{money.format(activeJob.fare)}</b></div>
-        <button className="primary-action" disabled>{pickingUp ? 'Driving to pickup' : 'Passenger on board'} · {secondsRemaining}s</button>
+        <button className="primary-action" disabled>{pickingUp ? 'Driving to pickup' : 'Passenger on board'} · {Math.ceil(secondsRemaining / 60)} min</button>
       </article> })}
       <>
         <p>Every request is invented by AI for your city. A new one arrives every {JOB_REQUEST_INTERVAL_MS / 1000} seconds.</p>
@@ -44,7 +44,7 @@ export function SectionSheet({ section, focusedJobId, vehicles, jobs, passengers
             <button disabled={!vehicles.some((vehicle) => vehicle.status === 'available')} onClick={() => onAcceptJob(job.id)}>{vehicles.some((vehicle) => vehicle.status === 'available') ? 'Accept fare' : 'All taxis busy'}</button>
           </article>
         })}</div>
-        <button className="refresh-link" disabled={jobsLoading} onClick={onRefreshJobs}>{jobsLoading ? 'Generating requests…' : '✦ Generate new AI requests'}</button>
+        <button className="refresh-link" disabled={jobsLoading} onClick={onRefreshJobs}>{jobsLoading ? 'Finding requests in the background…' : '✦ Find more requests'}</button>
       </>
     </section>
   }

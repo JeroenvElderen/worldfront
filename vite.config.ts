@@ -18,6 +18,14 @@ const sendJson = (response: ServerResponse, status: number, body: unknown) => {
 
 interface GroundedPlace { id: string; name: string; category: string; coordinates: [number, number] }
 
+const MIN_JOB_DISTANCE_KM = 6
+
+const distanceKmBetween = (from: [number, number], to: [number, number]) => {
+  const latitudeKm = (to[1] - from[1]) * 111.32
+  const longitudeKm = (to[0] - from[0]) * 111.32 * Math.cos(((from[1] + to[1]) / 2) * Math.PI / 180)
+  return Math.hypot(latitudeKm, longitudeKm)
+}
+
 const placeCache = new Map<string, { expiresAt: number; places: GroundedPlace[] }>()
 
 const groundedJobSchema = {
@@ -96,7 +104,7 @@ function localAiJobsEndpoint(ollamaUrl: string, model: string, overpassUrl: stri
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               model,
-              prompt: `Generate realistic taxi jobs from this request. Use ONLY pickupPlaceId and destinationPlaceId values from the supplied realPlaces list. Never invent, rename, or estimate a location. Pick different IDs for each journey and prefer varied categories. Follow the JSON schema exactly.\n${JSON.stringify({ ...jobRequest, realPlaces: places.map(({ id, name, category }) => ({ id, name, category })) })}`,
+              prompt: `Generate realistic, worthwhile taxi jobs from this request. Use ONLY pickupPlaceId and destinationPlaceId values from the supplied realPlaces list. Never invent, rename, or estimate a location. Every destination must be at least ${MIN_JOB_DISTANCE_KM} km from its pickup; use the supplied distanceFromCityKm values to favor places on different sides of the city instead of nearby pairs. Pick different IDs for each journey and prefer varied categories. Follow the JSON schema exactly.\n${JSON.stringify({ ...jobRequest, realPlaces: places.map(({ id, name, category, coordinates }) => ({ id, name, category, distanceFromCityKm: Math.round(distanceKmBetween((city as Record<string, unknown>).center as [number, number], coordinates) * 10) / 10 })) })}`,
               stream: false,
               format: groundedJobSchema,
               options: { temperature: 0.9 },
@@ -110,8 +118,14 @@ function localAiJobsEndpoint(ollamaUrl: string, model: string, overpassUrl: stri
           const placesById = new Map(places.map((place) => [place.id, place]))
           const jobs = (generated.jobs ?? []).flatMap((job) => {
             const pickup = typeof job.pickupPlaceId === 'string' ? placesById.get(job.pickupPlaceId) : undefined
-            const destination = typeof job.destinationPlaceId === 'string' ? placesById.get(job.destinationPlaceId) : undefined
+            let destination = typeof job.destinationPlaceId === 'string' ? placesById.get(job.destinationPlaceId) : undefined
             if (!pickup || !destination || pickup.id === destination.id) return []
+            if (distanceKmBetween(pickup.coordinates, destination.coordinates) < MIN_JOB_DISTANCE_KM) {
+              destination = places
+                .filter((place) => place.id !== pickup.id && distanceKmBetween(pickup.coordinates, place.coordinates) >= MIN_JOB_DISTANCE_KM)
+                .sort((left, right) => distanceKmBetween(pickup.coordinates, right.coordinates) - distanceKmBetween(pickup.coordinates, left.coordinates))[0]
+            }
+            if (!destination) return []
             return [{ passengerName: job.passengerName, partySize: job.partySize, pickupLabel: pickup.name, pickup: pickup.coordinates, destinationLabel: destination.name, destination: destination.coordinates }]
           })
           if (!jobs.length) return sendJson(response, 502, { error: 'The AI did not select valid real-world places.' })

@@ -41,8 +41,13 @@ const speedLimitAt = (route: RouteDetails, progress: number) => {
 
 function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
+  const map = useRef<mapboxgl.Map | null>(null)
+  const pickupJobIds = useRef(new Set<string>())
+  const pickupHandlers = useRef(new Map<string, { enter: () => void; leave: () => void; click: (event: mapboxgl.MapMouseEvent) => void }>())
+  const [mapRevision, setMapRevision] = useState(0)
   const [routeCount, setRouteCount] = useState(0)
   const [liveSpeeds, setLiveSpeeds] = useState<Record<string, number>>({})
+  const acceptedJobsKey = jobs.filter((job) => job.status === 'accepted').map((job) => `${job.id}:${job.acceptedAt ?? ''}`).join('|')
 
   useEffect(() => {
     if (!container.current) return
@@ -51,22 +56,15 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
     const abortController = new AbortController()
     const animationFrames: number[] = []
     const instance = new mapboxgl.Map({ container: container.current, style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle, center: selected?.coordinates ?? irelandOverview.center, zoom: selected?.mapZoom ?? irelandOverview.zoom, attributionControl: false, pitchWithRotate: false })
+    map.current = instance
+    pickupJobIds.current.clear()
+    pickupHandlers.current.clear()
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
     instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right')
     instance.on('load', async () => {
       instance.addSource('company-base', { type: 'geojson', data: featureCollection(selected ? [point(selected.coordinates)] : []) })
       instance.addLayer({ id: 'base-halo', type: 'circle', source: 'company-base', paint: { 'circle-radius': 22, 'circle-color': '#22d3a7', 'circle-opacity': 0.22, 'circle-stroke-width': 1, 'circle-stroke-color': '#5eead4' } })
       instance.addLayer({ id: 'base', type: 'circle', source: 'company-base', paint: { 'circle-radius': 9, 'circle-color': '#0f766e', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } })
-
-      for (const job of jobs.filter((candidate) => candidate.status === 'offered' || candidate.status === 'accepted')) {
-        const sourceId = `pickup-${job.id}`
-        instance.addSource(sourceId, { type: 'geojson', data: point(job.pickup, { title: job.pickupLabel }) })
-        instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 10, 'circle-color': '#fbbf24', 'circle-stroke-width': 3, 'circle-stroke-color': '#fff' } })
-        instance.addLayer({ id: `${sourceId}-label`, type: 'symbol', source: sourceId, layout: { 'text-field': '● PICKUP', 'text-size': 10, 'text-offset': [0, 1.8], 'text-anchor': 'top' }, paint: { 'text-color': '#fff', 'text-halo-color': '#15252f', 'text-halo-width': 2 } })
-        instance.on('mouseenter', sourceId, () => { instance.getCanvas().style.cursor = 'pointer' })
-        instance.on('mouseleave', sourceId, () => { instance.getCanvas().style.cursor = '' })
-        instance.on('click', sourceId, (event) => { event.originalEvent.stopPropagation(); onOpenJob(job.id) })
-      }
 
       for (const [index, vehicle] of vehicles.entries()) {
         const job = jobs.find((candidate) => candidate.status === 'accepted' && (candidate.assignedVehicleId === vehicle.id || (!candidate.assignedVehicleId && vehicle.status === 'on-job')))
@@ -122,9 +120,53 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
         animationFrames.push(requestAnimationFrame(animate))
       }
       setRouteCount(jobs.filter((job) => job.status === 'accepted').length)
+      setMapRevision((revision) => revision + 1)
     })
-    return () => { abortController.abort(); animationFrames.forEach(cancelAnimationFrame); instance.remove(); setLiveSpeeds({}) }
-  }, [cityId, vehicles, jobs, onOpenJob])
+    return () => { abortController.abort(); animationFrames.forEach(cancelAnimationFrame); map.current = null; instance.remove(); setLiveSpeeds({}) }
+    // Offered jobs are synchronized separately so background arrivals do not recreate the map.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cityId, vehicles, acceptedJobsKey])
+
+  useEffect(() => {
+    const instance = map.current
+    if (!instance?.isStyleLoaded()) return
+    const visibleJobs = jobs.filter((job) => job.status === 'offered' || job.status === 'accepted')
+    const visibleIds = new Set(visibleJobs.map((job) => job.id))
+
+    for (const jobId of pickupJobIds.current) {
+      if (visibleIds.has(jobId)) continue
+      const sourceId = `pickup-${jobId}`
+      const handlers = pickupHandlers.current.get(jobId)
+      if (handlers) {
+        instance.off('mouseenter', sourceId, handlers.enter)
+        instance.off('mouseleave', sourceId, handlers.leave)
+        instance.off('click', sourceId, handlers.click)
+      }
+      if (instance.getLayer(`${sourceId}-label`)) instance.removeLayer(`${sourceId}-label`)
+      if (instance.getLayer(sourceId)) instance.removeLayer(sourceId)
+      if (instance.getSource(sourceId)) instance.removeSource(sourceId)
+      pickupJobIds.current.delete(jobId)
+      pickupHandlers.current.delete(jobId)
+    }
+
+    for (const job of visibleJobs) {
+      if (pickupJobIds.current.has(job.id)) continue
+      const sourceId = `pickup-${job.id}`
+      instance.addSource(sourceId, { type: 'geojson', data: point(job.pickup, { title: job.pickupLabel }) })
+      instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 10, 'circle-color': '#fbbf24', 'circle-stroke-width': 3, 'circle-stroke-color': '#fff' } })
+      instance.addLayer({ id: `${sourceId}-label`, type: 'symbol', source: sourceId, layout: { 'text-field': '● PICKUP', 'text-size': 10, 'text-offset': [0, 1.8], 'text-anchor': 'top' }, paint: { 'text-color': '#fff', 'text-halo-color': '#15252f', 'text-halo-width': 2 } })
+      const handlers = {
+        enter: () => { instance.getCanvas().style.cursor = 'pointer' },
+        leave: () => { instance.getCanvas().style.cursor = '' },
+        click: (event: mapboxgl.MapMouseEvent) => { event.originalEvent.stopPropagation(); onOpenJob(job.id) },
+      }
+      instance.on('mouseenter', sourceId, handlers.enter)
+      instance.on('mouseleave', sourceId, handlers.leave)
+      instance.on('click', sourceId, handlers.click)
+      pickupHandlers.current.set(job.id, handlers)
+      pickupJobIds.current.add(job.id)
+    }
+  }, [jobs, mapRevision, onOpenJob])
 
   return <div ref={container} className="absolute inset-0" aria-label="Interactive game map">
     {routeCount > 0 && <div className="route-legend" aria-label="Taxi route legend">

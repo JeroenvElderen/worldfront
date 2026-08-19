@@ -23,7 +23,7 @@ export default function App() {
     <GameMap cityId={game.startingCityId} vehicles={game.vehicles} jobs={game.jobs} />
     {game.company ? <>
       <TopHud company={game.company} />
-      {game.activeSection !== 'map' && <SectionSheet section={game.activeSection} vehicles={game.vehicles} jobs={game.jobs} passengers={game.passengers} cash={game.company.cash} onClose={() => game.setSection('map')} onReset={game.resetGame} onRefreshJobs={game.refreshJobs} onAcceptJob={game.acceptJob} onCompleteJob={game.completeJob} onBuyTaxi={game.buyTaxi} />}
+      {game.activeSection !== 'map' && <SectionSheet section={game.activeSection} vehicles={game.vehicles} jobs={game.jobs} passengers={game.passengers} cash={game.company.cash} jobsLoading={game.jobsLoading} jobsError={game.jobsError} onClose={() => game.setSection('map')} onReset={game.resetGame} onRefreshJobs={game.refreshJobs} onAcceptJob={game.acceptJob} onCompleteJob={game.completeJob} onBuyTaxi={game.buyTaxi} />}
       <BottomNav active={game.activeSection} onChange={game.setSection} />
     </> : <CitySetup onStart={game.initializeCompany} />}
   </div>

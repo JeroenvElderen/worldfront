@@ -2,10 +2,10 @@ import type { Section } from '../../stores/gameStore'
 import type { Passenger, TaxiJob, Vehicle } from '../../models/game'
 import { JOB_REQUEST_INTERVAL_MS } from '../../services/jobEngine'
 
-interface SectionSheetProps { section: Exclude<Section, 'map'>; vehicles: Vehicle[]; jobs: TaxiJob[]; passengers: Passenger[]; cash: number; onClose: () => void; onReset: () => void; onRefreshJobs: () => void; onAcceptJob: (jobId: string) => void; onCompleteJob: (jobId: string) => void; onBuyTaxi: () => void }
+interface SectionSheetProps { section: Exclude<Section, 'map'>; vehicles: Vehicle[]; jobs: TaxiJob[]; passengers: Passenger[]; cash: number; jobsLoading: boolean; jobsError: string | null; onClose: () => void; onReset: () => void; onRefreshJobs: () => void; onAcceptJob: (jobId: string) => void; onCompleteJob: (jobId: string) => void; onBuyTaxi: () => void }
 const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
 
-export function SectionSheet({ section, vehicles, jobs, passengers, cash, onClose, onReset, onRefreshJobs, onAcceptJob, onCompleteJob, onBuyTaxi }: SectionSheetProps) {
+export function SectionSheet({ section, vehicles, jobs, passengers, cash, jobsLoading, jobsError, onClose, onReset, onRefreshJobs, onAcceptJob, onCompleteJob, onBuyTaxi }: SectionSheetProps) {
   if (section === 'jobs') {
     const activeJobs = jobs.filter((job) => job.status === 'accepted')
     const offers = jobs.filter((job) => job.status === 'offered')
@@ -18,8 +18,9 @@ export function SectionSheet({ section, vehicles, jobs, passengers, cash, onClos
         <button className="primary-action" onClick={() => onCompleteJob(activeJob.id)}>Complete trip</button>
       </article>)}
       <>
-        <p>Choose a fare for your available taxi. A new request arrives every {JOB_REQUEST_INTERVAL_MS / 1000} seconds.</p>
-        <div className="job-list">{offers.length === 0 && <p className="job-empty" role="status">Looking for a nearby passenger…</p>}{offers.map((job) => {
+        <p>Every request is invented by AI for your city. A new one arrives every {JOB_REQUEST_INTERVAL_MS / 1000} seconds.</p>
+        {jobsError && <p className="job-error" role="alert">{jobsError}</p>}
+        <div className="job-list">{offers.length === 0 && <p className="job-empty" role="status">{jobsLoading ? 'AI is finding a nearby passenger…' : 'No open requests yet.'}</p>}{offers.map((job) => {
           const passenger = passengers.find((candidate) => job.passengerIds.includes(candidate.id))
           return <article className="job-card" key={job.id}>
             <div><strong>{job.pickupLabel} → {job.destinationLabel}</strong><small>{passenger?.name ?? 'Passenger'} · party of {passenger?.partySize ?? 1}</small></div>
@@ -27,7 +28,7 @@ export function SectionSheet({ section, vehicles, jobs, passengers, cash, onClos
             <button disabled={!vehicles.some((vehicle) => vehicle.status === 'available')} onClick={() => onAcceptJob(job.id)}>{vehicles.some((vehicle) => vehicle.status === 'available') ? 'Accept fare' : 'All taxis busy'}</button>
           </article>
         })}</div>
-        <button className="refresh-link" onClick={onRefreshJobs}>↻ Refresh requests</button>
+        <button className="refresh-link" disabled={jobsLoading} onClick={onRefreshJobs}>{jobsLoading ? 'Generating requests…' : '✦ Generate new AI requests'}</button>
       </>
     </section>
   }

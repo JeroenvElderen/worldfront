@@ -1,53 +1,13 @@
 import type { Section } from '../../stores/gameStore'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { taxiModels } from '../../data/taxis'
-import type { Passenger, TaxiJob, TaxiPowertrain, Vehicle } from '../../models/game'
-import { getJobJourney, JOB_REQUEST_INTERVAL_MS } from '../../services/jobEngine'
+import type { TaxiPowertrain, Vehicle } from '../../models/game'
 
-interface SectionSheetProps { section: Exclude<Section, 'map'>; focusedJobId: string | null; vehicles: Vehicle[]; jobs: TaxiJob[]; passengers: Passenger[]; cash: number; jobsLoading: boolean; jobsError: string | null; onClose: () => void; onReset: () => void; onRefreshJobs: () => void; onAcceptJob: (jobId: string) => void; onBuyTaxi: (powertrain: TaxiPowertrain) => void }
+interface SectionSheetProps { section: Exclude<Section, 'map'>; vehicles: Vehicle[]; cash: number; onClose: () => void; onReset: () => void; onBuyTaxi: (powertrain: TaxiPowertrain) => void }
 const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
-const distanceKm = (from: [number, number], to: [number, number]) => {
-  const latitude = (to[1] - from[1]) * 111.32
-  const longitude = (to[0] - from[0]) * 111.32 * Math.cos(((from[1] + to[1]) / 2) * Math.PI / 180)
-  return Math.hypot(latitude, longitude)
-}
 
-export function SectionSheet({ section, focusedJobId, vehicles, jobs, passengers, cash, jobsLoading, jobsError, onClose, onReset, onRefreshJobs, onAcceptJob, onBuyTaxi }: SectionSheetProps) {
+export function SectionSheet({ section, vehicles, cash, onClose, onReset, onBuyTaxi }: SectionSheetProps) {
   const [selectedTaxi, setSelectedTaxi] = useState<TaxiPowertrain>('diesel')
-  const [now, setNow] = useState(Date.now())
-  useEffect(() => {
-    if (section !== 'jobs') return
-    const interval = window.setInterval(() => setNow(Date.now()), 1_000)
-    return () => window.clearInterval(interval)
-  }, [section])
-  if (section === 'jobs') {
-    const activeJobs = jobs.filter((job) => job.status === 'accepted')
-    const offers = jobs.filter((job) => job.status === 'offered').sort((left, right) => Number(right.id === focusedJobId) - Number(left.id === focusedJobId))
-    return <section className="section-sheet jobs-sheet game-panel">
-      <div className="sheet-handle" /><button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
-      <small>JOBS</small><h2>{activeJobs.length ? `${activeJobs.length} trip${activeJobs.length === 1 ? '' : 's'} in progress` : 'Taxi requests'}</h2>
-      {activeJobs.map((activeJob) => { const vehicle = vehicles.find((candidate) => candidate.id === activeJob.assignedVehicleId); const journey = vehicle ? getJobJourney(activeJob, vehicle) : null; const pickingUp = Boolean(journey && now < journey.pickupAt); const secondsRemaining = journey ? Math.max(0, Math.ceil((journey.arrivesAt - now) / 1_000)) : 0; return <article className="active-job" key={activeJob.id}>
-        <div className="job-route"><span>●</span><div><strong>{activeJob.pickupLabel}</strong><i /><strong>{activeJob.destinationLabel}</strong></div></div>
-        <div className="job-meta"><span>{vehicles.find((vehicle) => vehicle.id === activeJob.assignedVehicleId)?.name ?? 'Taxi'}</span><span>{activeJob.distanceKm} km</span><span>~{activeJob.durationMinutes} min</span><b>{money.format(activeJob.fare)}</b></div>
-        <button className="primary-action" disabled>{pickingUp ? 'Driving to pickup' : 'Passenger on board'} · {Math.ceil(secondsRemaining / 60)} min</button>
-      </article> })}
-      <>
-        <p>Every request connects places found by Mapbox in your city. A new one arrives every {JOB_REQUEST_INTERVAL_MS / 1000} seconds.</p>
-        {jobsError && <p className="job-error" role="alert">{jobsError}</p>}
-        <div className="job-list">{offers.length === 0 && <p className="job-empty" role="status">{jobsLoading ? 'Searching Mapbox for nearby passengers…' : 'No open requests yet.'}</p>}{offers.map((job) => {
-          const passenger = passengers.find((candidate) => job.passengerIds.includes(candidate.id))
-          const nearbyTaxis = vehicles.filter((vehicle) => vehicle.status === 'available' && vehicle.position).map((vehicle) => ({ vehicle, distance: distanceKm(vehicle.position!, job.pickup) })).sort((left, right) => left.distance - right.distance).slice(0, 3)
-          return <article className={`job-card${job.id === focusedJobId ? ' focused' : ''}`} key={job.id}>
-            <div><strong>{job.pickupLabel} → {job.destinationLabel}</strong><small>{passenger?.name ?? 'Passenger'} · party of {passenger?.partySize ?? 1}</small></div>
-            <div className="job-meta"><span>{job.distanceKm} km</span><span>~{job.durationMinutes} min</span><b>{money.format(job.fare)}</b></div>
-            <div className="nearby-taxis"><small>NEARBY TAXIS</small>{nearbyTaxis.length ? nearbyTaxis.map(({ vehicle, distance }) => <span key={vehicle.id}>{vehicle.name} <b>{distance.toFixed(1)} km away</b></span>) : <span>No available taxis nearby</span>}</div>
-            <button disabled={!vehicles.some((vehicle) => vehicle.status === 'available')} onClick={() => onAcceptJob(job.id)}>{vehicles.some((vehicle) => vehicle.status === 'available') ? 'Accept fare' : 'All taxis busy'}</button>
-          </article>
-        })}</div>
-        <button className="refresh-link" disabled={jobsLoading} onClick={onRefreshJobs}>{jobsLoading ? 'Finding requests in the background…' : '✦ Find more requests'}</button>
-      </>
-    </section>
-  }
   const content = {
     fleet: [`${vehicles.length} vehicle${vehicles.length === 1 ? '' : 's'} in your fleet`, vehicles[0] ? `${vehicles[0].name} · ${vehicles[0].condition}% condition · ${vehicles[0].status}` : 'Purchase your first vehicle.'],
     travel: ['Travel agency locked', 'Reach company level 3 to begin creating tours.'],

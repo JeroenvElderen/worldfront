@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { BottomNav } from './components/game/BottomNav'
 import { SectionSheet } from './components/game/SectionSheet'
 import { TopHud } from './components/game/TopHud'
+import { TaxiCallPopup } from './components/game/TaxiCallPopup'
 import { GameMap } from './map/GameMap'
 import { CitySetup } from './screens/CitySetup'
 import { useGameStore } from './stores/gameStore'
@@ -29,7 +30,8 @@ export default function App() {
     <GameMap cityId={game.startingCityId} vehicles={game.vehicles} jobs={game.jobs} onOpenJob={game.openJob} />
     {game.company ? <>
       <TopHud company={game.company} />
-      {game.activeSection !== 'map' && <SectionSheet section={game.activeSection} focusedJobId={game.focusedJobId} vehicles={game.vehicles} jobs={game.jobs} passengers={game.passengers} cash={game.company.cash} jobsLoading={game.jobsLoading} jobsError={game.jobsError} onClose={() => game.setSection('map')} onReset={game.resetGame} onRefreshJobs={game.refreshJobs} onAcceptJob={game.acceptJob} onBuyTaxi={game.buyTaxi} />}
+      {game.activeSection === 'map' && <TaxiCallPopup focusedJobId={game.focusedJobId} vehicles={game.vehicles} jobs={game.jobs} passengers={game.passengers} onAccept={game.acceptJob} onDecline={game.declineJob} />}
+      {game.activeSection !== 'map' && <SectionSheet section={game.activeSection} vehicles={game.vehicles} cash={game.company.cash} onClose={() => game.setSection('map')} onReset={game.resetGame} onBuyTaxi={game.buyTaxi} />}
       <BottomNav active={game.activeSection} onChange={game.setSection} />
     </> : <CitySetup onStart={game.initializeCompany} />}
   </div>

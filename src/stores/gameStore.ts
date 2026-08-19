@@ -4,6 +4,7 @@ import { getCity } from '../data/cities'
 import { getTaxiModel } from '../data/taxis'
 import type { Company, GameSave, TaxiPowertrain, Vehicle } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
+import { levelForReputation, maxJobDistanceForLevel } from '../services/companyProgression'
 import { generateJobOffers } from '../services/jobOfferService'
 import { acceptJobState, completeArrivedJobsState, completeJobState, MAX_JOB_OFFERS } from '../services/jobEngine'
 
@@ -33,7 +34,8 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     if (!city) return
     set({ jobsLoading: true, jobsError: null })
     try {
-      const generated = await generateJobOffers(city, 4, state.jobRequestHistory ?? [])
+      const level = levelForReputation(state.company?.reputation ?? 0)
+      const generated = await generateJobOffers(city, 4, state.jobRequestHistory ?? [], maxJobDistanceForLevel(level))
       set((latest) => ({ jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...generated.jobs], passengers: [...latest.passengers, ...generated.passengers], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }))
     } catch (error) {
       set({ jobsLoading: false, jobsError: error instanceof Error ? error.message : 'Could not generate requests.' })
@@ -46,7 +48,8 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     if (!city) return
     set({ jobsLoading: true, jobsError: null })
     try {
-      const generated = await generateJobOffers(city, 1, state.jobRequestHistory ?? [])
+      const level = levelForReputation(state.company?.reputation ?? 0)
+      const generated = await generateJobOffers(city, 1, state.jobRequestHistory ?? [], maxJobDistanceForLevel(level))
       set((latest) => ({ jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...generated.jobs], passengers: [...latest.passengers, ...generated.passengers], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }))
     } catch (error) {
       set({ jobsLoading: false, jobsError: error instanceof Error ? error.message : 'Could not generate a request.' })

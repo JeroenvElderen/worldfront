@@ -1,4 +1,5 @@
 import type { Company, TaxiJob, Vehicle } from '../models/game'
+import { levelForReputation } from './companyProgression'
 
 export const JOB_REQUEST_INTERVAL_MS = 30_000
 export const MAX_JOB_OFFERS = 6
@@ -74,9 +75,10 @@ export function completeJobState(
 
   const paidDistanceKm = distanceKmBetween(job.pickup, job.destination)
   const meteredFare = taxiFareForDistance(paidDistanceKm)
+  const reputation = company.reputation + 1
 
   return {
-    company: { ...company, cash: company.cash + meteredFare, reputation: company.reputation + 1 },
+    company: { ...company, cash: company.cash + meteredFare, reputation, level: levelForReputation(reputation) },
     jobs: jobs.map((candidate) => candidate.id === jobId ? { ...candidate, status: 'complete' as const } : candidate),
     vehicles: vehicles.map((candidate) =>
       candidate.id === job.assignedVehicleId || (!job.assignedVehicleId && candidate.status === 'on-job')

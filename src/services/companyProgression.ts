@@ -1,0 +1,27 @@
+export const BASE_JOB_DISTANCE_KM = 20
+export const JOB_DISTANCE_PER_LEVEL_KM = 20
+export const REPUTATION_PER_LEVEL = 50
+
+/** Every level has the same clear reputation target. */
+export const reputationForLevel = (level: number) => {
+  const completedLevels = Math.max(0, Math.floor(level) - 1)
+  return completedLevels * REPUTATION_PER_LEVEL
+}
+
+export const levelForReputation = (reputation: number) =>
+  Math.floor(Math.max(0, reputation) / REPUTATION_PER_LEVEL) + 1
+
+export const maxJobDistanceForLevel = (level: number) =>
+  BASE_JOB_DISTANCE_KM + (Math.max(1, Math.floor(level)) - 1) * JOB_DISTANCE_PER_LEVEL_KM
+
+export const progressionForReputation = (reputation: number) => {
+  const level = levelForReputation(reputation)
+  const currentLevelReputation = reputationForLevel(level)
+  const nextLevelReputation = reputationForLevel(level + 1)
+  return {
+    level,
+    current: Math.max(0, reputation - currentLevelReputation),
+    required: nextLevelReputation - currentLevelReputation,
+    maxJobDistanceKm: maxJobDistanceForLevel(level),
+  }
+}

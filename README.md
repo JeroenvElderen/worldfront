@@ -4,20 +4,60 @@ A mobile-first transport and travel management game foundation built around the 
 
 ## Getting started
 
-1. Copy the environment template and add a public Mapbox access token:
+1. Install [Ollama](https://ollama.com), then download the free local model:
+
+   ```bash
+   ollama pull llama3.2
+   ```
+
+2. Copy the environment template and optionally add a Mapbox key:
 
    ```bash
    cp .env.example .env
    ```
 
-2. Install and start the browser build:
+3. Install and start the browser build (leave Ollama running):
 
    ```bash
    pnpm install
    pnpm dev
    ```
 
-Vite prints the local URL (normally `http://localhost:5173`). Without a token the game remains usable with a clearly labelled map fallback, but Mapbox streets and navigation are only loaded once `VITE_MAPBOX_ACCESS_TOKEN` is configured.
+Vite prints the local URL (normally `http://localhost:5173`). Without a Mapbox token the game remains usable with a clearly labelled map fallback, but Mapbox streets and navigation are only loaded once `VITE_MAPBOX_ACCESS_TOKEN` is configured.
+
+## AI-generated taxi requests
+
+You do **not** need an API key, subscription, paid AI service, or separate endpoint for private local use. The Vite development server provides `/api/jobs` and talks to [Ollama](https://ollama.com) on your computer. The default `llama3.2` model runs locally, so job prompts and results are not sent to a hosted AI provider.
+
+The built-in endpoint exists while running `pnpm dev`, which is the recommended setup for private play. You can change `OLLAMA_MODEL` or `OLLAMA_BASE_URL` in `.env`. A standalone deployed web or Android build cannot reach the development server; that use case still needs an accessible backend set through `VITE_AI_JOBS_ENDPOINT`.
+
+The app sends a `POST` request like this:
+
+```json
+{
+  "city": { "name": "Dublin", "countryCode": "IE", "center": [-6.2603, 53.3498] },
+  "count": 4,
+  "excludeRoutes": ["central station→riverside hotel"],
+  "instructions": "Invent realistic, varied taxi requests..."
+}
+```
+
+The endpoint must return JSON in this shape (coordinates are `[longitude, latitude]`):
+
+```json
+{
+  "jobs": [{
+    "passengerName": "Maya O'Brien",
+    "partySize": 2,
+    "pickupLabel": "Chester Beatty Library",
+    "pickup": [-6.2675, 53.3421],
+    "destinationLabel": "Clontarf Promenade",
+    "destination": [-6.1911, 53.3632]
+  }]
+}
+```
+
+The built-in handler asks Ollama for JSON matching that schema. The client validates every result, calculates gameplay values itself, rejects duplicate routes, and retains the last 100 route signatures in the autosave so future prompts can avoid them.
 
 ## Android
 
@@ -46,4 +86,4 @@ pnpm build
 
 ## Current milestone
 
-The game includes the first-time city flow, local autosave, starter company, fleet purchasing, map base marker, HUD, and navigable game sections. A random taxi request arrives every 30 seconds (up to six open offers), and each available taxi can take its own fare. Every taxi remains visible on the map; when dispatched it drives from its current position to the pickup before continuing to the destination. With a Mapbox token these routes use `driving-traffic`, so they follow drivable roads and current traffic-aware restrictions rather than drawing straight lines. Hiring, travel agencies and multiple save-slot UI are reserved for future milestones. The IndexedDB save schema uses a named `autosave` key so additional slots can be introduced without replacing the persistence layer.
+The game includes the first-time city flow, local autosave, starter company, fleet purchasing, map base marker, HUD, and navigable game sections. An AI-generated taxi request arrives every 30 seconds (up to six open offers), and each available taxi can take its own fare. Every taxi remains visible on the map; when dispatched it drives from its current position to the pickup before continuing to the destination. With a Mapbox token these routes use `driving-traffic`, so they follow drivable roads and current traffic-aware restrictions rather than drawing straight lines. Hiring, travel agencies and multiple save-slot UI are reserved for future milestones. The IndexedDB save schema uses a named `autosave` key so additional slots can be introduced without replacing the persistence layer.

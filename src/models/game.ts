@@ -9,4 +9,4 @@ export interface Passenger { id: string; name: string; partySize: number }
 export interface TaxiJob { id: string; cityId: string; pickup: Coordinates; destination: Coordinates; pickupLabel: string; destinationLabel: string; passengerIds: string[]; fare: number; distanceKm: number; durationMinutes: number; status: 'offered' | 'accepted' | 'complete'; assignedVehicleId?: string }
 export interface TravelAgency { id: string; name: string; cityId: string; level: number }
 export interface Tour { id: string; agencyId: string; name: string; stops: Coordinates[]; price: number }
-export interface GameSave { id: string; version: number; updatedAt: string; company: Company | null; startingCityId: string | null; vehicles: Vehicle[]; drivers: Driver[]; jobs: TaxiJob[]; agencies: TravelAgency[]; tours: Tour[]; passengers: Passenger[] }
+export interface GameSave { id: string; version: number; updatedAt: string; company: Company | null; startingCityId: string | null; vehicles: Vehicle[]; drivers: Driver[]; jobs: TaxiJob[]; agencies: TravelAgency[]; tours: Tour[]; passengers: Passenger[]; jobRequestHistory: string[] }

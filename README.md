@@ -44,6 +44,6 @@ pnpm lint
 pnpm build
 ```
 
-## Milestone scope
+## Current milestone
 
-The initial milestone includes the first-time city flow, local autosave, starter company and taxi, map base marker, HUD, and navigable game sections. Job generation, driving simulation, route animation, hiring, purchases, travel agencies and multiple save-slot UI are intentionally reserved for future milestones. The IndexedDB save schema already uses a named `autosave` key so additional slots can be introduced without replacing the persistence layer.
+The game includes the first-time city flow, local autosave, starter company and taxi, map base marker, HUD, and navigable game sections. Players can now choose from locally generated taxi requests, accept a fare, view its route, complete the trip, and earn cash and reputation. Hiring, purchases, travel agencies, advanced driving simulation and multiple save-slot UI are reserved for future milestones. The IndexedDB save schema uses a named `autosave` key so additional slots can be introduced without replacing the persistence layer.

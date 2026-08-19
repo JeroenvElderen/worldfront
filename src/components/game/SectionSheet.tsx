@@ -1,8 +1,8 @@
 import type { Section } from '../../stores/gameStore'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { taxiModels } from '../../data/taxis'
 import type { Passenger, TaxiJob, TaxiPowertrain, Vehicle } from '../../models/game'
-import { JOB_REQUEST_INTERVAL_MS } from '../../services/jobEngine'
+import { getJobJourney, JOB_REQUEST_INTERVAL_MS } from '../../services/jobEngine'
 
 interface SectionSheetProps { section: Exclude<Section, 'map'>; focusedJobId: string | null; vehicles: Vehicle[]; jobs: TaxiJob[]; passengers: Passenger[]; cash: number; jobsLoading: boolean; jobsError: string | null; onClose: () => void; onReset: () => void; onRefreshJobs: () => void; onAcceptJob: (jobId: string) => void; onCompleteJob: (jobId: string) => void; onBuyTaxi: (powertrain: TaxiPowertrain) => void }
 const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
@@ -14,17 +14,23 @@ const distanceKm = (from: [number, number], to: [number, number]) => {
 
 export function SectionSheet({ section, focusedJobId, vehicles, jobs, passengers, cash, jobsLoading, jobsError, onClose, onReset, onRefreshJobs, onAcceptJob, onCompleteJob, onBuyTaxi }: SectionSheetProps) {
   const [selectedTaxi, setSelectedTaxi] = useState<TaxiPowertrain>('diesel')
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    if (section !== 'jobs') return
+    const interval = window.setInterval(() => setNow(Date.now()), 1_000)
+    return () => window.clearInterval(interval)
+  }, [section])
   if (section === 'jobs') {
     const activeJobs = jobs.filter((job) => job.status === 'accepted')
     const offers = jobs.filter((job) => job.status === 'offered').sort((left, right) => Number(right.id === focusedJobId) - Number(left.id === focusedJobId))
     return <section className="section-sheet jobs-sheet game-panel">
       <div className="sheet-handle" /><button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
       <small>JOBS</small><h2>{activeJobs.length ? `${activeJobs.length} trip${activeJobs.length === 1 ? '' : 's'} in progress` : 'Taxi requests'}</h2>
-      {activeJobs.map((activeJob) => <article className="active-job" key={activeJob.id}>
+      {activeJobs.map((activeJob) => { const vehicle = vehicles.find((candidate) => candidate.id === activeJob.assignedVehicleId); const journey = vehicle ? getJobJourney(activeJob, vehicle) : null; const arrived = Boolean(journey && now >= journey.arrivesAt); const pickingUp = Boolean(journey && now < journey.pickupAt); return <article className="active-job" key={activeJob.id}>
         <div className="job-route"><span>●</span><div><strong>{activeJob.pickupLabel}</strong><i /><strong>{activeJob.destinationLabel}</strong></div></div>
         <div className="job-meta"><span>{vehicles.find((vehicle) => vehicle.id === activeJob.assignedVehicleId)?.name ?? 'Taxi'}</span><span>{activeJob.distanceKm} km</span><span>~{activeJob.durationMinutes} min</span><b>{money.format(activeJob.fare)}</b></div>
-        <button className="primary-action" onClick={() => onCompleteJob(activeJob.id)}>Complete trip</button>
-      </article>)}
+        <button className="primary-action" disabled={!arrived} onClick={() => onCompleteJob(activeJob.id)}>{arrived ? 'Complete trip' : pickingUp ? 'Driving to pickup…' : 'Passenger on board…'}</button>
+      </article> })}
       <>
         <p>Every request is invented by AI for your city. A new one arrives every {JOB_REQUEST_INTERVAL_MS / 1000} seconds.</p>
         {jobsError && <p className="job-error" role="alert">{jobsError}</p>}

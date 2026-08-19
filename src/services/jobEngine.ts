@@ -8,6 +8,26 @@ const distanceSquared = (from: [number, number], to: [number, number]) => {
   return ((from[0] - to[0]) * longitudeScale) ** 2 + (from[1] - to[1]) ** 2
 }
 
+export const distanceKmBetween = (from: [number, number], to: [number, number]) => {
+  const latitudeKm = (to[1] - from[1]) * 111.32
+  const longitudeKm = (to[0] - from[0]) * 111.32 * Math.cos(((from[1] + to[1]) / 2) * Math.PI / 180)
+  return Math.hypot(latitudeKm, longitudeKm)
+}
+
+/** Stable journey timings keep a trip in the same place across map reloads. */
+export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {
+  const acceptedAt = job.acceptedAt ? new Date(job.acceptedAt).getTime() : Date.now()
+  const start = vehicle.position ?? job.pickup
+  const urbanSpeedKmh = Math.min(vehicle.topSpeedKmh ?? 155, 45)
+  const pickupDurationMs = Math.max(30_000, distanceKmBetween(start, job.pickup) / urbanSpeedKmh * 3_600_000)
+  const passengerDurationMs = Math.max(30_000, job.durationMinutes * 60_000)
+  return {
+    acceptedAt,
+    pickupAt: acceptedAt + pickupDurationMs,
+    arrivesAt: acceptedAt + pickupDurationMs + passengerDurationMs,
+  }
+}
+
 export function acceptJobState(
   jobs: TaxiJob[],
   vehicles: Vehicle[],
@@ -36,10 +56,14 @@ export function completeJobState(
   company: Company,
   jobs: TaxiJob[],
   vehicles: Vehicle[],
-  jobId: string
+  jobId: string,
+  now = Date.now()
 ) {
   const job = jobs.find((candidate) => candidate.id === jobId && candidate.status === 'accepted')
   if (!job) return null
+  const vehicle = vehicles.find((candidate) => candidate.id === job.assignedVehicleId)
+    ?? vehicles.find((candidate) => candidate.status === 'on-job')
+  if (!vehicle || now < getJobJourney(job, vehicle).arrivesAt) return null
 
   return {
     company: { ...company, cash: company.cash + job.fare, reputation: company.reputation + 1 },

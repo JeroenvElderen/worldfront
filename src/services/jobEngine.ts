@@ -2,6 +2,9 @@ import type { Company, TaxiJob, Vehicle } from '../models/game'
 
 export const JOB_REQUEST_INTERVAL_MS = 30_000
 export const MAX_JOB_OFFERS = 6
+// One simulated minute passes each second so journeys remain visible without
+// asking the player to wait for the full real-world trip time.
+export const SIMULATED_MINUTE_MS = 1_000
 
 const distanceSquared = (from: [number, number], to: [number, number]) => {
   const longitudeScale = Math.cos(((from[1] + to[1]) / 2) * Math.PI / 180)
@@ -14,13 +17,18 @@ export const distanceKmBetween = (from: [number, number], to: [number, number]) 
   return Math.hypot(latitudeKm, longitudeKm)
 }
 
+/** A simple metered tariff: flag fall plus a charge for every passenger kilometre. */
+export const taxiFareForDistance = (distanceKm: number) =>
+  Math.round((4.5 + Math.max(0, distanceKm) * 2.1) * 100) / 100
+
 /** Stable journey timings keep a trip in the same place across map reloads. */
 export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {
   const acceptedAt = job.acceptedAt ? new Date(job.acceptedAt).getTime() : Date.now()
   const start = vehicle.position ?? job.pickup
   const urbanSpeedKmh = Math.min(vehicle.topSpeedKmh ?? 155, 45)
-  const pickupDurationMs = Math.max(30_000, distanceKmBetween(start, job.pickup) / urbanSpeedKmh * 3_600_000)
-  const passengerDurationMs = Math.max(30_000, job.durationMinutes * 60_000)
+  const pickupMinutes = distanceKmBetween(start, job.pickup) / urbanSpeedKmh * 60
+  const pickupDurationMs = Math.max(2_000, pickupMinutes * SIMULATED_MINUTE_MS)
+  const passengerDurationMs = Math.max(5_000, job.durationMinutes * SIMULATED_MINUTE_MS)
   return {
     acceptedAt,
     pickupAt: acceptedAt + pickupDurationMs,
@@ -65,8 +73,11 @@ export function completeJobState(
     ?? vehicles.find((candidate) => candidate.status === 'on-job')
   if (!vehicle || now < getJobJourney(job, vehicle).arrivesAt) return null
 
+  const paidDistanceKm = distanceKmBetween(job.pickup, job.destination)
+  const meteredFare = taxiFareForDistance(paidDistanceKm)
+
   return {
-    company: { ...company, cash: company.cash + job.fare, reputation: company.reputation + 1 },
+    company: { ...company, cash: company.cash + meteredFare, reputation: company.reputation + 1 },
     jobs: jobs.map((candidate) => candidate.id === jobId ? { ...candidate, status: 'complete' as const } : candidate),
     vehicles: vehicles.map((candidate) =>
       candidate.id === job.assignedVehicleId || (!job.assignedVehicleId && candidate.status === 'on-job')

@@ -1,4 +1,5 @@
 import type { City, Coordinates, Passenger, TaxiJob } from '../models/game'
+import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 
 interface GeneratedJob {
   passengerName: string
@@ -17,11 +18,8 @@ const isCoordinates = (value: unknown): value is Coordinates =>
 const routeSignature = (pickup: string, destination: string) =>
   `${pickup.trim().toLocaleLowerCase()}→${destination.trim().toLocaleLowerCase()}`
 
-const distance = (a: Coordinates, b: Coordinates) => {
-  const latitudeKm = (b[1] - a[1]) * 111
-  const longitudeKm = (b[0] - a[0]) * 111 * Math.cos((a[1] * Math.PI) / 180)
-  return Math.max(1, Math.round(Math.hypot(latitudeKm, longitudeKm) * 10) / 10)
-}
+const distance = (a: Coordinates, b: Coordinates) =>
+  Math.max(1, Math.round(distanceKmBetween(a, b) * 10) / 10)
 
 function parseJob(value: unknown): GeneratedJob | null {
   if (!value || typeof value !== 'object') return null
@@ -78,7 +76,7 @@ export async function generateJobOffers(
     return {
       id: crypto.randomUUID(), cityId: city.id, pickup: job.pickup, destination: job.destination,
       pickupLabel: job.pickupLabel.trim(), destinationLabel: job.destinationLabel.trim(),
-      passengerIds: [passengers[index].id], fare: Math.round(5 + distanceKm * 2.4 + job.partySize * 1.5),
+      passengerIds: [passengers[index].id], fare: taxiFareForDistance(distanceKm),
       distanceKm, durationMinutes: Math.max(5, Math.round(distanceKm * 3.2)), status: 'offered' as const,
     }
   })

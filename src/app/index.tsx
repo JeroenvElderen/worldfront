@@ -15,28 +15,26 @@ import Mapbox, {
   ShapeSource,
 } from "@rnmapbox/maps";
 
-import type { Feature, Polygon } from "geojson";
-
 const mapboxToken =
   process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN;
 
-if (!mapboxToken) {
-  throw new Error(
-    "EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN is missing"
-  );
+if (mapboxToken) {
+  Mapbox.setAccessToken(mapboxToken);
 }
-
-Mapbox.setAccessToken(mapboxToken);
 
 const PLAYER_COLOR = "#5B3A72";
 const ENEMY_COLOR = "#A94442";
 
-type Territory = Feature<
-  Polygon,
-  {
+type Territory = {
+  type: "Feature";
+  properties: {
     faction: "player" | "enemy";
-  }
->;
+  };
+  geometry: {
+    type: "Polygon";
+    coordinates: number[][][];
+  };
+};
 
 const playerInitial: Territory = {
   type: "Feature",
@@ -133,6 +131,17 @@ export default function GameScreen() {
     () => (advanced ? enemyAfterAdvance : enemyInitial),
     [advanced]
   );
+
+  if (!mapboxToken) {
+    return (
+      <SafeAreaView style={styles.setupContainer}>
+        <Text style={styles.setupTitle}>MAP TOKEN REQUIRED</Text>
+        <Text style={styles.setupBody}>
+          Add EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN to a .env file, then restart the development build.
+        </Text>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -243,6 +252,27 @@ const styles = StyleSheet.create({
     backgroundColor: "#111114",
   },
 
+  setupContainer: {
+    flex: 1,
+    justifyContent: "center",
+    padding: 32,
+    backgroundColor: "#111114",
+  },
+
+  setupTitle: {
+    color: "#FFFFFF",
+    fontSize: 22,
+    fontWeight: "800",
+    letterSpacing: 1,
+  },
+
+  setupBody: {
+    marginTop: 12,
+    color: "#B8B4BD",
+    fontSize: 16,
+    lineHeight: 24,
+  },
+  
   overlay: {
     flex: 1,
     justifyContent: "space-between",

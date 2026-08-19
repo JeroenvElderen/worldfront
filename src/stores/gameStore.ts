@@ -8,8 +8,8 @@ import { levelForReputation, maxJobDistanceForLevel } from '../services/companyP
 import { generateJobOffers } from '../services/jobOfferService'
 import { acceptJobState, completeArrivedJobsState, completeJobState, MAX_JOB_OFFERS } from '../services/jobEngine'
 
-type Section = 'map' | 'jobs' | 'fleet' | 'travel' | 'company'
-interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (powertrain: TaxiPowertrain) => void; resetGame: () => void }
+type Section = 'map' | 'fleet' | 'travel' | 'company'
+interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (powertrain: TaxiPowertrain) => void; resetGame: () => void }
 interface GameState extends GameSave { activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
 
 const blankSave: GameSave = { id: 'autosave', version: 2, updatedAt: new Date(0).toISOString(), company: null, startingCityId: null, vehicles: [], drivers: [], jobs: [], agencies: [], tours: [], passengers: [], jobRequestHistory: [] }
@@ -18,7 +18,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   ...blankSave, activeSection: 'map', focusedJobId: null, hasHydrated: false, jobsLoading: false, jobsError: null,
   setHasHydrated: (hasHydrated) => set({ hasHydrated }),
   setSection: (activeSection) => set({ activeSection }),
-  openJob: (focusedJobId) => set({ focusedJobId, activeSection: 'jobs' }),
+  openJob: (focusedJobId) => set({ focusedJobId, activeSection: 'map' }),
   initializeCompany: (cityId) => {
     if (!getCity(cityId)) return
     const now = new Date().toISOString()
@@ -29,13 +29,15 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   },
   refreshJobs: async () => {
     const state = useGameStore.getState()
-    if (!state.startingCityId || state.jobsLoading || state.jobs.some((job) => job.status === 'accepted')) return
+    const availableTaxi = state.vehicles.find((vehicle) => vehicle.status === 'available')
+    if (!state.startingCityId || state.jobsLoading || !availableTaxi) return
     const city = getCity(state.startingCityId)
     if (!city) return
     set({ jobsLoading: true, jobsError: null })
     try {
       const level = levelForReputation(state.company?.reputation ?? 0)
-      const generated = await generateJobOffers(city, 4, state.jobRequestHistory ?? [], maxJobDistanceForLevel(level))
+      const searchArea = availableTaxi.position ? { ...city, coordinates: availableTaxi.position } : city
+      const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxJobDistanceForLevel(level))
       set((latest) => ({ jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...generated.jobs], passengers: [...latest.passengers, ...generated.passengers], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }))
     } catch (error) {
       set({ jobsLoading: false, jobsError: error instanceof Error ? error.message : 'Could not generate requests.' })
@@ -43,13 +45,15 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   },
   addRandomJob: async () => {
     const state = useGameStore.getState()
-    if (!state.startingCityId || state.jobsLoading || state.jobs.filter((job) => job.status === 'offered').length >= MAX_JOB_OFFERS) return
+    const availableTaxi = state.vehicles.find((vehicle) => vehicle.status === 'available')
+    if (!state.startingCityId || state.jobsLoading || !availableTaxi || state.jobs.filter((job) => job.status === 'offered').length >= MAX_JOB_OFFERS) return
     const city = getCity(state.startingCityId)
     if (!city) return
     set({ jobsLoading: true, jobsError: null })
     try {
       const level = levelForReputation(state.company?.reputation ?? 0)
-      const generated = await generateJobOffers(city, 1, state.jobRequestHistory ?? [], maxJobDistanceForLevel(level))
+      const searchArea = availableTaxi.position ? { ...city, coordinates: availableTaxi.position } : city
+      const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxJobDistanceForLevel(level))
       set((latest) => ({ jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...generated.jobs], passengers: [...latest.passengers, ...generated.passengers], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }))
     } catch (error) {
       set({ jobsLoading: false, jobsError: error instanceof Error ? error.message : 'Could not generate a request.' })
@@ -59,6 +63,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     const result = acceptJobState(state.jobs, state.vehicles, jobId)
     return result ? { ...result, updatedAt: new Date().toISOString(), activeSection: 'map' } : state
   }),
+  declineJob: (jobId) => set((state) => ({ jobs: state.jobs.filter((job) => job.id !== jobId), focusedJobId: state.focusedJobId === jobId ? null : state.focusedJobId, updatedAt: new Date().toISOString() })),
   completeJob: (jobId) => set((state) => {
     if (!state.company) return state
     const result = completeJobState(state.company, state.jobs, state.vehicles, jobId)

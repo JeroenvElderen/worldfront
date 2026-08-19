@@ -20,10 +20,10 @@ export default function App() {
   }, [company, refreshJobs, addRandomJob])
   if (!game.hasHydrated) return <div className="loading">TRAVEL EMPIRE</div>
   return <div className="game-shell">
-    <GameMap cityId={game.startingCityId} vehicles={game.vehicles} jobs={game.jobs} />
+    <GameMap cityId={game.startingCityId} vehicles={game.vehicles} jobs={game.jobs} onOpenJob={game.openJob} />
     {game.company ? <>
       <TopHud company={game.company} />
-      {game.activeSection !== 'map' && <SectionSheet section={game.activeSection} vehicles={game.vehicles} jobs={game.jobs} passengers={game.passengers} cash={game.company.cash} jobsLoading={game.jobsLoading} jobsError={game.jobsError} onClose={() => game.setSection('map')} onReset={game.resetGame} onRefreshJobs={game.refreshJobs} onAcceptJob={game.acceptJob} onCompleteJob={game.completeJob} onBuyTaxi={game.buyTaxi} />}
+      {game.activeSection !== 'map' && <SectionSheet section={game.activeSection} focusedJobId={game.focusedJobId} vehicles={game.vehicles} jobs={game.jobs} passengers={game.passengers} cash={game.company.cash} jobsLoading={game.jobsLoading} jobsError={game.jobsError} onClose={() => game.setSection('map')} onReset={game.resetGame} onRefreshJobs={game.refreshJobs} onAcceptJob={game.acceptJob} onCompleteJob={game.completeJob} onBuyTaxi={game.buyTaxi} />}
       <BottomNav active={game.activeSection} onChange={game.setSection} />
     </> : <CitySetup onStart={game.initializeCompany} />}
   </div>

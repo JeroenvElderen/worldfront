@@ -22,12 +22,22 @@ const routePosition = (coordinates: number[][], progress: number): Coordinates =
   return [start[0] + (end[0] - start[0]) * amount, start[1] + (end[1] - start[1]) * amount]
 }
 
-const routeDistanceKm = (coordinates: number[][]) => coordinates.slice(1).reduce((total, coordinate, index) => {
-  const previous = coordinates[index]
-  const latitudeKm = (coordinate[1] - previous[1]) * 111.32
-  const longitudeKm = (coordinate[0] - previous[0]) * 111.32 * Math.cos(((coordinate[1] + previous[1]) / 2) * Math.PI / 180)
-  return total + Math.hypot(latitudeKm, longitudeKm)
-}, 0)
+const jobColors = ['#38bdf8', '#f97316', '#a78bfa', '#22c55e', '#f43f5e', '#eab308']
+type RouteSpeedLimit = { speed: number; unit: 'km/h' | 'mph' } | { unknown: true } | { none: true }
+type RouteDetails = { coordinates: number[][]; speedLimits: RouteSpeedLimit[] }
+
+const speedLimitKmh = (limit: RouteSpeedLimit | undefined) => {
+  if (!limit || 'unknown' in limit || 'none' in limit) return null
+  return Math.round(limit.unit === 'mph' ? limit.speed * 1.609344 : limit.speed)
+}
+
+const speedLimitAt = (route: RouteDetails, progress: number) => {
+  const lengths = route.coordinates.slice(1).map((coordinate, index) => Math.hypot(coordinate[0] - route.coordinates[index][0], coordinate[1] - route.coordinates[index][1]))
+  let target = progress * lengths.reduce((sum, length) => sum + length, 0)
+  let segment = 0
+  while (segment < lengths.length - 1 && target > lengths[segment]) target -= lengths[segment++]
+  return speedLimitKmh(route.speedLimits[segment])
+}
 
 function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
@@ -62,33 +72,33 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
         const job = jobs.find((candidate) => candidate.status === 'accepted' && (candidate.assignedVehicleId === vehicle.id || (!candidate.assignedVehicleId && vehicle.status === 'on-job')))
         const start = vehicle.position ?? selected?.coordinates
         if (!start) continue
-        let pickupCoordinates: number[][] = job ? [start, job.pickup] : [start]
-        let passengerCoordinates: number[][] = job ? [job.pickup, job.destination] : [start]
+        let pickupRoute: RouteDetails = { coordinates: job ? [start, job.pickup] : [start], speedLimits: [] }
+        let passengerRoute: RouteDetails = { coordinates: job ? [job.pickup, job.destination] : [start], speedLimits: [] }
         if (job && token) {
           try {
             const fetchRoute = async (from: Coordinates, to: Coordinates) => {
-              const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?alternatives=true&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
+              const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?alternatives=true&annotations=maxspeed&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
               if (!response.ok) throw new Error(`Directions request failed: ${response.status}`)
-              const result = await response.json() as { routes?: Array<{ duration: number; geometry: { coordinates: number[][] } }> }
-              return result.routes?.reduce((fastest, route) => route.duration < fastest.duration ? route : fastest)?.geometry.coordinates
+              const result = await response.json() as { routes?: Array<{ duration: number; geometry: { coordinates: number[][] }; legs: Array<{ annotation?: { maxspeed?: RouteSpeedLimit[] } }> }> }
+              const route = result.routes?.reduce((fastest, candidate) => candidate.duration < fastest.duration ? candidate : fastest)
+              return route && { coordinates: route.geometry.coordinates, speedLimits: route.legs.flatMap((leg) => leg.annotation?.maxspeed ?? []) }
             }
-            pickupCoordinates = await fetchRoute(start, job.pickup) ?? pickupCoordinates
-            passengerCoordinates = await fetchRoute(job.pickup, job.destination) ?? passengerCoordinates
+            pickupRoute = await fetchRoute(start, job.pickup) ?? pickupRoute
+            passengerRoute = await fetchRoute(job.pickup, job.destination) ?? passengerRoute
           } catch (error) { if ((error as Error).name === 'AbortError') return }
         }
         const sourceId = `taxi-${index}`
         instance.addSource(sourceId, { type: 'geojson', data: point(start, { name: vehicle.name }) })
         instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 9, 'circle-color': job ? '#fbbf24' : '#22d3a7', 'circle-stroke-width': 3, 'circle-stroke-color': '#fff' } })
         if (!job) continue
+        const color = jobColors[jobs.filter((candidate) => candidate.status === 'accepted').findIndex((candidate) => candidate.id === job.id) % jobColors.length]
         const pickupRouteId = `pickup-route-${index}`
         const passengerRouteId = `passenger-route-${index}`
-        instance.addSource(pickupRouteId, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: pickupCoordinates } } })
-        instance.addSource(passengerRouteId, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: passengerCoordinates } } })
-        instance.addLayer({ id: pickupRouteId, type: 'line', source: pickupRouteId, paint: { 'line-color': '#f59e0b', 'line-width': 6, 'line-opacity': 0.9, 'line-dasharray': [1.5, 1] } }, sourceId)
-        instance.addLayer({ id: passengerRouteId, type: 'line', source: passengerRouteId, paint: { 'line-color': '#38bdf8', 'line-width': 6, 'line-opacity': 0.25 } }, sourceId)
+        instance.addSource(pickupRouteId, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: pickupRoute.coordinates } } })
+        instance.addSource(passengerRouteId, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: passengerRoute.coordinates } } })
+        instance.addLayer({ id: pickupRouteId, type: 'line', source: pickupRouteId, paint: { 'line-color': color, 'line-width': 6, 'line-opacity': 0.9, 'line-dasharray': [1.5, 1] } }, sourceId)
+        instance.addLayer({ id: passengerRouteId, type: 'line', source: passengerRouteId, paint: { 'line-color': color, 'line-width': 6, 'line-opacity': 0.25 } }, sourceId)
         const journey = getJobJourney(job, vehicle)
-        const pickupSpeed = Math.round(routeDistanceKm(pickupCoordinates) / ((journey.pickupAt - journey.acceptedAt) / 3_600_000))
-        const passengerSpeed = Math.round(routeDistanceKm(passengerCoordinates) / ((journey.arrivesAt - journey.pickupAt) / 3_600_000))
         let lastSpeedUpdate = 0
         const animate = (now: number) => {
           const time = Date.now()
@@ -96,15 +106,15 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
           const progress = pickingUp
             ? Math.max(0, Math.min(1, (time - journey.acceptedAt) / (journey.pickupAt - journey.acceptedAt)))
             : Math.max(0, Math.min(1, (time - journey.pickupAt) / (journey.arrivesAt - journey.pickupAt)))
-          const activeCoordinates = pickingUp ? pickupCoordinates : passengerCoordinates
-          ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(activeCoordinates, progress), { name: vehicle.name }))
+          const activeRoute = pickingUp ? pickupRoute : passengerRoute
+          ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(activeRoute.coordinates, progress), { name: vehicle.name }))
           instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
           instance.setLayoutProperty(`pickup-${job.id}-label`, 'visibility', pickingUp ? 'visible' : 'none')
           instance.setPaintProperty(pickupRouteId, 'line-opacity', pickingUp ? 0.9 : 0.15)
           instance.setPaintProperty(passengerRouteId, 'line-opacity', pickingUp ? 0.25 : 0.9)
           if (now - lastSpeedUpdate > 1000) {
             lastSpeedUpdate = now
-            const speedKmh = time < journey.arrivesAt ? (pickingUp ? pickupSpeed : passengerSpeed) : 0
+            const speedKmh = time < journey.arrivesAt ? speedLimitAt(activeRoute, progress) ?? 0 : 0
             setLiveSpeeds((current) => current[vehicle.id] === speedKmh ? current : { ...current, [vehicle.id]: speedKmh })
           }
           if (time < journey.arrivesAt) animationFrames.push(requestAnimationFrame(animate))
@@ -117,7 +127,13 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
   }, [cityId, vehicles, jobs, onOpenJob])
 
   return <div ref={container} className="absolute inset-0" aria-label="Interactive game map">
-    {routeCount > 0 && <div className="traffic-status">{token ? 'LIVE TRAFFIC' : 'REAL-TIME SPEED'} · {Object.values(liveSpeeds).filter(Boolean).map((speed) => `${speed} KM/H`).join(' · ') || 'ARRIVED'}</div>}
+    {routeCount > 0 && <div className="route-legend" aria-label="Taxi route legend">
+      {jobs.filter((job) => job.status === 'accepted').map((job, index) => {
+        const vehicle = vehicles.find((candidate) => candidate.id === job.assignedVehicleId)
+        const speed = vehicle && liveSpeeds[vehicle.id]
+        return <div key={job.id}><i style={{ backgroundColor: jobColors[index % jobColors.length] }} /><span>{vehicle?.name ?? 'Taxi'}</span><b>{speed ? `${speed} KM/H LIMIT` : token ? 'LIMIT UNKNOWN' : 'LIMIT UNAVAILABLE'}</b></div>
+      })}
+    </div>}
   </div>
 }
 

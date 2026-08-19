@@ -9,14 +9,15 @@ import { JOB_REQUEST_INTERVAL_MS } from './services/jobEngine'
 
 export default function App() {
   const game = useGameStore()
-  const { company, jobs, refreshJobs, addRandomJob } = game
+  const { company, refreshJobs, addRandomJob } = game
   useEffect(() => {
     if (!company) return
     // Hydrated saves with no offers should not wait for the first interval.
-    if (!jobs.some((job) => job.status === 'offered' || job.status === 'accepted')) refreshJobs()
+    const savedJobs = useGameStore.getState().jobs
+    if (!savedJobs.some((job) => job.status === 'offered' || job.status === 'accepted')) refreshJobs()
     const interval = window.setInterval(addRandomJob, JOB_REQUEST_INTERVAL_MS)
     return () => window.clearInterval(interval)
-  }, [company, jobs, refreshJobs, addRandomJob])
+  }, [company, refreshJobs, addRandomJob])
   if (!game.hasHydrated) return <div className="loading">TRAVEL EMPIRE</div>
   return <div className="game-shell">
     <GameMap cityId={game.startingCityId} vehicles={game.vehicles} jobs={game.jobs} />

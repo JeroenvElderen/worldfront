@@ -6,7 +6,20 @@ import { getCity, irelandOverview } from '../data/cities'
 import type { TaxiJob } from '../models/game'
 
 interface GameMapProps { cityId: string | null; activeJob?: TaxiJob }
-const token = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined
+const configuredToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined
+const token = configuredToken && !configuredToken.includes('your_public_mapbox_token') ? configuredToken : undefined
+const fallbackStyle: mapboxgl.StyleSpecification = {
+  version: 8,
+  sources: {
+    openStreetMap: {
+      type: 'raster',
+      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tileSize: 256,
+      attribution: '© OpenStreetMap contributors',
+    },
+  },
+  layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }],
+}
 
 export function GameMap({ cityId, activeJob }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
@@ -14,13 +27,14 @@ export function GameMap({ cityId, activeJob }: GameMapProps) {
   const [trafficEta, setTrafficEta] = useState<number | null>(null)
 
   useEffect(() => {
-    if (!container.current || !token) return
-    mapboxgl.accessToken = token
+    if (!container.current) return
+    if (token) mapboxgl.accessToken = token
     const selected = getCity(cityId)
     const abortController = new AbortController()
     let animationFrame = 0
     const instance = new mapboxgl.Map({
-      container: container.current, style: 'mapbox://styles/mapbox/streets-v12',
+      container: container.current,
+      style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle,
       center: selected?.coordinates ?? irelandOverview.center, zoom: selected?.mapZoom ?? irelandOverview.zoom,
       attributionControl: false, pitchWithRotate: false,
     })
@@ -35,6 +49,7 @@ export function GameMap({ cityId, activeJob }: GameMapProps) {
         let coordinates: number[][] = [activeJob.pickup, activeJob.destination]
         let durationSeconds = activeJob.durationMinutes * 60
         try {
+          if (!token) throw new Error('Mapbox directions are unavailable without an access token')
           const points = [activeJob.pickup, activeJob.destination].map((coordinate) => coordinate.join(',')).join(';')
           const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${points}?alternatives=false&geometries=geojson&overview=full&steps=true&access_token=${token}`, { signal: abortController.signal })
           if (!response.ok) throw new Error(`Directions request failed: ${response.status}`)
@@ -79,7 +94,6 @@ export function GameMap({ cityId, activeJob }: GameMapProps) {
   }, [cityId, activeJob])
 
   return <div ref={container} className="absolute inset-0" aria-label="Interactive game map">
-    {activeJob && token && <div className="traffic-status">LIVE TRAFFIC · {trafficEta ? `${trafficEta} MIN` : 'ROUTING'}</div>}
-    {!token && <div className="map-fallback"><div><span>MAP PREVIEW</span><p>Add your Mapbox public token to <code>.env</code> to load the world map.</p></div></div>}
+    {activeJob && <div className="traffic-status">{token ? 'LIVE TRAFFIC' : 'ESTIMATED ROUTE'} · {trafficEta ? `${trafficEta} MIN` : `${activeJob.durationMinutes} MIN`}</div>}
   </div>
 }

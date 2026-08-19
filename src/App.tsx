@@ -9,7 +9,7 @@ import { JOB_REQUEST_INTERVAL_MS } from './services/jobEngine'
 
 export default function App() {
   const game = useGameStore()
-  const { company, refreshJobs, addRandomJob } = game
+  const { company, refreshJobs, addRandomJob, tickJobs } = game
   useEffect(() => {
     if (!company) return
     // Hydrated saves with no offers should not wait for the first interval.
@@ -18,12 +18,18 @@ export default function App() {
     const interval = window.setInterval(addRandomJob, JOB_REQUEST_INTERVAL_MS)
     return () => window.clearInterval(interval)
   }, [company, refreshJobs, addRandomJob])
+  useEffect(() => {
+    if (!company) return
+    tickJobs()
+    const interval = window.setInterval(tickJobs, 1_000)
+    return () => window.clearInterval(interval)
+  }, [company, tickJobs])
   if (!game.hasHydrated) return <div className="loading">TRAVEL EMPIRE</div>
   return <div className="game-shell">
     <GameMap cityId={game.startingCityId} vehicles={game.vehicles} jobs={game.jobs} onOpenJob={game.openJob} />
     {game.company ? <>
       <TopHud company={game.company} />
-      {game.activeSection !== 'map' && <SectionSheet section={game.activeSection} focusedJobId={game.focusedJobId} vehicles={game.vehicles} jobs={game.jobs} passengers={game.passengers} cash={game.company.cash} jobsLoading={game.jobsLoading} jobsError={game.jobsError} onClose={() => game.setSection('map')} onReset={game.resetGame} onRefreshJobs={game.refreshJobs} onAcceptJob={game.acceptJob} onCompleteJob={game.completeJob} onBuyTaxi={game.buyTaxi} />}
+      {game.activeSection !== 'map' && <SectionSheet section={game.activeSection} focusedJobId={game.focusedJobId} vehicles={game.vehicles} jobs={game.jobs} passengers={game.passengers} cash={game.company.cash} jobsLoading={game.jobsLoading} jobsError={game.jobsError} onClose={() => game.setSection('map')} onReset={game.resetGame} onRefreshJobs={game.refreshJobs} onAcceptJob={game.acceptJob} onBuyTaxi={game.buyTaxi} />}
       <BottomNav active={game.activeSection} onChange={game.setSection} />
     </> : <CitySetup onStart={game.initializeCompany} />}
   </div>

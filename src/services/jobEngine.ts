@@ -74,3 +74,29 @@ export function completeJobState(
         : candidate),
   }
 }
+
+/** Completes every journey that has reached its destination at the supplied time. */
+export function completeArrivedJobsState(
+  company: Company,
+  jobs: TaxiJob[],
+  vehicles: Vehicle[],
+  now = Date.now()
+) {
+  let nextCompany = company
+  let nextJobs = jobs
+  let nextVehicles = vehicles
+  const completedJobIds: string[] = []
+
+  for (const job of jobs) {
+    const result = completeJobState(nextCompany, nextJobs, nextVehicles, job.id, now)
+    if (!result) continue
+    nextCompany = result.company
+    nextJobs = result.jobs
+    nextVehicles = result.vehicles
+    completedJobIds.push(job.id)
+  }
+
+  return completedJobIds.length
+    ? { company: nextCompany, jobs: nextJobs, vehicles: nextVehicles, completedJobIds }
+    : null
+}

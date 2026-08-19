@@ -4,7 +4,7 @@ import { taxiModels } from '../../data/taxis'
 import type { Passenger, TaxiJob, TaxiPowertrain, Vehicle } from '../../models/game'
 import { getJobJourney, JOB_REQUEST_INTERVAL_MS } from '../../services/jobEngine'
 
-interface SectionSheetProps { section: Exclude<Section, 'map'>; focusedJobId: string | null; vehicles: Vehicle[]; jobs: TaxiJob[]; passengers: Passenger[]; cash: number; jobsLoading: boolean; jobsError: string | null; onClose: () => void; onReset: () => void; onRefreshJobs: () => void; onAcceptJob: (jobId: string) => void; onCompleteJob: (jobId: string) => void; onBuyTaxi: (powertrain: TaxiPowertrain) => void }
+interface SectionSheetProps { section: Exclude<Section, 'map'>; focusedJobId: string | null; vehicles: Vehicle[]; jobs: TaxiJob[]; passengers: Passenger[]; cash: number; jobsLoading: boolean; jobsError: string | null; onClose: () => void; onReset: () => void; onRefreshJobs: () => void; onAcceptJob: (jobId: string) => void; onBuyTaxi: (powertrain: TaxiPowertrain) => void }
 const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
 const distanceKm = (from: [number, number], to: [number, number]) => {
   const latitude = (to[1] - from[1]) * 111.32
@@ -12,7 +12,7 @@ const distanceKm = (from: [number, number], to: [number, number]) => {
   return Math.hypot(latitude, longitude)
 }
 
-export function SectionSheet({ section, focusedJobId, vehicles, jobs, passengers, cash, jobsLoading, jobsError, onClose, onReset, onRefreshJobs, onAcceptJob, onCompleteJob, onBuyTaxi }: SectionSheetProps) {
+export function SectionSheet({ section, focusedJobId, vehicles, jobs, passengers, cash, jobsLoading, jobsError, onClose, onReset, onRefreshJobs, onAcceptJob, onBuyTaxi }: SectionSheetProps) {
   const [selectedTaxi, setSelectedTaxi] = useState<TaxiPowertrain>('diesel')
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
@@ -26,10 +26,10 @@ export function SectionSheet({ section, focusedJobId, vehicles, jobs, passengers
     return <section className="section-sheet jobs-sheet game-panel">
       <div className="sheet-handle" /><button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
       <small>JOBS</small><h2>{activeJobs.length ? `${activeJobs.length} trip${activeJobs.length === 1 ? '' : 's'} in progress` : 'Taxi requests'}</h2>
-      {activeJobs.map((activeJob) => { const vehicle = vehicles.find((candidate) => candidate.id === activeJob.assignedVehicleId); const journey = vehicle ? getJobJourney(activeJob, vehicle) : null; const arrived = Boolean(journey && now >= journey.arrivesAt); const pickingUp = Boolean(journey && now < journey.pickupAt); return <article className="active-job" key={activeJob.id}>
+      {activeJobs.map((activeJob) => { const vehicle = vehicles.find((candidate) => candidate.id === activeJob.assignedVehicleId); const journey = vehicle ? getJobJourney(activeJob, vehicle) : null; const pickingUp = Boolean(journey && now < journey.pickupAt); const secondsRemaining = journey ? Math.max(0, Math.ceil((journey.arrivesAt - now) / 1_000)) : 0; return <article className="active-job" key={activeJob.id}>
         <div className="job-route"><span>●</span><div><strong>{activeJob.pickupLabel}</strong><i /><strong>{activeJob.destinationLabel}</strong></div></div>
         <div className="job-meta"><span>{vehicles.find((vehicle) => vehicle.id === activeJob.assignedVehicleId)?.name ?? 'Taxi'}</span><span>{activeJob.distanceKm} km</span><span>~{activeJob.durationMinutes} min</span><b>{money.format(activeJob.fare)}</b></div>
-        <button className="primary-action" disabled={!arrived} onClick={() => onCompleteJob(activeJob.id)}>{arrived ? 'Complete trip' : pickingUp ? 'Driving to pickup…' : 'Passenger on board…'}</button>
+        <button className="primary-action" disabled>{pickingUp ? 'Driving to pickup' : 'Passenger on board'} · {secondsRemaining}s</button>
       </article> })}
       <>
         <p>Every request is invented by AI for your city. A new one arrives every {JOB_REQUEST_INTERVAL_MS / 1000} seconds.</p>

@@ -3,97 +3,78 @@ import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { featureCollection, point } from '@turf/helpers'
 import { getCity, irelandOverview } from '../data/cities'
-import type { TaxiJob } from '../models/game'
+import type { Coordinates, TaxiJob, Vehicle } from '../models/game'
 
-interface GameMapProps { cityId: string | null; activeJob?: TaxiJob }
+interface GameMapProps { cityId: string | null; vehicles: Vehicle[]; jobs: TaxiJob[] }
 const configuredToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined
 const token = configuredToken && !configuredToken.includes('your_public_mapbox_token') ? configuredToken : undefined
-const fallbackStyle: mapboxgl.StyleSpecification = {
-  version: 8,
-  sources: {
-    openStreetMap: {
-      type: 'raster',
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-      tileSize: 256,
-      attribution: '© OpenStreetMap contributors',
-    },
-  },
-  layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }],
+const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
+
+const routePosition = (coordinates: number[][], progress: number): Coordinates => {
+  const lengths = coordinates.slice(1).map((coordinate, index) => Math.hypot(coordinate[0] - coordinates[index][0], coordinate[1] - coordinates[index][1]))
+  let target = progress * lengths.reduce((sum, length) => sum + length, 0)
+  let segment = 0
+  while (segment < lengths.length - 1 && target > lengths[segment]) target -= lengths[segment++]
+  const start = coordinates[segment]
+  const end = coordinates[segment + 1] ?? start
+  const amount = lengths[segment] ? target / lengths[segment] : 1
+  return [start[0] + (end[0] - start[0]) * amount, start[1] + (end[1] - start[1]) * amount]
 }
 
-export function GameMap({ cityId, activeJob }: GameMapProps) {
+export function GameMap({ cityId, vehicles, jobs }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
-  const map = useRef<mapboxgl.Map | null>(null)
-  const [trafficEta, setTrafficEta] = useState<number | null>(null)
+  const [routeCount, setRouteCount] = useState(0)
 
   useEffect(() => {
     if (!container.current) return
     if (token) mapboxgl.accessToken = token
     const selected = getCity(cityId)
     const abortController = new AbortController()
-    let animationFrame = 0
-    const instance = new mapboxgl.Map({
-      container: container.current,
-      style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle,
-      center: selected?.coordinates ?? irelandOverview.center, zoom: selected?.mapZoom ?? irelandOverview.zoom,
-      attributionControl: false, pitchWithRotate: false,
-    })
-    map.current = instance
+    const animationFrames: number[] = []
+    const instance = new mapboxgl.Map({ container: container.current, style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle, center: selected?.coordinates ?? irelandOverview.center, zoom: selected?.mapZoom ?? irelandOverview.zoom, attributionControl: false, pitchWithRotate: false })
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
     instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right')
     instance.on('load', async () => {
       instance.addSource('company-base', { type: 'geojson', data: featureCollection(selected ? [point(selected.coordinates)] : []) })
       instance.addLayer({ id: 'base-halo', type: 'circle', source: 'company-base', paint: { 'circle-radius': 22, 'circle-color': '#22d3a7', 'circle-opacity': 0.22, 'circle-stroke-width': 1, 'circle-stroke-color': '#5eead4' } })
       instance.addLayer({ id: 'base', type: 'circle', source: 'company-base', paint: { 'circle-radius': 9, 'circle-color': '#0f766e', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } })
-      if (activeJob) {
-        let coordinates: number[][] = [activeJob.pickup, activeJob.destination]
-        let durationSeconds = activeJob.durationMinutes * 60
-        try {
-          if (!token) throw new Error('Mapbox directions are unavailable without an access token')
-          const points = [activeJob.pickup, activeJob.destination].map((coordinate) => coordinate.join(',')).join(';')
-          const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${points}?alternatives=false&geometries=geojson&overview=full&steps=true&access_token=${token}`, { signal: abortController.signal })
-          if (!response.ok) throw new Error(`Directions request failed: ${response.status}`)
-          const result = await response.json() as { routes?: Array<{ duration: number; geometry: { coordinates: number[][] } }> }
-          const route = result.routes?.[0]
-          if (!route) throw new Error('No drivable route found')
-          coordinates = route.geometry.coordinates
-          durationSeconds = route.duration
-          setTrafficEta(Math.max(1, Math.round(durationSeconds / 60)))
-        } catch (error) {
-          if ((error as Error).name === 'AbortError') return
-          setTrafficEta(null)
-        }
-        if (!instance.getStyle()) return
-        instance.addSource('active-route', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } } })
-        instance.addLayer({ id: 'active-route', type: 'line', source: 'active-route', paint: { 'line-color': '#22d3a7', 'line-width': 5, 'line-opacity': 0.85, 'line-dasharray': [1.5, 1] } })
-        instance.addSource('taxi-position', { type: 'geojson', data: point(coordinates[0]) })
-        instance.addLayer({ id: 'taxi-position', type: 'circle', source: 'taxi-position', paint: { 'circle-radius': 8, 'circle-color': '#fbbf24', 'circle-stroke-width': 3, 'circle-stroke-color': '#fff' } })
-        const firstCoordinate = coordinates[0] as [number, number]
-        const bounds = coordinates.reduce((routeBounds, coordinate) => routeBounds.extend(coordinate as [number, number]), new mapboxgl.LngLatBounds(firstCoordinate, firstCoordinate))
-        instance.fitBounds(bounds, { padding: 90, maxZoom: 14 })
 
-        const segmentLengths = coordinates.slice(1).map((coordinate, index) => Math.hypot(coordinate[0] - coordinates[index][0], coordinate[1] - coordinates[index][1]))
-        const totalLength = segmentLengths.reduce((sum, length) => sum + length, 0)
-        const startedAt = performance.now()
-        const animateTaxi = (now: number) => {
-          let target = Math.min(1, (now - startedAt) / (durationSeconds * 1000)) * totalLength
-          let segment = 0
-          while (segment < segmentLengths.length - 1 && target > segmentLengths[segment]) target -= segmentLengths[segment++]
-          const start = coordinates[segment]
-          const end = coordinates[segment + 1] ?? start
-          const progress = segmentLengths[segment] ? target / segmentLengths[segment] : 1
-          const position: [number, number] = [start[0] + (end[0] - start[0]) * progress, start[1] + (end[1] - start[1]) * progress]
-          const source = instance.getSource('taxi-position') as mapboxgl.GeoJSONSource | undefined
-          source?.setData(point(position))
-          if (now - startedAt < durationSeconds * 1000) animationFrame = requestAnimationFrame(animateTaxi)
+      for (const [index, vehicle] of vehicles.entries()) {
+        const job = jobs.find((candidate) => candidate.status === 'accepted' && (candidate.assignedVehicleId === vehicle.id || (!candidate.assignedVehicleId && vehicle.status === 'on-job')))
+        const start = vehicle.position ?? selected?.coordinates
+        if (!start) continue
+        let coordinates: number[][] = job ? [start, job.pickup, job.destination] : [start]
+        let durationSeconds = job ? Math.max(30, job.durationMinutes * 60) : 0
+        if (job && token) {
+          try {
+            const waypoints = [start, job.pickup, job.destination].map((coordinate) => coordinate.join(',')).join(';')
+            const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${waypoints}?alternatives=false&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
+            if (!response.ok) throw new Error(`Directions request failed: ${response.status}`)
+            const result = await response.json() as { routes?: Array<{ duration: number; geometry: { coordinates: number[][] } }> }
+            if (result.routes?.[0]) { coordinates = result.routes[0].geometry.coordinates; durationSeconds = result.routes[0].duration }
+          } catch (error) { if ((error as Error).name === 'AbortError') return }
         }
-        animationFrame = requestAnimationFrame(animateTaxi)
+        const sourceId = `taxi-${index}`
+        instance.addSource(sourceId, { type: 'geojson', data: point(start, { name: vehicle.name }) })
+        instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 9, 'circle-color': job ? '#fbbf24' : '#22d3a7', 'circle-stroke-width': 3, 'circle-stroke-color': '#fff' } })
+        if (!job) continue
+        const routeId = `route-${index}`
+        instance.addSource(routeId, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } } })
+        instance.addLayer({ id: routeId, type: 'line', source: routeId, paint: { 'line-color': '#22d3a7', 'line-width': 5, 'line-opacity': 0.8, 'line-dasharray': [1.5, 1] } }, sourceId)
+        const startedAt = performance.now()
+        const animate = (now: number) => {
+          const progress = Math.min(1, (now - startedAt) / (durationSeconds * 1000))
+          ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(coordinates, progress), { name: vehicle.name }))
+          if (progress < 1) animationFrames.push(requestAnimationFrame(animate))
+        }
+        animationFrames.push(requestAnimationFrame(animate))
       }
+      setRouteCount(jobs.filter((job) => job.status === 'accepted').length)
     })
-    return () => { abortController.abort(); cancelAnimationFrame(animationFrame); instance.remove(); map.current = null }
-  }, [cityId, activeJob])
+    return () => { abortController.abort(); animationFrames.forEach(cancelAnimationFrame); instance.remove() }
+  }, [cityId, vehicles, jobs])
 
   return <div ref={container} className="absolute inset-0" aria-label="Interactive game map">
-    {activeJob && <div className="traffic-status">{token ? 'LIVE TRAFFIC' : 'ESTIMATED ROUTE'} · {trafficEta ? `${trafficEta} MIN` : `${activeJob.durationMinutes} MIN`}</div>}
+    {routeCount > 0 && <div className="traffic-status">{token ? 'LIVE TRAFFIC' : 'ESTIMATED ROUTES'} · {routeCount} TAXI{routeCount === 1 ? '' : 'S'} DRIVING</div>}
   </div>
 }

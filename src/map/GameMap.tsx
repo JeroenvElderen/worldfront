@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { featureCollection, point } from '@turf/helpers'
@@ -21,7 +21,7 @@ const routePosition = (coordinates: number[][], progress: number): Coordinates =
   return [start[0] + (end[0] - start[0]) * amount, start[1] + (end[1] - start[1]) * amount]
 }
 
-export function GameMap({ cityId, vehicles, jobs }: GameMapProps) {
+function GameMapView({ cityId, vehicles, jobs }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const [routeCount, setRouteCount] = useState(0)
 
@@ -78,3 +78,17 @@ export function GameMap({ cityId, vehicles, jobs }: GameMapProps) {
     {routeCount > 0 && <div className="traffic-status">{token ? 'LIVE TRAFFIC' : 'ESTIMATED ROUTES'} · {routeCount} TAXI{routeCount === 1 ? '' : 'S'} DRIVING</div>}
   </div>
 }
+
+const activeJobsMatch = (previous: TaxiJob[], next: TaxiJob[]) => {
+  const previousActive = previous.filter((job) => job.status === 'accepted')
+  const nextActive = next.filter((job) => job.status === 'accepted')
+  return previousActive.length === nextActive.length && previousActive.every((job, index) => job === nextActive[index])
+}
+
+// Incoming offers update in the background. They do not affect the map, so keep
+// its Mapbox instance mounted instead of visibly reloading it for every offer.
+export const GameMap = memo(GameMapView, (previous, next) =>
+  previous.cityId === next.cityId &&
+  previous.vehicles === next.vehicles &&
+  activeJobsMatch(previous.jobs, next.jobs)
+)

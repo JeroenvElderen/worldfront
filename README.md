@@ -29,7 +29,7 @@ Vite prints the local URL (normally `http://localhost:5173`). Without a Mapbox t
 
 You do **not** need an API key, subscription, paid AI service, or separate endpoint for private local use. The Vite development server provides `/api/jobs` and talks to [Ollama](https://ollama.com) on your computer. The default `llama3.2` model runs locally, so job prompts and results are not sent to a hosted AI provider.
 
-The built-in endpoint exists while running `pnpm dev`, which is the recommended setup for private play. You can change `OLLAMA_MODEL` or `OLLAMA_BASE_URL` in `.env`. A standalone deployed web or Android build cannot reach the development server; that use case still needs an accessible backend set through `VITE_AI_JOBS_ENDPOINT`.
+The built-in endpoint exists while running `pnpm dev`, which is the recommended setup for private play. It first loads named points of interest within 15 km of the city from OpenStreetMap's Overpass API, then requires Ollama to select from those IDs. Labels and coordinates are copied from the map data rather than invented by the model, so shops, stations, landmarks, and other venues appear at their real mapped positions. Results are cached for six hours. You can change `OLLAMA_MODEL`, `OLLAMA_BASE_URL`, or `OVERPASS_API_URL` in `.env`. A standalone deployed web or Android build cannot reach the development server; that use case still needs an accessible backend set through `VITE_AI_JOBS_ENDPOINT`; custom backends should apply equivalent location grounding.
 
 The app sends a `POST` request like this:
 
@@ -38,7 +38,7 @@ The app sends a `POST` request like this:
   "city": { "name": "Dublin", "countryCode": "IE", "center": [-6.2603, 53.3498] },
   "count": 4,
   "excludeRoutes": ["central station→riverside hotel"],
-  "instructions": "Invent realistic, varied taxi requests..."
+  "instructions": "Create varied taxi requests between real, currently mapped places..."
 }
 ```
 
@@ -57,7 +57,7 @@ The endpoint must return JSON in this shape (coordinates are `[longitude, latitu
 }
 ```
 
-The built-in handler asks Ollama for JSON matching that schema. The client validates every result, calculates gameplay values itself, rejects duplicate routes, and retains the last 100 route signatures in the autosave so future prompts can avoid them.
+The built-in handler gives Ollama a catalog of real OpenStreetMap place IDs, validates the selected IDs, and replaces them with the authoritative mapped labels and coordinates before responding in the public shape above. The client validates every result, calculates gameplay values itself, rejects duplicate routes, and retains the last 100 route signatures in the autosave so future prompts can avoid them.
 
 ## Android
 

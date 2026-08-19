@@ -5,10 +5,10 @@ import { getTaxiModel } from '../data/taxis'
 import type { Company, GameSave, TaxiPowertrain, Vehicle } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
 import { generateJobOffers } from '../services/aiJobService'
-import { acceptJobState, completeJobState, MAX_JOB_OFFERS } from '../services/jobEngine'
+import { acceptJobState, completeArrivedJobsState, completeJobState, MAX_JOB_OFFERS } from '../services/jobEngine'
 
 type Section = 'map' | 'jobs' | 'fleet' | 'travel' | 'company'
-interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; completeJob: (jobId: string) => void; buyTaxi: (powertrain: TaxiPowertrain) => void; resetGame: () => void }
+interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (powertrain: TaxiPowertrain) => void; resetGame: () => void }
 interface GameState extends GameSave { activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
 
 const blankSave: GameSave = { id: 'autosave', version: 2, updatedAt: new Date(0).toISOString(), company: null, startingCityId: null, vehicles: [], drivers: [], jobs: [], agencies: [], tours: [], passengers: [], jobRequestHistory: [] }
@@ -60,6 +60,11 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     if (!state.company) return state
     const result = completeJobState(state.company, state.jobs, state.vehicles, jobId)
     return result ? { ...result, updatedAt: new Date().toISOString() } : state
+  }),
+  tickJobs: () => set((state) => {
+    if (!state.company || !state.jobs.some((job) => job.status === 'accepted')) return state
+    const result = completeArrivedJobsState(state.company, state.jobs, state.vehicles)
+    return result ? { company: result.company, jobs: result.jobs, vehicles: result.vehicles, focusedJobId: null, updatedAt: new Date().toISOString() } : state
   }),
   buyTaxi: (powertrain) => set((state) => {
     const model = getTaxiModel(powertrain)

@@ -49,7 +49,7 @@ export async function generateJobOffers(
       city: { name: city.name, countryCode: city.countryCode, center: city.coordinates },
       count,
       excludeRoutes: excludedRoutes,
-      instructions: 'Invent realistic, varied taxi requests in this city. Use real or plausible local place names and valid nearby longitude/latitude coordinates. Never repeat an excluded route.',
+      instructions: 'Create varied taxi requests between real, currently mapped places in this city. Use each place’s actual longitude/latitude position; never invent a place or estimate its coordinates. Never repeat an excluded route.',
     }),
     signal,
   })

@@ -321,6 +321,7 @@ export default function App() {
           <BottomNav
             active={game.activeSection}
             onChange={game.setSection}
+            availableJobCount={offeredJobCount}
           />
         </>
       ) : (

@@ -293,6 +293,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         instance.off('mouseenter', sourceId, handlers.enter)
         instance.off('mouseleave', sourceId, handlers.leave)
         instance.off('click', sourceId, handlers.click)
+        instance.off('click', `${sourceId}-label`, handlers.click)
       }
       for (const layerId of [`${sourceId}-label`, `destination-${jobId}-label`, `destination-${jobId}`]) if (instance.getLayer(layerId)) instance.removeLayer(layerId)
       if (instance.getLayer(sourceId)) instance.removeLayer(sourceId)
@@ -313,12 +314,16 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       if (pickupJobIds.current.has(job.id)) {
         // Job updates do not rebuild the map, so update the marker in place.
         if (instance.getLayer(sourceId)) instance.setLayoutProperty(sourceId, 'icon-image', markerImage)
+        if (instance.getLayer(`${sourceId}-label`)) {
+          instance.setLayoutProperty(`${sourceId}-label`, 'text-field', job.status === 'offered' ? `AVAILABLE · €${Math.round(job.fare)}` : 'PICKUP')
+          instance.setPaintProperty(`${sourceId}-label`, 'text-color', job.status === 'offered' ? '#fef08a' : '#fff')
+        }
         if (instance.getLayer(`destination-${job.id}`)) instance.setLayoutProperty(`destination-${job.id}`, 'icon-image', destinationMarkerImage)
         continue
       }
       instance.addSource(sourceId, { type: 'geojson', data: point(job.pickup, { title: job.pickupLabel }) })
       instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': markerImage, 'icon-size': 1, 'icon-allow-overlap': true } })
-      instance.addLayer({ id: `${sourceId}-label`, type: 'symbol', source: sourceId, layout: { 'text-field': 'PICKUP', 'text-size': 10, 'text-offset': [0, 1.8], 'text-anchor': 'top' }, paint: { 'text-color': '#fff', 'text-halo-color': '#15252f', 'text-halo-width': 2 } })
+      instance.addLayer({ id: `${sourceId}-label`, type: 'symbol', source: sourceId, layout: { 'text-field': job.status === 'offered' ? `AVAILABLE · €${Math.round(job.fare)}` : 'PICKUP', 'text-size': 11, 'text-offset': [0, 1.8], 'text-anchor': 'top', 'text-allow-overlap': true }, paint: { 'text-color': job.status === 'offered' ? '#fef08a' : '#fff', 'text-halo-color': '#15252f', 'text-halo-width': 2 } })
       const destinationId = `destination-${job.id}`
       instance.addSource(destinationId, { type: 'geojson', data: point(job.destination, { title: job.destinationLabel }) })
       instance.addLayer({ id: destinationId, type: 'symbol', source: destinationId, layout: { 'icon-image': destinationMarkerImage, 'icon-size': 0.8, 'icon-allow-overlap': true } })
@@ -331,6 +336,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       instance.on('mouseenter', sourceId, handlers.enter)
       instance.on('mouseleave', sourceId, handlers.leave)
       instance.on('click', sourceId, handlers.click)
+      instance.on('click', `${sourceId}-label`, handlers.click)
       pickupHandlers.current.set(job.id, handlers)
       pickupJobIds.current.add(job.id)
     }

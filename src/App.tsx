@@ -25,6 +25,24 @@ export default function App() {
     const interval = window.setInterval(tickJobs, 1_000)
     return () => window.clearInterval(interval)
   }, [company, tickJobs])
+  useEffect(() => {
+    if (!company) return
+    const resumeGame = () => {
+      if (document.visibilityState === 'hidden') return
+      // Mobile WebViews suspend timers in the background. Settle overdue trips first
+      // so their taxis are available before immediately requesting a new offer.
+      tickJobs()
+      void addRandomJob()
+    }
+    document.addEventListener('visibilitychange', resumeGame)
+    window.addEventListener('pageshow', resumeGame)
+    window.addEventListener('focus', resumeGame)
+    return () => {
+      document.removeEventListener('visibilitychange', resumeGame)
+      window.removeEventListener('pageshow', resumeGame)
+      window.removeEventListener('focus', resumeGame)
+    }
+  }, [company, tickJobs, addRandomJob])
   if (!game.hasHydrated) return <div className="loading">TRAVEL EMPIRE</div>
   return <div className="game-shell">
     <GameMap cityId={game.startingCityId} vehicles={game.vehicles} jobs={game.jobs} onOpenJob={game.openJob} />

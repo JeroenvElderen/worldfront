@@ -63,7 +63,7 @@ export default function App() {
   }, [company, tickJobs])
   if (!game.hasHydrated) return <div className="loading">TRAVEL EMPIRE</div>
   return <div className="game-shell">
-    <GameMap cityId={game.startingCityId} vehicles={game.vehicles} jobs={game.jobs} onOpenJob={game.openJob} />
+    <GameMap cityId={game.startingCityId} vehicles={game.vehicles} jobs={game.jobs} focusedJobId={game.focusedJobId} onOpenJob={game.openJob} />
     {game.company ? <>
       <TopHud company={game.company} />
       {game.activeSection === 'jobs' && <TaxiCallPopup focusedJobId={game.focusedJobId} vehicles={game.vehicles} jobs={game.jobs} passengers={game.passengers} onAccept={game.acceptJob} onDecline={game.declineJob} onClose={() => game.setSection('map')} />}

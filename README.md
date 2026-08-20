@@ -30,9 +30,10 @@ than from a repeating 30-second timer. Tile-expiry refreshes and label fades are
 also disabled, and the tile cache is capped, which avoids recurring network,
 CPU, GPU, and memory work without changing game outcomes.
 
-Vehicles are rendered as small map dots and journey route lines are omitted.
-This keeps the map uncluttered and avoids the extra route request and line-layer
-updates that were previously used only for decoration.
+Vehicles are rendered as small, color-coded map dots: green taxis are available,
+orange taxis are driving to a pickup, and red taxis have their client aboard.
+Active journeys follow a thin route line, and selecting a job highlights the
+road route the nearest available driver will take to its pickup and destination.
 
 ## Android
 

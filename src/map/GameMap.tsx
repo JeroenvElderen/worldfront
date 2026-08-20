@@ -104,15 +104,21 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
   const viewport = useRef<{ center: Coordinates; zoom: number } | null>(null)
   const pickupJobIds = useRef(new Set<string>())
   const pickupHandlers = useRef(new Map<string, { enter: () => void; leave: () => void; click: (event: mapboxgl.MapMouseEvent) => void }>())
+  const knownJourneyAssignments = useRef(new Set<string>())
   const [mapRevision, setMapRevision] = useState(0)
-  const acceptedJobsKey = jobs.filter((job) => job.status === 'accepted').map((job) => `${job.id}:${job.acceptedAt ?? ''}`).join('|')
+  // Only rebuild the expensive WebGL map when the fleet's appearance or a new
+  // journey changes. Finishing a job is handled in-place below, avoiding the
+  // visible map flash that used to happen at every arrival.
+  const fleetConfigurationKey = vehicles.map((vehicle) => `${vehicle.id}:${vehicle.modelId}:${(vehicle.exteriorAccessories ?? []).join(',')}`).join('|')
+  for (const job of jobs) if (job.acceptedAt) knownJourneyAssignments.current.add(`${job.id}:${job.acceptedAt}`)
+  const journeyAssignmentsKey = [...knownJourneyAssignments.current].join('|')
 
   useEffect(() => {
     if (!container.current) return
     if (token) mapboxgl.accessToken = token
     const selected = getCity(cityId)
     const abortController = new AbortController()
-    const animationFrames: number[] = []
+    const animationFrames = new Set<number>()
     const instance = new mapboxgl.Map({ container: container.current, style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle, center: viewport.current?.center ?? selected?.coordinates ?? irelandOverview.center, zoom: viewport.current?.zoom ?? selected?.mapZoom ?? irelandOverview.zoom, attributionControl: false, pitchWithRotate: false })
     map.current = instance
     pickupJobIds.current.clear()
@@ -159,7 +165,19 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
         instance.addLayer({ id: pickupRouteId, type: 'line', source: pickupRouteId, paint: { 'line-color': color, 'line-width': 6, 'line-opacity': 0.9, 'line-dasharray': [1.5, 1] } }, sourceId)
         instance.addLayer({ id: passengerRouteId, type: 'line', source: passengerRouteId, paint: { 'line-color': color, 'line-width': 6, 'line-opacity': 0.25 } }, sourceId)
         const journey = getJobJourney(job, vehicle)
-        const animate = () => {
+        let lastAnimationUpdate = 0
+        let animationFrame = 0
+        const scheduleAnimation = () => {
+          animationFrame = requestAnimationFrame(animate)
+          animationFrames.add(animationFrame)
+        }
+        const animate = (frameTime: number) => {
+          animationFrames.delete(animationFrame)
+          if (frameTime - lastAnimationUpdate < 1000 / 30) {
+            scheduleAnimation()
+            return
+          }
+          lastAnimationUpdate = frameTime
           const time = Date.now()
           const pickingUp = time < journey.pickupAt
           const elapsed = pickingUp
@@ -180,16 +198,16 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
           instance.setLayoutProperty(`pickup-${job.id}-label`, 'visibility', pickingUp ? 'visible' : 'none')
           instance.setPaintProperty(pickupRouteId, 'line-opacity', pickingUp ? 0.9 : 0.15)
           instance.setPaintProperty(passengerRouteId, 'line-opacity', pickingUp ? 0.25 : 0.9)
-          if (time < journey.arrivesAt) animationFrames.push(requestAnimationFrame(animate))
+          if (time < journey.arrivesAt) scheduleAnimation()
         }
-        animationFrames.push(requestAnimationFrame(animate))
+        scheduleAnimation()
       }
       setMapRevision((revision) => revision + 1)
     })
     return () => { const center = instance.getCenter(); viewport.current = { center: [center.lng, center.lat], zoom: instance.getZoom() }; abortController.abort(); animationFrames.forEach(cancelAnimationFrame); map.current = null; instance.remove() }
     // Offered jobs are synchronized separately so background arrivals do not recreate the map.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cityId, vehicles, acceptedJobsKey])
+  }, [cityId, fleetConfigurationKey, journeyAssignmentsKey])
 
   useEffect(() => {
     const instance = map.current
@@ -245,7 +263,20 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
       pickupHandlers.current.set(job.id, handlers)
       pickupJobIds.current.add(job.id)
     }
-  }, [jobs, mapRevision, onOpenJob])
+
+    // The animation already leaves the marker at its destination. Remove the
+    // completed route and update its source without destroying/recreating the map.
+    for (const job of jobs.filter((candidate) => candidate.status === 'complete')) {
+      const vehicleIndex = vehicles.findIndex((vehicle) => vehicle.id === job.assignedVehicleId)
+      if (vehicleIndex < 0) continue
+      const taxiSource = instance.getSource(`taxi-${vehicleIndex}`) as mapboxgl.GeoJSONSource | undefined
+      taxiSource?.setData(point(job.destination, { statusLabel: '0 km/h' }))
+      for (const routeId of [`pickup-route-${vehicleIndex}`, `passenger-route-${vehicleIndex}`]) {
+        if (instance.getLayer(routeId)) instance.removeLayer(routeId)
+        if (instance.getSource(routeId)) instance.removeSource(routeId)
+      }
+    }
+  }, [jobs, vehicles, mapRevision, onOpenJob])
 
   return <div ref={container} className="absolute inset-0" aria-label="Interactive game map" />
 }

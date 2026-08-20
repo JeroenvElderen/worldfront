@@ -10,7 +10,7 @@ import { acceptJobState, completeArrivedJobsState, completeJobState, jobOfferExp
 import { createDynamicEvent, energyUseForJob, fatigueUseForJob, FINANCE_PERIOD_MS, startRecoveryTrip } from '../services/operationsEngine'
 
 type Section = 'map' | 'jobs' | 'fleet' | 'travel' | 'company'
-interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; resetGame: () => void }
+interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; resetGame: () => void }
 interface GameState extends GameSave { activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
 
 const blankSave: GameSave = { id: 'autosave', version: 3, updatedAt: new Date(0).toISOString(), company: null, startingCityId: null, vehicles: [], drivers: [], jobs: [], agencies: [], tours: [], passengers: [], jobRequestHistory: [], loans: [], activeEvent: null, nextEventAt: new Date(0).toISOString(), nextOperatingPaymentAt: new Date(0).toISOString() }
@@ -20,6 +20,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   setHasHydrated: (hasHydrated) => set({ hasHydrated }),
   setSection: (activeSection) => set({ activeSection }),
   openJob: (focusedJobId) => set({ focusedJobId, activeSection: 'jobs' }),
+  showJobOnMap: (focusedJobId) => set({ focusedJobId, activeSection: 'map' }),
   initializeCompany: (cityId) => {
     if (!getCity(cityId)) return
     const now = new Date().toISOString()

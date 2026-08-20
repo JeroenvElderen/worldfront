@@ -22,16 +22,26 @@ const routePosition = (coordinates: number[][], progress: number): Coordinates =
   return [start[0] + (end[0] - start[0]) * amount, start[1] + (end[1] - start[1]) * amount]
 }
 
-const mapIcon = (kind: 'pickup' | 'destination') => {
+const remainingRoute = (coordinates: number[][], progress: number) => {
+  if (coordinates.length < 2) return coordinates
+  const lengths = coordinates.slice(1).map((coordinate, index) => Math.hypot(coordinate[0] - coordinates[index][0], coordinate[1] - coordinates[index][1]))
+  let target = Math.max(0, Math.min(1, progress)) * lengths.reduce((sum, length) => sum + length, 0)
+  let segment = 0
+  while (segment < lengths.length - 1 && target > lengths[segment]) target -= lengths[segment++]
+  const currentPosition = routePosition(coordinates, progress)
+  return [currentPosition, ...coordinates.slice(segment + 1)]
+}
+
+const mapIcon = (kind: 'new-job' | 'active-job' | 'new-destination' | 'active-destination') => {
   const canvas = document.createElement('canvas')
   canvas.width = 64
   canvas.height = 64
   const context = canvas.getContext('2d')!
-  context.fillStyle = kind === 'pickup' ? '#f59e0b' : '#ef4444'
+  context.fillStyle = kind.startsWith('active-') ? '#f59e0b' : '#ef4444'
   context.beginPath(); context.arc(32, 32, 29, 0, Math.PI * 2); context.fill()
   context.strokeStyle = '#fff'; context.lineWidth = 4; context.stroke()
   context.fillStyle = '#fff'
-  if (kind === 'pickup') {
+  if (kind.endsWith('-job')) {
     context.font = '900 43px sans-serif'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText('!', 32, 34)
   } else {
     context.beginPath(); context.arc(32, 32, 15, 0, Math.PI * 2); context.fill()
@@ -117,8 +127,10 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
     instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right')
     instance.on('load', async () => {
-      instance.addImage('pickup-marker', mapIcon('pickup'), { pixelRatio: 2 })
-      instance.addImage('destination-marker', mapIcon('destination'), { pixelRatio: 2 })
+      instance.addImage('new-job-marker', mapIcon('new-job'), { pixelRatio: 2 })
+      instance.addImage('active-job-marker', mapIcon('active-job'), { pixelRatio: 2 })
+      instance.addImage('new-destination-marker', mapIcon('new-destination'), { pixelRatio: 2 })
+      instance.addImage('active-destination-marker', mapIcon('active-destination'), { pixelRatio: 2 })
       instance.addSource('company-base', { type: 'geojson', data: featureCollection(selected ? [point(selected.coordinates)] : []) })
       instance.addLayer({ id: 'base-halo', type: 'circle', source: 'company-base', paint: { 'circle-radius': 22, 'circle-color': '#22d3a7', 'circle-opacity': 0.22, 'circle-stroke-width': 1, 'circle-stroke-color': '#5eead4' } })
       instance.addLayer({ id: 'base', type: 'circle', source: 'company-base', paint: { 'circle-radius': 9, 'circle-color': '#0f766e', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } })
@@ -187,7 +199,12 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
           const fallbackSpeedKmh = job.durationMinutes > 0 ? job.distanceKm / (job.durationMinutes / 60) : 30
           const motion = routeMotion(activeRoute, elapsed, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
           const progress = motion.progress
-          ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(activeRoute.coordinates, progress)))
+          const currentPosition = routePosition(activeRoute.coordinates, progress)
+          ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(currentPosition))
+          const remainingCoordinates = pickingUp
+            ? [...remainingRoute(pickupRoute.coordinates, progress), ...passengerRoute.coordinates.slice(1)]
+            : remainingRoute(passengerRoute.coordinates, progress)
+          ;(instance.getSource(`${sourceId}-route`) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(remainingCoordinates))
           instance.setPaintProperty(sourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
           if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
           if (instance.getLayer(`pickup-${job.id}-label`)) instance.setLayoutProperty(`pickup-${job.id}-label`, 'visibility', pickingUp ? 'visible' : 'none')
@@ -249,14 +266,25 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     }
 
     for (const job of visibleJobs) {
-      if (pickupJobIds.current.has(job.id)) continue
       const sourceId = `pickup-${job.id}`
+      const markerImage = job.status === 'accepted' && job.assignedVehicleId
+        ? 'active-job-marker'
+        : 'new-job-marker'
+      const destinationMarkerImage = job.status === 'accepted' && job.assignedVehicleId
+        ? 'active-destination-marker'
+        : 'new-destination-marker'
+      if (pickupJobIds.current.has(job.id)) {
+        // Job updates do not rebuild the map, so update the marker in place.
+        if (instance.getLayer(sourceId)) instance.setLayoutProperty(sourceId, 'icon-image', markerImage)
+        if (instance.getLayer(`destination-${job.id}`)) instance.setLayoutProperty(`destination-${job.id}`, 'icon-image', destinationMarkerImage)
+        continue
+      }
       instance.addSource(sourceId, { type: 'geojson', data: point(job.pickup, { title: job.pickupLabel }) })
-      instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': 'pickup-marker', 'icon-size': 1, 'icon-allow-overlap': true } })
+      instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': markerImage, 'icon-size': 1, 'icon-allow-overlap': true } })
       instance.addLayer({ id: `${sourceId}-label`, type: 'symbol', source: sourceId, layout: { 'text-field': 'PICKUP', 'text-size': 10, 'text-offset': [0, 1.8], 'text-anchor': 'top' }, paint: { 'text-color': '#fff', 'text-halo-color': '#15252f', 'text-halo-width': 2 } })
       const destinationId = `destination-${job.id}`
       instance.addSource(destinationId, { type: 'geojson', data: point(job.destination, { title: job.destinationLabel }) })
-      instance.addLayer({ id: destinationId, type: 'symbol', source: destinationId, layout: { 'icon-image': 'destination-marker', 'icon-size': 0.8, 'icon-allow-overlap': true } })
+      instance.addLayer({ id: destinationId, type: 'symbol', source: destinationId, layout: { 'icon-image': destinationMarkerImage, 'icon-size': 0.8, 'icon-allow-overlap': true } })
       instance.addLayer({ id: `${destinationId}-label`, type: 'symbol', source: destinationId, layout: { 'text-field': 'DESTINATION', 'text-size': 10, 'text-offset': [0, 1.6], 'text-anchor': 'top' }, paint: { 'text-color': '#fff', 'text-halo-color': '#15252f', 'text-halo-width': 2 } })
       const handlers = {
         enter: () => { instance.getCanvas().style.cursor = 'pointer' },
@@ -316,7 +344,12 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         const to = pickingUp ? journey.pickupAt : journey.arrivesAt
         const route = pickingUp ? pickupRoute : passengerRoute
         const progress = Math.max(0, Math.min(1, (now - from) / (to - from)))
-        ;(instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(point(routePosition(route, progress)))
+        const currentPosition = routePosition(route, progress)
+        ;(instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(point(currentPosition))
+        const remainingCoordinates = pickingUp
+          ? [...remainingRoute(pickupRoute, progress), ...passengerRoute.slice(1)]
+          : remainingRoute(passengerRoute, progress)
+        ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(remainingCoordinates))
         instance.setPaintProperty(taxiSourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
         if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
         if (instance.getLayer(`pickup-${job.id}-label`)) instance.setLayoutProperty(`pickup-${job.id}-label`, 'visibility', pickingUp ? 'visible' : 'none')
@@ -383,6 +416,10 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     const job = jobs.find((candidate) => candidate.id === focusedJobId)
     if (!job) return
 
+    // Accepted jobs already have a live route that is trimmed behind the taxi.
+    // Do not overlay it with the complete preview route again.
+    if (job.status === 'accepted') return
+
     const assignedVehicle = vehicles.find((vehicle) => vehicle.id === job.assignedVehicleId)
     const availableVehicle = vehicles
       .filter((vehicle) => vehicle.status === 'available' && vehicle.position)
@@ -420,6 +457,12 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
             'line-opacity': 0.95,
           },
         })
+
+        const bounds = coordinates.reduce(
+          (routeBounds, coordinate) => routeBounds.extend(coordinate as Coordinates),
+          new mapboxgl.LngLatBounds(coordinates[0] as Coordinates, coordinates[0] as Coordinates),
+        )
+        instance.fitBounds(bounds, { padding: { top: 110, right: 45, bottom: 150, left: 45 }, maxZoom: 15, duration: 700 })
       } catch {
         // Ignore a draw that loses the race with map/style teardown.
       }

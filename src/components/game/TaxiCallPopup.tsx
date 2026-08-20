@@ -9,6 +9,7 @@ interface TaxiCallPopupProps {
   passengers: Passenger[]
   onAccept: (jobId: string) => void
   onDecline: (jobId: string) => void
+  onViewMap: (jobId: string) => void
   onClose: () => void
 }
 
@@ -19,7 +20,7 @@ const remainingTime = (job: TaxiJob, now: number) => {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
-export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, onAccept, onDecline, onClose }: TaxiCallPopupProps) {
+export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, onAccept, onDecline, onViewMap, onClose }: TaxiCallPopupProps) {
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1_000)
@@ -41,6 +42,7 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, onAcce
         <div><strong>{passenger?.name ?? 'A passenger'}</strong><small>Expires in <b className="job-timer">{remainingTime(job, now)}</b></small></div>
         <div className="job-route"><span>●</span><div><strong>{job.pickupLabel}</strong><i /><strong>{job.destinationLabel}</strong></div></div>
         <div className="job-meta"><span>{taxi && Number.isFinite(taxi.distance) ? `${taxi.distance.toFixed(1)} km to pickup` : 'Taxi location pending'}</span><span>{job.distanceKm} km trip</span><b>{money.format(job.fare)}</b></div>
+        <button className="view-job-map" onClick={() => onViewMap(job.id)}>View route on map</button>
         <div className="call-actions"><button className="decline-call" onClick={() => onDecline(job.id)}>Decline</button><button className="accept-call" disabled={!taxi} onClick={() => onAccept(job.id)}>{taxi ? 'Accept job' : 'No taxi available'}</button></div>
       </article>
     }) : <div className="job-empty"><strong>No calls waiting</strong><p>New jobs will appear here when a taxi is available.</p></div>}</div>

@@ -4,7 +4,6 @@ import { distanceKmBetween } from './jobEngine'
 export const LOW_ENERGY_THRESHOLD = 20
 export const TIRED_DRIVER_THRESHOLD = 80
 export const SERVICE_TRIP_DURATION_MS = 30_000
-export const FINANCE_PERIOD_MS = 10 * 60_000
 
 const eventTemplates = [
   { name: 'Stadium rush', description: 'A major match is driving up fares and traffic.', fareMultiplier: 1.35, fuelMultiplier: 1.2 },

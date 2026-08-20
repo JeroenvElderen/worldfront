@@ -84,7 +84,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
   // Only rebuild the expensive WebGL map when the fleet's appearance or a new
   // journey changes. Finishing a job is handled in-place below, avoiding the
   // visible map flash that used to happen at every arrival.
-  const fleetConfigurationKey = vehicles.map((vehicle) => `${vehicle.id}:${vehicle.modelId}:${(vehicle.exteriorAccessories ?? []).join(',')}`).join('|')
+  const fleetConfigurationKey = vehicles.map((vehicle) => `${vehicle.id}:${vehicle.modelId}:${(vehicle.exteriorAccessories ?? []).join(',')}:${vehicle.serviceTrip?.startedAt ?? ''}`).join('|')
   for (const job of jobs) if (job.acceptedAt) knownJourneyAssignments.current.add(`${job.id}:${job.acceptedAt}`)
   const journeyAssignmentsKey = [...knownJourneyAssignments.current].join('|')
 
@@ -147,6 +147,22 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         }
         instance.addSource(sourceId, { type: 'geojson', data: point(start) })
         instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 6, 'circle-color': job ? vehicleColor.pickingUp : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available, 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
+        if (!job && vehicle.serviceTrip) {
+          const service = vehicle.serviceTrip
+          const routeSourceId = `${sourceId}-route`
+          instance.addSource(routeSourceId, { type: 'geojson', data: lineString([service.from, service.destination]) })
+          instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': '#94a3b8', 'line-width': 1.5, 'line-dasharray': [2, 2] } })
+          let serviceTimer: number | undefined
+          const animateService = () => {
+            if (serviceTimer !== undefined) animationTimers.delete(serviceTimer)
+            const startedAt = new Date(service.startedAt).getTime()
+            const arrivesAt = new Date(service.arrivesAt).getTime()
+            const progress = Math.max(0, Math.min(1, (Date.now() - startedAt) / (arrivesAt - startedAt)))
+            ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition([service.from, service.destination], progress)))
+            if (progress < 1 && document.visibilityState !== 'hidden') { serviceTimer = window.setTimeout(animateService, JOURNEY_UPDATE_INTERVAL_MS); animationTimers.add(serviceTimer) }
+          }
+          animationRunners.add(animateService); animateService(); continue
+        }
         if (!job) continue
         const journey = getJobJourney(job, vehicle)
         let animationTimer: number | undefined

@@ -81,7 +81,8 @@ export function completeJobState(
   if (!vehicle || now < getJobJourney(job, vehicle).arrivesAt) return null
 
   const paidDistanceKm = distanceKmBetween(job.pickup, job.destination)
-  const meteredFare = taxiFareForDistance(paidDistanceKm)
+  // The offered fare can include a live-event surge, so preserve it at settlement.
+  const meteredFare = job.fare || taxiFareForDistance(paidDistanceKm)
   const reputation = company.reputation + 1
 
   return {

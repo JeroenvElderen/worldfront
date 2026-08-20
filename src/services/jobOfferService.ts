@@ -139,7 +139,8 @@ export async function generateJobOffers(
   excludedRoutes: string[],
   maxDistanceKm = BASE_JOB_DISTANCE_KM,
   signal?: AbortSignal,
-  taxiPositions: Coordinates[] = [city.coordinates]
+  taxiPositions: Coordinates[] = [city.coordinates],
+  fareMultiplier = 1
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
   const places = await findMapboxPlaces(city, maxDistanceKm, signal)
   const excluded = new Set(excludedRoutes)
@@ -168,7 +169,7 @@ export async function generateJobOffers(
     id: crypto.randomUUID(), cityId: city.id,
     pickup: route.pickup.coordinates, destination: route.destination.coordinates,
     pickupLabel: route.pickup.name, destinationLabel: route.destination.name,
-    passengerIds: [passengers[index].id], fare: taxiFareForDistance(route.distanceKm),
+    passengerIds: [passengers[index].id], fare: Math.round(taxiFareForDistance(route.distanceKm) * fareMultiplier * 100) / 100,
     distanceKm: route.distanceKm, durationMinutes: Math.max(5, Math.round(route.distanceKm * 3.2)), status: 'offered', offeredAt,
   }))
 

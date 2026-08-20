@@ -14,6 +14,13 @@ export const levelForReputation = (reputation: number) =>
 export const maxJobDistanceForLevel = (level: number) =>
   BASE_JOB_DISTANCE_KM + (Math.max(1, Math.floor(level)) - 1) * JOB_DISTANCE_PER_LEVEL_KM
 
+/** Keep the first jobs manageable while the player only has a starter-sized fleet. */
+export const maxJobDistanceForFleet = (level: number, vehicleCount: number) => {
+  const levelLimit = maxJobDistanceForLevel(level)
+  if (levelLimit > BASE_JOB_DISTANCE_KM) return levelLimit
+  return Math.min(levelLimit, 10 + Math.max(0, Math.floor(vehicleCount) - 1) * 5)
+}
+
 export const progressionForReputation = (reputation: number) => {
   const level = levelForReputation(reputation)
   const currentLevelReputation = reputationForLevel(level)

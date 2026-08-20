@@ -3,8 +3,9 @@ import { levelForReputation } from './companyProgression'
 
 export const JOB_REQUEST_INTERVAL_MS = 30_000
 export const MAX_JOB_OFFERS = 6
-// The game clock runs at 2x speed: one simulated minute takes 30 seconds.
-export const SIMULATED_MINUTE_MS = 30_000
+// Trips take half their estimated real-world duration (a 2x game clock).
+export const REAL_TIME_TRIP_SCALE = 0.5
+export const SIMULATED_MINUTE_MS = 60_000 * REAL_TIME_TRIP_SCALE
 
 const distanceSquared = (from: [number, number], to: [number, number]) => {
   const longitudeScale = Math.cos(((from[1] + to[1]) / 2) * Math.PI / 180)

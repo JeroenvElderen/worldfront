@@ -6,35 +6,28 @@ import { TaxiCallPopup } from './components/game/TaxiCallPopup'
 import { GameMap } from './map/GameMap'
 import { CitySetup } from './screens/CitySetup'
 import { useGameStore } from './stores/gameStore'
-import { getJobJourney, JOB_REQUEST_INTERVAL_MS } from './services/jobEngine'
+import { getJobJourney } from './services/jobEngine'
 
 export default function App() {
   const game = useGameStore()
-  const { company, refreshJobs, addRandomJob, tickJobs } = game
+  const { company, addRandomJob, tickJobs } = game
+  const availableVehicleCount = game.vehicles.filter((vehicle) => vehicle.status === 'available').length
+  const offeredJobCount = game.jobs.filter((job) => job.status === 'offered').length
   useEffect(() => {
     if (!company) return
-    // Hydrated saves with no offers should not wait for the first interval.
-    const savedJobs = useGameStore.getState().jobs
-    if (!savedJobs.some((job) => job.status === 'offered' || job.status === 'accepted')) refreshJobs()
-    let timeout: number | undefined
-    const scheduleOffer = () => {
-      window.clearTimeout(timeout)
-      if (document.visibilityState !== 'hidden') timeout = window.setTimeout(async () => {
-        await addRandomJob()
-        scheduleOffer()
-      }, JOB_REQUEST_INTERVAL_MS)
+    const requestOfferForAvailableTaxi = () => {
+      if (document.visibilityState === 'hidden') return
+      const state = useGameStore.getState()
+      const available = state.vehicles.filter((vehicle) => vehicle.status === 'available').length
+      const offered = state.jobs.filter((job) => job.status === 'offered').length
+      // Generate on demand instead of waking the app every 30 seconds. Keeping
+      // at most one open offer per idle taxi prevents useless route requests.
+      if (available > offered) void addRandomJob()
     }
-    const resumeOffers = () => {
-      if (document.visibilityState === 'visible') scheduleOffer()
-      else window.clearTimeout(timeout)
-    }
-    scheduleOffer()
-    document.addEventListener('visibilitychange', resumeOffers)
-    return () => {
-      window.clearTimeout(timeout)
-      document.removeEventListener('visibilitychange', resumeOffers)
-    }
-  }, [company, refreshJobs, addRandomJob])
+    requestOfferForAvailableTaxi()
+    document.addEventListener('visibilitychange', requestOfferForAvailableTaxi)
+    return () => document.removeEventListener('visibilitychange', requestOfferForAvailableTaxi)
+  }, [company, availableVehicleCount, offeredJobCount, addRandomJob])
   useEffect(() => {
     if (!company) return
     tickJobs()

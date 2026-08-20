@@ -1,7 +1,6 @@
 import type { Company, TaxiJob, Vehicle } from '../models/game'
 import { levelForReputation } from './companyProgression'
 
-export const JOB_REQUEST_INTERVAL_MS = 30_000
 export const MAX_JOB_OFFERS = 6
 // Trips take an eighth of their estimated real-world duration (an 8x game clock).
 export const REAL_TIME_TRIP_SCALE = 0.125

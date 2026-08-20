@@ -50,6 +50,20 @@ const mapIcon = (kind: 'new-job' | 'active-job' | 'new-destination' | 'active-de
   return context.getImageData(0, 0, 64, 64)
 }
 
+const postalVehicleIcon = () => {
+  const canvas = document.createElement('canvas')
+  canvas.width = 80
+  canvas.height = 80
+  const context = canvas.getContext('2d')!
+  context.fillStyle = '#fbbf24'
+  context.beginPath(); context.arc(40, 40, 35, 0, Math.PI * 2); context.fill()
+  context.strokeStyle = '#fff'; context.lineWidth = 5; context.stroke()
+  context.fillStyle = '#422006'
+  context.font = '900 34px sans-serif'; context.textAlign = 'center'; context.textBaseline = 'middle'
+  context.fillText('POST', 40, 41)
+  return context.getImageData(0, 0, 80, 80)
+}
+
 // One-second movement steps keep the small taxi dots useful without continuously
 // waking the CPU and GPU to render decorative intermediate positions.
 const JOURNEY_UPDATE_INTERVAL_MS = 1_000
@@ -95,7 +109,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
   const [mapRevision, setMapRevision] = useState(0)
   // Job changes are applied to the existing WebGL map by the synchronization
   // effects below. In particular, accepting a call must never recreate the map.
-  const fleetConfigurationKey = vehicles.map((vehicle) => `${vehicle.id}:${vehicle.modelId}:${(vehicle.exteriorAccessories ?? []).join(',')}:${vehicle.serviceTrip?.startedAt ?? ''}`).join('|')
+  const fleetConfigurationKey = vehicles.map((vehicle) => `${vehicle.id}:${vehicle.modelId}:${(vehicle.exteriorAccessories ?? []).join(',')}:${vehicle.serviceTrip?.startedAt ?? ''}:${vehicle.postalRoute?.startedAt ?? ''}`).join('|')
 
   useEffect(() => {
     if (!container.current) return
@@ -132,6 +146,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       instance.addImage('active-job-marker', mapIcon('active-job'), { pixelRatio: 2 })
       instance.addImage('new-destination-marker', mapIcon('new-destination'), { pixelRatio: 2 })
       instance.addImage('active-destination-marker', mapIcon('active-destination'), { pixelRatio: 2 })
+      instance.addImage('postal-vehicle-marker', postalVehicleIcon(), { pixelRatio: 2 })
       instance.addSource('company-base', { type: 'geojson', data: featureCollection(selected ? [point(selected.coordinates)] : []) })
       instance.addLayer({ id: 'base-halo', type: 'circle', source: 'company-base', paint: { 'circle-radius': 22, 'circle-color': '#22d3a7', 'circle-opacity': 0.22, 'circle-stroke-width': 1, 'circle-stroke-color': '#5eead4' } })
       instance.addLayer({ id: 'base', type: 'circle', source: 'company-base', paint: { 'circle-radius': 9, 'circle-color': '#0f766e', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } })
@@ -164,7 +179,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
             instance.addLayer({ id: `${stopId}-label`, type: 'symbol', source: stopId, layout: { 'text-field': `${stopIndex + 1}`, 'text-size': 9 }, paint: { 'text-color': '#422006' } })
           })
           instance.addSource(sourceId, { type: 'geojson', data: point(start) })
-          instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 7, 'circle-color': '#fbbf24', 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
+          instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': 'postal-vehicle-marker', 'icon-size': 0.7, 'icon-allow-overlap': true } })
           let postalTimer: number | undefined
           const animatePostal = () => {
             if (postalTimer !== undefined) animationTimers.delete(postalTimer)

@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { taxiModels } from '../../data/taxis'
 import type { Driver, ExteriorAccessory, Loan, Vehicle } from '../../models/game'
 
-interface SectionSheetProps { section: Exclude<Section, 'map' | 'jobs'>; vehicles: Vehicle[]; drivers: Driver[]; loans: Loan[]; cash: number; onClose: () => void; onReset: () => void; onBuyTaxi: (modelId: string) => void; onLeaseTaxi: (modelId: string) => void; onTakeLoan: (amount: number) => void; onSellVehicle: (vehicleId: string) => void; onSetDriverShift: (driverId: string, shift: Driver['shift']) => void; onToggleAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void }
+interface SectionSheetProps { section: Exclude<Section, 'map' | 'jobs' | 'services'>; vehicles: Vehicle[]; drivers: Driver[]; loans: Loan[]; cash: number; onClose: () => void; onReset: () => void; onBuyTaxi: (modelId: string) => void; onLeaseTaxi: (modelId: string) => void; onTakeLoan: (amount: number) => void; onSellVehicle: (vehicleId: string) => void; onSetDriverShift: (driverId: string, shift: Driver['shift']) => void; onToggleAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void }
 const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
 const exteriorAccessories: Array<{ id: ExteriorAccessory; label: string; icon: string }> = [
   { id: 'panoramic-roof', label: 'Panoramic roof', icon: '🌅' }, { id: 'towbar', label: 'Towbar', icon: '🪝' },
@@ -15,11 +15,6 @@ const getModel = (vehicle: Vehicle) => taxiModels.find((model) => model.id === v
 export function SectionSheet({ section, vehicles, drivers, loans, cash, onClose, onReset, onBuyTaxi, onLeaseTaxi, onTakeLoan, onSellVehicle, onSetDriverShift, onToggleAccessory }: SectionSheetProps) {
   const [selectedTaxi, setSelectedTaxi] = useState(taxiModels[0].id)
   const [customizingVehicleId, setCustomizingVehicleId] = useState(vehicles[0]?.id ?? '')
-  const content = {
-    fleet: [`${vehicles.length} vehicle${vehicles.length === 1 ? '' : 's'} in your fleet`, vehicles[0] ? `${vehicles[0].name} · ${vehicles[0].condition}% condition · ${vehicles[0].status}` : 'Purchase your first vehicle.'],
-    travel: ['Travel agency locked', 'Reach company level 3 to begin creating tours.'],
-    company: ['Your company', 'Manage finances, staff and expansion from here.'],
-  }[section]
   if (section === 'fleet') return <section className="section-sheet fleet-sheet game-panel">
     <div className="sheet-handle" /><button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
     <small>FLEET</small><h2>{vehicles.length} taxi{vehicles.length === 1 ? '' : 's'} on the road</h2>
@@ -39,8 +34,5 @@ export function SectionSheet({ section, vehicles, drivers, loans, cash, onClose,
     <div className="loan-list">{loans.map((loan) => <div key={loan.id}><b>{money.format(loan.balance)} remaining</b><small>{money.format(loan.paymentAmount)} next payment</small></div>)}</div>
     <button className="danger-link" onClick={onReset}>Start a new company</button>
   </section>
-  return <section className="section-sheet game-panel">
-    <div className="sheet-handle" /><button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
-    <small>{section.toUpperCase()}</small><h2>{content[0]}</h2><p>{content[1]}</p>
-  </section>
+  return null
 }

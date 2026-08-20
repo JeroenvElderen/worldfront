@@ -2,18 +2,19 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { getCity } from '../data/cities'
 import { getTaxiModel } from '../data/taxis'
-import type { Company, Driver, ExteriorAccessory, GameSave, Vehicle } from '../models/game'
+import { cityServices, contractOffers } from '../data/services'
+import type { Company, Driver, ExteriorAccessory, GameSave, ServiceType, Vehicle } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
 import { levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import { generateJobOffers } from '../services/jobOfferService'
 import { acceptJobState, completeArrivedJobsState, completeJobState, getJobJourney, jobOfferExpiresAt, MAX_JOB_OFFERS } from '../services/jobEngine'
 import { createDynamicEvent, energyUseForJob, fatigueUseForJob, FINANCE_PERIOD_MS, startRecoveryTrip } from '../services/operationsEngine'
 
-type Section = 'map' | 'jobs' | 'fleet' | 'travel' | 'company'
-interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; resetGame: () => void }
+type Section = 'map' | 'jobs' | 'fleet' | 'services' | 'company'
+interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; establishDivision: (service: ServiceType) => void; upgradeHub: () => void; acceptContract: (contractId: string) => void; resetGame: () => void }
 interface GameState extends GameSave { activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
 
-const blankSave: GameSave = { id: 'autosave', version: 3, updatedAt: new Date(0).toISOString(), company: null, startingCityId: null, vehicles: [], drivers: [], jobs: [], agencies: [], tours: [], passengers: [], jobRequestHistory: [], loans: [], activeEvent: null, nextEventAt: new Date(0).toISOString(), nextOperatingPaymentAt: new Date(0).toISOString() }
+const blankSave: GameSave = { id: 'autosave', version: 4, updatedAt: new Date(0).toISOString(), company: null, startingCityId: null, vehicles: [], drivers: [], jobs: [], agencies: [], tours: [], passengers: [], jobRequestHistory: [], loans: [], divisions: [], contracts: contractOffers, hub: { level: 1 }, activeEvent: null, nextEventAt: new Date(0).toISOString(), nextOperatingPaymentAt: new Date(0).toISOString() }
 
 export const useGameStore = create<GameState & GameActions>()(persist((set) => ({
   ...blankSave, activeSection: 'map', focusedJobId: null, hasHydrated: false, jobsLoading: false, jobsError: null,
@@ -120,7 +121,10 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     for (const loan of loans.filter((item) => new Date(item.nextPaymentAt).getTime() <= now)) company = { ...company, cash: company.cash - Math.min(loan.paymentAmount, loan.balance) }
     loans = loans.map((loan) => new Date(loan.nextPaymentAt).getTime() > now ? loan : { ...loan, balance: Math.max(0, loan.balance - loan.paymentAmount), nextPaymentAt: new Date(now + FINANCE_PERIOD_MS).toISOString() }).filter((loan) => loan.balance > 0)
     const operatingPaymentDue = new Date(state.nextOperatingPaymentAt ?? 0).getTime() <= now
-    if (operatingPaymentDue) company = { ...company, cash: company.cash - vehicles.reduce((sum, vehicle) => sum + (vehicle.leaseWeeklyCost ?? 0), 0) - drivers.reduce((sum, driver) => sum + driver.salary, 0) }
+    if (operatingPaymentDue) {
+      const contractIncome = (state.contracts ?? []).filter((contract) => contract.status === 'active').reduce((sum, contract) => sum + contract.weeklyIncome, 0)
+      company = { ...company, cash: company.cash + contractIncome - vehicles.reduce((sum, vehicle) => sum + (vehicle.leaseWeeklyCost ?? 0), 0) - drivers.reduce((sum, driver) => sum + driver.salary, 0) }
+    }
     const nextOperatingPaymentAt = operatingPaymentDue ? new Date(now + FINANCE_PERIOD_MS).toISOString() : state.nextOperatingPaymentAt
     const activeEvent = state.activeEvent && new Date(state.activeEvent.expiresAt).getTime() > now ? state.activeEvent : (new Date(state.nextEventAt ?? 0).getTime() <= now ? createDynamicEvent(now) : null)
     const nextEventAt = activeEvent && activeEvent.id !== state.activeEvent?.id ? new Date(now + 13 * 60_000).toISOString() : state.nextEventAt
@@ -155,6 +159,23 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     vehicles: state.vehicles.map((vehicle) => vehicle.id !== vehicleId ? vehicle : { ...vehicle, exteriorAccessories: (vehicle.exteriorAccessories ?? []).includes(accessory) ? (vehicle.exteriorAccessories ?? []).filter((item) => item !== accessory) : [...(vehicle.exteriorAccessories ?? []), accessory] }),
     updatedAt: new Date().toISOString(),
   })),
+  establishDivision: (service) => set((state) => {
+    const definition = cityServices.find((item) => item.id === service)
+    const companyLevel = levelForReputation(state.company?.reputation ?? 0)
+    if (!state.company || !definition || (state.divisions ?? []).some((division) => division.type === service) || state.company.cash < definition.cost || companyLevel < definition.requiredLevel || (state.hub?.level ?? 1) < definition.requiredLevel) return state
+    return { company: { ...state.company, cash: state.company.cash - definition.cost }, divisions: [...(state.divisions ?? []), { id: crypto.randomUUID(), type: service, level: 1, establishedAt: new Date().toISOString() }], updatedAt: new Date().toISOString() }
+  }),
+  upgradeHub: () => set((state) => {
+    const level = state.hub?.level ?? 1
+    const cost = level * 10_000
+    if (!state.company || level >= 4 || state.company.cash < cost) return state
+    return { company: { ...state.company, cash: state.company.cash - cost }, hub: { level: level + 1 }, updatedAt: new Date().toISOString() }
+  }),
+  acceptContract: (contractId) => set((state) => {
+    const contract = (state.contracts ?? contractOffers).find((item) => item.id === contractId)
+    if (!contract || contract.status === 'active' || !(state.divisions ?? []).some((division) => division.type === contract.service)) return state
+    return { contracts: (state.contracts ?? contractOffers).map((item) => item.id === contractId ? { ...item, status: 'active' as const } : item), updatedAt: new Date().toISOString() }
+  }),
   resetGame: () => set({ ...blankSave, activeSection: 'map', hasHydrated: true }),
 }), {
   name: 'save:autosave', storage: createJSONStorage(() => indexedDbStorage),
@@ -167,6 +188,10 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     return save
   },
   onRehydrateStorage: () => (state) => state?.setHasHydrated(true),
+  merge: (persisted, current) => {
+    const saved = persisted as Partial<GameState>
+    return { ...current, ...saved, divisions: saved.divisions ?? [], contracts: saved.contracts ?? contractOffers, hub: saved.hub ?? { level: 1 } }
+  },
 }))
 
 export type { Section }

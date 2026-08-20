@@ -2,14 +2,14 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { getCity } from '../data/cities'
 import { getTaxiModel } from '../data/taxis'
-import type { Company, GameSave, TaxiPowertrain, Vehicle } from '../models/game'
+import type { Company, ExteriorAccessory, GameSave, Vehicle } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
 import { levelForReputation, maxJobDistanceForLevel } from '../services/companyProgression'
 import { generateJobOffers } from '../services/jobOfferService'
 import { acceptJobState, completeArrivedJobsState, completeJobState, MAX_JOB_OFFERS } from '../services/jobEngine'
 
 type Section = 'map' | 'fleet' | 'travel' | 'company'
-interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (powertrain: TaxiPowertrain) => void; resetGame: () => void }
+interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; resetGame: () => void }
 interface GameState extends GameSave { activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
 
 const blankSave: GameSave = { id: 'autosave', version: 2, updatedAt: new Date(0).toISOString(), company: null, startingCityId: null, vehicles: [], drivers: [], jobs: [], agencies: [], tours: [], passengers: [], jobRequestHistory: [] }
@@ -23,8 +23,8 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     if (!getCity(cityId)) return
     const now = new Date().toISOString()
     const company: Company = { id: crypto.randomUUID(), name: 'Travel Empire', cash: 25_000, reputation: 0, level: 1, homeCityId: cityId, foundedAt: now }
-    const starter = getTaxiModel('diesel')
-    const vehicle: Vehicle = { id: crypto.randomUUID(), name: `${starter.name} 1`, type: 'taxi', powertrain: starter.id, value: starter.price, condition: 100, fuel: 100, capacity: starter.capacity, topSpeedKmh: starter.topSpeedKmh, status: 'available', cityId, position: getCity(cityId)?.coordinates }
+    const starter = getTaxiModel('toyota-corolla')
+    const vehicle: Vehicle = { id: crypto.randomUUID(), name: `${starter.brand} ${starter.name} 1`, type: 'taxi', modelId: starter.id, powertrain: starter.powertrain, exteriorAccessories: [], value: starter.price, condition: 100, fuel: 100, capacity: starter.capacity, topSpeedKmh: starter.topSpeedKmh, status: 'available', cityId, position: getCity(cityId)?.coordinates }
     set({ ...blankSave, company, startingCityId: cityId, vehicles: [vehicle], updatedAt: now, activeSection: 'map', hasHydrated: true, jobsLoading: false, jobsError: null })
   },
   refreshJobs: async () => {
@@ -76,15 +76,19 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     const result = completeArrivedJobsState(state.company, state.jobs, state.vehicles)
     return result ? { company: result.company, jobs: result.jobs, vehicles: result.vehicles, focusedJobId: null, updatedAt: new Date().toISOString() } : state
   }),
-  buyTaxi: (powertrain) => set((state) => {
-    const model = getTaxiModel(powertrain)
+  buyTaxi: (modelId) => set((state) => {
+    const model = getTaxiModel(modelId)
     if (!state.company || !state.startingCityId || state.company.cash < model.price) return state
     const city = getCity(state.startingCityId)
     if (!city) return state
-    const modelNumber = state.vehicles.filter((vehicle) => (vehicle.powertrain ?? 'diesel') === powertrain).length + 1
-    const taxi: Vehicle = { id: crypto.randomUUID(), name: `${model.name} ${modelNumber}`, type: 'taxi', powertrain: model.id, value: model.price, condition: 100, fuel: 100, capacity: model.capacity, topSpeedKmh: model.topSpeedKmh, status: 'available', cityId: city.id, position: city.coordinates }
+    const modelNumber = state.vehicles.filter((vehicle) => vehicle.modelId === model.id).length + 1
+    const taxi: Vehicle = { id: crypto.randomUUID(), name: `${model.brand} ${model.name} ${modelNumber}`, type: 'taxi', modelId: model.id, powertrain: model.powertrain, exteriorAccessories: [], value: model.price, condition: 100, fuel: 100, capacity: model.capacity, topSpeedKmh: model.topSpeedKmh, status: 'available', cityId: city.id, position: city.coordinates }
     return { company: { ...state.company, cash: state.company.cash - taxi.value }, vehicles: [...state.vehicles, taxi], updatedAt: new Date().toISOString() }
   }),
+  toggleExteriorAccessory: (vehicleId, accessory) => set((state) => ({
+    vehicles: state.vehicles.map((vehicle) => vehicle.id !== vehicleId ? vehicle : { ...vehicle, exteriorAccessories: (vehicle.exteriorAccessories ?? []).includes(accessory) ? (vehicle.exteriorAccessories ?? []).filter((item) => item !== accessory) : [...(vehicle.exteriorAccessories ?? []), accessory] }),
+    updatedAt: new Date().toISOString(),
+  })),
   resetGame: () => set({ ...blankSave, activeSection: 'map', hasHydrated: true }),
 }), {
   name: 'save:autosave', storage: createJSONStorage(() => indexedDbStorage),

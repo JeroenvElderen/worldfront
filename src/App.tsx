@@ -14,7 +14,7 @@ export default function App() {
   const { company, addRandomJob, tickJobs } = game
 
   const availableVehicleCount = game.vehicles.filter(
-    (vehicle) => vehicle.status === 'available',
+    (vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available',
   ).length
 
   const offeredJobCount = game.jobs.filter(
@@ -33,7 +33,7 @@ export default function App() {
       const state = useGameStore.getState()
 
       const available = state.vehicles.filter(
-        (vehicle) => vehicle.status === 'available',
+        (vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available',
       ).length
 
       const offered = state.jobs.filter(
@@ -102,7 +102,9 @@ export default function App() {
       })
       .concat(
         state.vehicles.flatMap((vehicle) =>
-          vehicle.serviceTrip
+          vehicle.postalRoute
+            ? [new Date(vehicle.postalRoute.arrivesAt).getTime()]
+            : vehicle.serviceTrip
             ? [
                 new Date(
                   vehicle.serviceTrip.arrivesAt,
@@ -279,6 +281,8 @@ export default function App() {
                 onReset={game.resetGame}
                 onBuyTaxi={game.buyTaxi}
                 onLeaseTaxi={game.leaseTaxi}
+                onBuyPostVehicle={game.buyPostVehicle}
+                onStartPostalRoute={game.startPostalRoute}
                 onTakeLoan={game.takeLoan}
                 onSellVehicle={game.sellVehicle}
                 onSetDriverShift={

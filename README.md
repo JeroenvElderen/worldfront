@@ -35,6 +35,14 @@ orange taxis are driving to a pickup, and red taxis have their client aboard.
 Active journeys follow a thin route line, and selecting a job highlights the
 road route the nearest available driver will take to its pickup and destination.
 
+## Postal service
+
+The Fleet dealership also sells postal vans. Dispatching one starts an automatic
+four-stop delivery round: numbered stop markers and the remaining route appear
+on the map, and the van follows Mapbox's traffic-aware road geometry before
+returning to the depot. Finishing a round earns cash and reputation, and the van
+can then be dispatched again.
+
 ## Android
 
 The native project is generated from the Capacitor configuration after dependencies are installed:

@@ -6,6 +6,7 @@ import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, irelandOverview } from '../data/cities'
 import type { Coordinates, TaxiJob, Vehicle } from '../models/game'
 import { getJobJourney } from '../services/jobEngine'
+import { postalRouteProgress } from '../services/postalEngine'
 
 interface GameMapProps { cityId: string | null; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; onOpenJob: (jobId: string) => void }
 const token = mapboxAccessToken
@@ -139,6 +140,41 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         const job = jobs.find((candidate) => candidate.status === 'accepted' && (candidate.assignedVehicleId === vehicle.id || (!candidate.assignedVehicleId && vehicle.status === 'on-job')))
         const start = vehicle.position ?? selected?.coordinates
         if (!start) continue
+        if (vehicle.postalRoute) {
+          const postal = vehicle.postalRoute
+          const sourceId = `taxi-${index}`
+          const routeSourceId = `${sourceId}-postal-route`
+          let roadCoordinates: number[][] = postal.stops.map((stop) => stop.coordinates)
+          if (token) {
+            try {
+              const waypoints = postal.stops.map((stop) => stop.coordinates.join(',')).join(';')
+              const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${waypoints}?continue_straight=true&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
+              if (response.ok) {
+                const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] } }> }
+                roadCoordinates = result.routes?.[0]?.geometry.coordinates ?? roadCoordinates
+              }
+            } catch (error) { if ((error as Error).name === 'AbortError') return }
+          }
+          instance.addSource(routeSourceId, { type: 'geojson', data: lineString(roadCoordinates) })
+          instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': '#f59e0b', 'line-width': 3, 'line-opacity': 0.9, 'line-dasharray': [1.5, 1] } })
+          postal.stops.slice(1, -1).forEach((stop, stopIndex) => {
+            const stopId = `${sourceId}-post-stop-${stopIndex}`
+            instance.addSource(stopId, { type: 'geojson', data: point(stop.coordinates) })
+            instance.addLayer({ id: stopId, type: 'circle', source: stopId, paint: { 'circle-radius': 7, 'circle-color': '#fbbf24', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } })
+            instance.addLayer({ id: `${stopId}-label`, type: 'symbol', source: stopId, layout: { 'text-field': `${stopIndex + 1}`, 'text-size': 9 }, paint: { 'text-color': '#422006' } })
+          })
+          instance.addSource(sourceId, { type: 'geojson', data: point(start) })
+          instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 7, 'circle-color': '#fbbf24', 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
+          let postalTimer: number | undefined
+          const animatePostal = () => {
+            if (postalTimer !== undefined) animationTimers.delete(postalTimer)
+            const progress = postalRouteProgress(postal)
+            ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(roadCoordinates, progress)))
+            ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(remainingRoute(roadCoordinates, progress)))
+            if (progress < 1 && document.visibilityState !== 'hidden') { postalTimer = window.setTimeout(animatePostal, JOURNEY_UPDATE_INTERVAL_MS); animationTimers.add(postalTimer) }
+          }
+          animationRunners.add(animatePostal); animatePostal(); continue
+        }
         let pickupRoute: RouteDetails = { coordinates: job ? [start, job.pickup] : [start], speedLimits: [] }
         let passengerRoute: RouteDetails = { coordinates: job ? [job.pickup, job.destination] : [start], speedLimits: [] }
         if (job && token) {
@@ -422,7 +458,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
 
     const assignedVehicle = vehicles.find((vehicle) => vehicle.id === job.assignedVehicleId)
     const availableVehicle = vehicles
-      .filter((vehicle) => vehicle.status === 'available' && vehicle.position)
+      .filter((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available' && vehicle.position)
       .sort((left, right) => {
         const leftDistance = Math.hypot(left.position![0] - job.pickup[0], left.position![1] - job.pickup[1])
         const rightDistance = Math.hypot(right.position![0] - job.pickup[0], right.position![1] - job.pickup[1])

@@ -79,6 +79,8 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
   const viewport = useRef<{ center: Coordinates; zoom: number } | null>(null)
   const pickupJobIds = useRef(new Set<string>())
   const pickupHandlers = useRef(new Map<string, { enter: () => void; leave: () => void; click: (event: mapboxgl.MapMouseEvent) => void }>())
+  const liveJobIds = useRef(new Set<string>())
+  const liveJobTimers = useRef(new Map<string, number>())
   const [mapRevision, setMapRevision] = useState(0)
   // Job changes are applied to the existing WebGL map by the synchronization
   // effects below. In particular, accepting a call must never recreate the map.
@@ -86,6 +88,8 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
 
   useEffect(() => {
     if (!container.current) return
+    const currentLiveJobIds = liveJobIds.current
+    const currentLiveJobTimers = liveJobTimers.current
     if (token) mapboxgl.accessToken = token
     const selected = getCity(cityId)
     const abortController = new AbortController()
@@ -107,6 +111,9 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     map.current = instance
     pickupJobIds.current.clear()
     pickupHandlers.current.clear()
+    currentLiveJobIds.clear()
+    currentLiveJobTimers.forEach(window.clearTimeout)
+    currentLiveJobTimers.clear()
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
     instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right')
     instance.on('load', async () => {
@@ -139,15 +146,12 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         if (job) {
           const routeSourceId = `${sourceId}-route`
           instance.addSource(routeSourceId, { type: 'geojson', data: lineString([...pickupRoute.coordinates, ...passengerRoute.coordinates.slice(1)]) })
-          instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': '#0f766e', 'line-width': 1.5, 'line-opacity': 0.8 } })
+          instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': '#0f766e', 'line-width': 2.5, 'line-opacity': 0.9 } })
         }
         instance.addSource(sourceId, { type: 'geojson', data: point(start) })
         instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 6, 'circle-color': job ? vehicleColor.pickingUp : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available, 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
         if (!job && vehicle.serviceTrip) {
           const service = vehicle.serviceTrip
-          const routeSourceId = `${sourceId}-route`
-          instance.addSource(routeSourceId, { type: 'geojson', data: lineString([service.from, service.destination]) })
-          instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': '#94a3b8', 'line-width': 1.5, 'line-dasharray': [2, 2] } })
           let serviceTimer: number | undefined
           const animateService = () => {
             if (serviceTimer !== undefined) animationTimers.delete(serviceTimer)
@@ -160,6 +164,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
           animationRunners.add(animateService); animateService(); continue
         }
         if (!job) continue
+        liveJobIds.current.add(job.id)
         const journey = getJobJourney(job, vehicle)
         let animationTimer: number | undefined
         const scheduleAnimation = () => {
@@ -209,6 +214,9 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       viewport.current = { center: [center.lng, center.lat], zoom: instance.getZoom() }
       abortController.abort()
       animationTimers.forEach(window.clearTimeout)
+      currentLiveJobTimers.forEach(window.clearTimeout)
+      currentLiveJobTimers.clear()
+      currentLiveJobIds.clear()
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       map.current = null
       instance.remove()
@@ -262,9 +270,8 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       pickupJobIds.current.add(job.id)
     }
 
-    // Paint an accepted journey onto the live map. This intentionally mutates
-    // Mapbox sources/layers rather than changing the Map component's identity,
-    // so accepting a job has no blank frame, tile reload, or camera reset.
+    // Start newly accepted journeys on the live map and replace the immediate
+    // fallback with road geometry as soon as Directions responds.
     for (const job of jobs.filter((candidate) => candidate.status === 'accepted')) {
       const vehicleIndex = vehicles.findIndex((vehicle) => vehicle.id === job.assignedVehicleId)
       if (vehicleIndex < 0) continue
@@ -272,15 +279,54 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       const start = vehicle.position ?? getCity(cityId)?.coordinates
       if (!start) continue
       const taxiSourceId = `taxi-${vehicleIndex}`
-      const routeSourceId = `${taxiSourceId}-route`
-      const routeData = lineString([start, job.pickup, job.destination])
-      const routeSource = instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined
-      if (routeSource) routeSource.setData(routeData)
-      else {
-        instance.addSource(routeSourceId, { type: 'geojson', data: routeData })
-        instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': '#0f766e', 'line-width': 1.5, 'line-opacity': 0.8 } })
-      }
       if (instance.getLayer(taxiSourceId)) instance.setPaintProperty(taxiSourceId, 'circle-color', vehicleColor.pickingUp)
+      if (liveJobIds.current.has(job.id)) continue
+
+      liveJobIds.current.add(job.id)
+      const journey = getJobJourney(job, vehicle)
+      let pickupRoute: number[][] = [start, job.pickup]
+      let passengerRoute: number[][] = [job.pickup, job.destination]
+      const routeSourceId = `${taxiSourceId}-route`
+      instance.addSource(routeSourceId, { type: 'geojson', data: lineString([...pickupRoute, job.destination]) })
+      instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': '#0f766e', 'line-width': 2.5, 'line-opacity': 0.9 } })
+
+      if (token) {
+        const fetchRoute = async (from: Coordinates, to: Coordinates) => {
+          const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?continue_straight=true&geometries=geojson&overview=full&access_token=${token}`)
+          if (!response.ok) throw new Error(`Directions request failed: ${response.status}`)
+          const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] } }> }
+          return result.routes?.[0]?.geometry.coordinates
+        }
+        void Promise.all([fetchRoute(start, job.pickup), fetchRoute(job.pickup, job.destination)])
+          .then(([toPickup, toDestination]) => {
+            if (!liveJobIds.current.has(job.id) || map.current !== instance) return
+            pickupRoute = toPickup ?? pickupRoute
+            passengerRoute = toDestination ?? passengerRoute
+            ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)
+              ?.setData(lineString([...pickupRoute, ...passengerRoute.slice(1)]))
+          })
+          .catch(() => undefined)
+      }
+
+      const animate = () => {
+        if (map.current !== instance || !instance.getSource(taxiSourceId)) return
+        const now = Date.now()
+        const pickingUp = now < journey.pickupAt
+        const from = pickingUp ? journey.acceptedAt : journey.pickupAt
+        const to = pickingUp ? journey.pickupAt : journey.arrivesAt
+        const route = pickingUp ? pickupRoute : passengerRoute
+        const progress = Math.max(0, Math.min(1, (now - from) / (to - from)))
+        ;(instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(point(routePosition(route, progress)))
+        instance.setPaintProperty(taxiSourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
+        if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
+        if (instance.getLayer(`pickup-${job.id}-label`)) instance.setLayoutProperty(`pickup-${job.id}-label`, 'visibility', pickingUp ? 'visible' : 'none')
+        if (now < journey.arrivesAt && document.visibilityState !== 'hidden') {
+          liveJobTimers.current.set(job.id, window.setTimeout(animate, JOURNEY_UPDATE_INTERVAL_MS))
+        }
+      }
+
+      // Move immediately on acceptance rather than waiting for the first tick.
+      animate()
     }
 
     // Leave the completed taxi dot at its destination without rebuilding the map.
@@ -288,6 +334,10 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       const vehicleIndex = vehicles.findIndex((vehicle) => vehicle.id === job.assignedVehicleId)
       if (vehicleIndex < 0) continue
       const taxiSource = instance.getSource(`taxi-${vehicleIndex}`) as mapboxgl.GeoJSONSource | undefined
+      const timer = liveJobTimers.current.get(job.id)
+      if (timer !== undefined) window.clearTimeout(timer)
+      liveJobTimers.current.delete(job.id)
+      liveJobIds.current.delete(job.id)
       taxiSource?.setData(point(job.destination))
       if (instance.getLayer(`taxi-${vehicleIndex}`)) instance.setPaintProperty(`taxi-${vehicleIndex}`, 'circle-color', vehicleColor.available)
       const routeSourceId = `taxi-${vehicleIndex}-route`

@@ -15,7 +15,7 @@ export default function App() {
   const { company, addRandomJob, tickJobs } = game
 
   const availableVehicleCount = game.vehicles.filter(
-    (vehicle) => vehicle.status === 'available',
+    (vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available',
   ).length
 
   const offeredJobCount = game.jobs.filter(
@@ -34,7 +34,7 @@ export default function App() {
       const state = useGameStore.getState()
 
       const available = state.vehicles.filter(
-        (vehicle) => vehicle.status === 'available',
+        (vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available',
       ).length
 
       const offered = state.jobs.filter(
@@ -292,7 +292,7 @@ export default function App() {
             )}
 
           {game.activeSection === 'services' && game.company && (
-            <ServicesPanel company={game.company} divisions={game.divisions ?? []} contracts={game.contracts ?? []} hub={game.hub ?? { level: 1 }} onClose={() => game.setSection('map')} onEstablish={game.establishDivision} onUpgradeHub={game.upgradeHub} onAcceptContract={game.acceptContract} />
+            <ServicesPanel company={game.company} divisions={game.divisions ?? []} contracts={game.contracts ?? []} vehicles={game.vehicles} hub={game.hub ?? { level: 1 }} onClose={() => game.setSection('map')} onEstablish={game.establishDivision} onBuyVehicle={game.buyServiceVehicle} onUpgradeHub={game.upgradeHub} onAcceptContract={game.acceptContract} />
           )}
 
           <BottomNav

@@ -1,5 +1,6 @@
 import { cityServices } from '../../data/services'
-import type { Company, Division, ServiceContract, ServiceType, TransportHub } from '../../models/game'
+import { serviceVehicleModels } from '../../data/serviceVehicles'
+import type { Company, Division, ServiceContract, ServiceType, TransportHub, Vehicle } from '../../models/game'
 import { levelForReputation } from '../../services/companyProgression'
 
 const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
@@ -8,14 +9,16 @@ interface ServicesPanelProps {
   company: Company
   divisions: Division[]
   contracts: ServiceContract[]
+  vehicles: Vehicle[]
   hub: TransportHub
   onClose: () => void
   onEstablish: (service: ServiceType) => void
+  onBuyVehicle: (modelId: string) => void
   onUpgradeHub: () => void
   onAcceptContract: (contractId: string) => void
 }
 
-export function ServicesPanel({ company, divisions, contracts, hub, onClose, onEstablish, onUpgradeHub, onAcceptContract }: ServicesPanelProps) {
+export function ServicesPanel({ company, divisions, contracts, vehicles, hub, onClose, onEstablish, onBuyVehicle, onUpgradeHub, onAcceptContract }: ServicesPanelProps) {
   const companyLevel = levelForReputation(company.reputation)
   const activeContracts = contracts.filter((contract) => contract.status === 'active')
   const weeklyIncome = activeContracts.reduce((total, contract) => total + contract.weeklyIncome, 0)
@@ -40,6 +43,13 @@ export function ServicesPanel({ company, divisions, contracts, hub, onClose, onE
         {!division && <button disabled={levelLocked || company.cash < service.cost} onClick={() => onEstablish(service.id)}>{levelLocked ? `Level ${service.requiredLevel} hub` : money.format(service.cost)}</button>}
         {division && <b className="division-level">LV {division.level}</b>}
       </article>
+    })}</div>
+
+    <div className="services-section-title service-fleet-title"><b>SERVICE VEHICLES</b><span>{vehicles.filter((vehicle) => vehicle.serviceType).length} owned</span></div>
+    <div className="service-vehicle-shop">{serviceVehicleModels.map((model) => {
+      const unlocked = divisions.some((division) => division.type === model.service)
+      const owned = vehicles.filter((vehicle) => vehicle.modelId === model.id).length
+      return <article className={!unlocked ? 'locked' : ''} key={model.id}><span>{model.icon}</span><div><strong>{model.name}</strong><small>{model.description}</small><em>{model.capacity} capacity · {model.topSpeedKmh} km/h{owned ? ` · ${owned} owned` : ''}</em></div><button disabled={!unlocked || company.cash < model.price} onClick={() => onBuyVehicle(model.id)}>{!unlocked ? 'Establish division' : company.cash < model.price ? 'Not enough cash' : `Buy · ${money.format(model.price)}`}</button></article>
     })}</div>
 
     <div className="services-section-title contract-title"><b>CONTRACTS</b><span>{money.format(weeklyIncome)} / week secured</span></div>

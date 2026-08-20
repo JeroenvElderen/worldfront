@@ -4,7 +4,8 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 import { featureCollection, lineString, point } from '@turf/helpers'
 import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, irelandOverview } from '../data/cities'
-import type { Coordinates, TaxiJob, Vehicle } from '../models/game'
+import { cityServices } from '../data/services'
+import type { Coordinates, ServiceType, TaxiJob, Vehicle } from '../models/game'
 import { getJobJourney } from '../services/jobEngine'
 
 interface GameMapProps { cityId: string | null; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; onOpenJob: (jobId: string) => void }
@@ -46,6 +47,24 @@ const mapIcon = (kind: 'new-job' | 'active-job' | 'new-destination' | 'active-de
   } else {
     context.beginPath(); context.arc(32, 32, 15, 0, Math.PI * 2); context.fill()
   }
+  return context.getImageData(0, 0, 64, 64)
+}
+
+const serviceMapIcon = (service: ServiceType) => {
+  const definition = cityServices.find((item) => item.id === service)
+  const canvas = document.createElement('canvas')
+  canvas.width = 64; canvas.height = 64
+  const context = canvas.getContext('2d')!
+  context.fillStyle = definition?.accent ?? '#22c55e'
+  context.strokeStyle = '#fff'; context.lineWidth = 4
+  context.beginPath()
+  if (service === 'bicycle') context.arc(32, 32, 25, 0, Math.PI * 2)
+  else if (service === 'food') { context.moveTo(32, 5); context.lineTo(59, 32); context.lineTo(32, 59); context.lineTo(5, 32); context.closePath() }
+  else if (service === 'parcel') context.rect(7, 7, 50, 50)
+  else if (service === 'accessible') for (let index = 0; index < 6; index++) { const angle = Math.PI / 3 * index - Math.PI / 2; const x = 32 + Math.cos(angle) * 28; const y = 32 + Math.sin(angle) * 28; if (index) context.lineTo(x, y); else context.moveTo(x, y) }
+  else { context.moveTo(32, 4); context.lineTo(59, 56); context.lineTo(5, 56); context.closePath() }
+  context.fill(); context.stroke()
+  context.fillStyle = '#102724'; context.font = '900 24px sans-serif'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText(definition?.shortName.slice(0, 1) ?? 'S', 32, 33)
   return context.getImageData(0, 0, 64, 64)
 }
 
@@ -131,12 +150,13 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       instance.addImage('active-job-marker', mapIcon('active-job'), { pixelRatio: 2 })
       instance.addImage('new-destination-marker', mapIcon('new-destination'), { pixelRatio: 2 })
       instance.addImage('active-destination-marker', mapIcon('active-destination'), { pixelRatio: 2 })
+      for (const service of cityServices) instance.addImage(`service-${service.id}-marker`, serviceMapIcon(service.id), { pixelRatio: 2 })
       instance.addSource('company-base', { type: 'geojson', data: featureCollection(selected ? [point(selected.coordinates)] : []) })
       instance.addLayer({ id: 'base-halo', type: 'circle', source: 'company-base', paint: { 'circle-radius': 22, 'circle-color': '#22d3a7', 'circle-opacity': 0.22, 'circle-stroke-width': 1, 'circle-stroke-color': '#5eead4' } })
       instance.addLayer({ id: 'base', type: 'circle', source: 'company-base', paint: { 'circle-radius': 9, 'circle-color': '#0f766e', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } })
 
       for (const [index, vehicle] of vehicles.entries()) {
-        const job = jobs.find((candidate) => candidate.status === 'accepted' && (candidate.assignedVehicleId === vehicle.id || (!candidate.assignedVehicleId && vehicle.status === 'on-job')))
+        const job = vehicle.type === 'taxi' ? jobs.find((candidate) => candidate.status === 'accepted' && (candidate.assignedVehicleId === vehicle.id || (!candidate.assignedVehicleId && vehicle.status === 'on-job'))) : undefined
         const start = vehicle.position ?? selected?.coordinates
         if (!start) continue
         let pickupRoute: RouteDetails = { coordinates: job ? [start, job.pickup] : [start], speedLimits: [] }
@@ -161,7 +181,8 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
           instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': '#0f766e', 'line-width': 2.5, 'line-opacity': 0.9 } })
         }
         instance.addSource(sourceId, { type: 'geojson', data: point(start) })
-        instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 6, 'circle-color': job ? vehicleColor.pickingUp : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available, 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
+        if (vehicle.serviceType) instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': `service-${vehicle.serviceType}-marker`, 'icon-size': .72, 'icon-allow-overlap': true } })
+        else instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 6, 'circle-color': job ? vehicleColor.pickingUp : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available, 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
         if (!job && vehicle.serviceTrip) {
           const service = vehicle.serviceTrip
           let serviceTimer: number | undefined

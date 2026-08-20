@@ -9,12 +9,7 @@ import { getJobJourney } from '../services/jobEngine'
 
 interface GameMapProps { cityId: string | null; vehicles: Vehicle[]; jobs: TaxiJob[]; onOpenJob: (jobId: string) => void }
 const token = mapboxAccessToken
-// Keep the visible base map independent from the Mapbox token. A revoked or
-// origin-restricted token otherwise leaves Mapbox GL's background visible but
-// cannot load any streets, which looks like a blue/black screen. Mapbox remains
-// available for place and route data, while public OSM tiles make the map itself
-// resilient to token failures.
-const baseMapStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
+const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
 const routePosition = (coordinates: number[][], progress: number): Coordinates => {
   const lengths = coordinates.slice(1).map((coordinate, index) => Math.hypot(coordinate[0] - coordinates[index][0], coordinate[1] - coordinates[index][1]))
@@ -79,6 +74,7 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
   const pickupHandlers = useRef(new Map<string, { enter: () => void; leave: () => void; click: (event: mapboxgl.MapMouseEvent) => void }>())
   const knownJourneyAssignments = useRef(new Set<string>())
   const [mapRevision, setMapRevision] = useState(0)
+  const [mapFailed, setMapFailed] = useState(false)
   // Only rebuild the expensive WebGL map when the fleet's appearance or a new
   // journey changes. Finishing a job is handled in-place below, avoiding the
   // visible map flash that used to happen at every arrival.
@@ -88,30 +84,58 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
 
   useEffect(() => {
     if (!container.current) return
+    setMapFailed(false)
+    if (!mapboxgl.supported()) {
+      setMapFailed(true)
+      return
+    }
     if (token) mapboxgl.accessToken = token
     const selected = getCity(cityId)
     const abortController = new AbortController()
     const animationTimers = new Set<number>()
     const animationRunners = new Set<() => void>()
-    const instance = new mapboxgl.Map({
-      container: container.current,
-      style: baseMapStyle,
-      center: viewport.current?.center ?? selected?.coordinates ?? irelandOverview.center,
-      zoom: viewport.current?.zoom ?? selected?.mapZoom ?? irelandOverview.zoom,
-      attributionControl: false,
-      pitchWithRotate: false,
-      // Avoid periodic network and render work when the already-cached map is
-      // perfectly adequate for this mostly static management-game viewport.
-      refreshExpiredTiles: false,
-      fadeDuration: 0,
-      maxTileCacheSize: 24,
-    })
+    let instance: mapboxgl.Map
+    try {
+      instance = new mapboxgl.Map({
+        container: container.current,
+        // Use the Mapbox-hosted style when its configured token is available.
+        // Switching every install to third-party raster tiles caused the Android
+        // WebView regression where the map surface stayed black after setup.
+        style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle,
+        center: viewport.current?.center ?? selected?.coordinates ?? irelandOverview.center,
+        zoom: viewport.current?.zoom ?? selected?.mapZoom ?? irelandOverview.zoom,
+        attributionControl: false,
+        pitchWithRotate: false,
+        // Avoid periodic network and render work when the already-cached map is
+        // perfectly adequate for this mostly static management-game viewport.
+        refreshExpiredTiles: false,
+        fadeDuration: 0,
+        maxTileCacheSize: 24,
+      })
+    } catch (error) {
+      console.error('The game map could not be initialized.', error)
+      setMapFailed(true)
+      return
+    }
     map.current = instance
     pickupJobIds.current.clear()
     pickupHandlers.current.clear()
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
     instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right')
+    let initialized = false
+    const initializationTimeout = window.setTimeout(() => {
+      if (!initialized) setMapFailed(true)
+    }, 10_000)
+    const handleInitializationError = (event: mapboxgl.ErrorEvent) => {
+      if (initialized) return
+      console.error('The game map failed before it was ready.', event.error)
+      window.clearTimeout(initializationTimeout)
+      setMapFailed(true)
+    }
+    instance.on('error', handleInitializationError)
     instance.on('load', async () => {
+      initialized = true
+      window.clearTimeout(initializationTimeout)
       instance.addImage('pickup-marker', mapIcon('pickup'), { pixelRatio: 2 })
       instance.addImage('destination-marker', mapIcon('destination'), { pixelRatio: 2 })
       instance.addSource('company-base', { type: 'geojson', data: featureCollection(selected ? [point(selected.coordinates)] : []) })
@@ -188,8 +212,10 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
       const center = instance.getCenter()
       viewport.current = { center: [center.lng, center.lat], zoom: instance.getZoom() }
       abortController.abort()
+      window.clearTimeout(initializationTimeout)
       animationTimers.forEach(window.clearTimeout)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
+      instance.off('error', handleInitializationError)
       map.current = null
       instance.remove()
     }
@@ -251,7 +277,12 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
     }
   }, [jobs, vehicles, mapRevision, onOpenJob])
 
-  return <div ref={container} className="absolute inset-0" aria-label="Interactive game map" />
+  return <>
+    <div ref={container} className={`absolute inset-0${mapFailed ? ' map-hidden' : ''}`} aria-label="Interactive game map" />
+    {mapFailed && <div className="map-fallback" role="status">
+      <div><span>MAP UNAVAILABLE</span><p>Your company is still running. You can continue using the controls below.</p></div>
+    </div>}
+  </>
 }
 
 export const GameMap = memo(GameMapView, (previous, next) =>

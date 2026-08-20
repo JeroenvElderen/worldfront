@@ -63,8 +63,8 @@ export default function App() {
   }, [company, tickJobs])
   if (!game.hasHydrated) return <div className="loading">TRAVEL EMPIRE</div>
   return <div className="game-shell">
+    <MapErrorBoundary><GameMap cityId={game.startingCityId} vehicles={game.vehicles} jobs={game.jobs} onOpenJob={game.openJob} /></MapErrorBoundary>
     {game.company ? <>
-      <MapErrorBoundary><GameMap cityId={game.startingCityId} vehicles={game.vehicles} jobs={game.jobs} onOpenJob={game.openJob} /></MapErrorBoundary>
       <TopHud company={game.company} />
       {game.activeSection !== 'map' && <SectionSheet section={game.activeSection} focusedJobId={game.focusedJobId} vehicles={game.vehicles} jobs={game.jobs} passengers={game.passengers} cash={game.company.cash} jobsLoading={game.jobsLoading} jobsError={game.jobsError} onClose={() => game.setSection('map')} onReset={game.resetGame} onRefreshJobs={game.refreshJobs} onAcceptJob={game.acceptJob} onDeclineJob={game.declineJob} onBuyTaxi={game.buyTaxi} onToggleAccessory={game.toggleExteriorAccessory} />}
       <BottomNav active={game.activeSection} onChange={game.setSection} />

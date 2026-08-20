@@ -1,4 +1,5 @@
 import type { City, Coordinates, Passenger, TaxiJob } from '../models/game'
+import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 
@@ -17,8 +18,7 @@ interface MapboxFeature {
   properties?: { mapbox_id?: unknown; name?: unknown; full_address?: unknown }
 }
 
-const configuredToken = (import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined)?.trim()
-const mapboxToken = configuredToken && !configuredToken.includes('your_public_mapbox_token') ? configuredToken : undefined
+const mapboxToken = mapboxAccessToken
 const placeSearches = ['airport', 'train station', 'hotel', 'hospital', 'shopping centre', 'museum', 'university', 'stadium', 'tourist attraction', 'restaurant']
 const MAPBOX_REQUEST_INTERVAL_MS = 250
 interface PlaceCacheEntry { loadedRadiusKm: number; places: MapboxPlace[]; pending?: Promise<void> }
@@ -61,8 +61,6 @@ const wait = (milliseconds: number, signal?: AbortSignal) => new Promise<void>((
 })
 
 async function fetchMapboxPlaces(city: City, previousRadiusKm: number, radiusKm: number, signal?: AbortSignal): Promise<MapboxPlace[]> {
-  if (!mapboxToken) throw new Error('Add VITE_MAPBOX_ACCESS_TOKEN to .env, then rebuild the app to find taxi requests.')
-
   const responses: Array<{ features?: MapboxFeature[] }> = []
   const boxes = boxesForNewArea(city.coordinates, previousRadiusKm, radiusKm)
   for (const box of boxes) {

@@ -1,0 +1,1 @@
+export const mapboxTokenSuffix = 'ImEiOiJjbWMwa2M0cWswMm9jMnFzNjI3Z2I4YnV4In0.qUqeNUDYMBf3E54ouOd2Jg'

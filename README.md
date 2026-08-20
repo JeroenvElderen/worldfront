@@ -4,20 +4,14 @@ A mobile-first transport and travel management game foundation built around the 
 
 ## Getting started
 
-1. Copy the environment template and optionally add a Mapbox key:
-
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Install and start the browser build:
+1. Install and start the browser build:
 
    ```bash
    pnpm install
    pnpm dev
    ```
 
-Vite prints the local URL (normally `http://localhost:5173`). Configure `VITE_MAPBOX_ACCESS_TOKEN` to load the map and generate taxi requests from real Mapbox places.
+Vite prints the local URL (normally `http://localhost:5173`). The bundled public Mapbox token loads the map and generates taxi requests from real Mapbox places, so no environment file is required.
 
 ## Taxi requests
 
@@ -40,7 +34,9 @@ For later web changes, `pnpm android:open` builds the app, syncs the web bundle 
 pnpm android:prepare
 ```
 
-Android Studio and its Android SDK are required to compile and run the resulting native project.
+Android Studio with its Android SDK is the supported desktop workflow for compiling and running the native project.
+
+Building directly on an Android phone is also possible when an ARM-compatible Android SDK is already installed. See the step-by-step [Termux installation guide](TERMUX.md) for setup, APK creation, and installation.
 
 ## Quality commands
 

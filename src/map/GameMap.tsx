@@ -2,14 +2,14 @@ import { memo, useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { featureCollection, point } from '@turf/helpers'
+import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, irelandOverview } from '../data/cities'
 import type { Coordinates, TaxiJob, Vehicle } from '../models/game'
 import { getJobJourney } from '../services/jobEngine'
 import { getTaxiModel } from '../data/taxis'
 
 interface GameMapProps { cityId: string | null; vehicles: Vehicle[]; jobs: TaxiJob[]; onOpenJob: (jobId: string) => void }
-const configuredToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined
-const token = configuredToken && !configuredToken.includes('your_public_mapbox_token') ? configuredToken : undefined
+const token = mapboxAccessToken
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
 const routePosition = (coordinates: number[][], progress: number): Coordinates => {

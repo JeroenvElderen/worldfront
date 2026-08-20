@@ -14,7 +14,7 @@ export default function App() {
   const { company, addRandomJob, tickJobs } = game
 
   const availableVehicleCount = game.vehicles.filter(
-    (vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available',
+    (vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available' && vehicle.driverId,
   ).length
 
   const offeredJobCount = game.jobs.filter(
@@ -33,7 +33,7 @@ export default function App() {
       const state = useGameStore.getState()
 
       const available = state.vehicles.filter(
-        (vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available',
+        (vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available' && vehicle.driverId,
       ).length
 
       const offered = state.jobs.filter(
@@ -130,6 +130,7 @@ export default function App() {
         ...(state.loans ?? []).map((loan) =>
           new Date(loan.nextPaymentAt).getTime(),
         ),
+        ...state.drivers.flatMap((driver) => driver.missedShiftUntil ? [new Date(driver.missedShiftUntil).getTime()] : []),
       ])
       .reduce(
         (soonest, event) =>
@@ -157,6 +158,7 @@ export default function App() {
     game.nextEventAt,
     game.nextOperatingPaymentAt,
     game.loans,
+    game.drivers,
     game.hasHydrated,
     tickJobs,
   ])
@@ -273,6 +275,9 @@ export default function App() {
                 section={game.activeSection}
                 vehicles={game.vehicles}
                 drivers={game.drivers}
+                driverCandidates={game.driverCandidates}
+                goals={game.goals}
+                jobs={game.jobs}
                 loans={game.loans}
                 cash={game.company.cash}
                 onClose={() =>
@@ -288,6 +293,13 @@ export default function App() {
                 onSetDriverShift={
                   game.setDriverShift
                 }
+                onHireDriver={game.hireDriver}
+                onRefreshCandidates={game.refreshDriverCandidates}
+                onServiceVehicle={game.serviceVehicle}
+                onInstallUpgrade={game.installUpgrade}
+                onSetRefuelStrategy={game.setRefuelStrategy}
+                onRefuelVehicle={game.refuelVehicle}
+                onClaimGoal={game.claimGoal}
                 onToggleAccessory={
                   game.toggleExteriorAccessory
                 }

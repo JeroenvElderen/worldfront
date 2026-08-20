@@ -6,9 +6,9 @@ import type { Company, ExteriorAccessory, GameSave, Vehicle } from '../models/ga
 import { indexedDbStorage } from '../services/saveDatabase'
 import { levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import { generateJobOffers } from '../services/jobOfferService'
-import { acceptJobState, completeArrivedJobsState, completeJobState, MAX_JOB_OFFERS } from '../services/jobEngine'
+import { acceptJobState, completeArrivedJobsState, completeJobState, jobOfferExpiresAt, MAX_JOB_OFFERS } from '../services/jobEngine'
 
-type Section = 'map' | 'fleet' | 'travel' | 'company'
+type Section = 'map' | 'jobs' | 'fleet' | 'travel' | 'company'
 interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; resetGame: () => void }
 interface GameState extends GameSave { activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
 
@@ -18,7 +18,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   ...blankSave, activeSection: 'map', focusedJobId: null, hasHydrated: false, jobsLoading: false, jobsError: null,
   setHasHydrated: (hasHydrated) => set({ hasHydrated }),
   setSection: (activeSection) => set({ activeSection }),
-  openJob: (focusedJobId) => set({ focusedJobId, activeSection: 'map' }),
+  openJob: (focusedJobId) => set({ focusedJobId, activeSection: 'jobs' }),
   initializeCompany: (cityId) => {
     if (!getCity(cityId)) return
     const now = new Date().toISOString()
@@ -74,9 +74,12 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     return result ? { ...result, updatedAt: new Date().toISOString() } : state
   }),
   tickJobs: () => set((state) => {
-    if (!state.company || !state.jobs.some((job) => job.status === 'accepted')) return state
-    const result = completeArrivedJobsState(state.company, state.jobs, state.vehicles)
-    return result ? { company: result.company, jobs: result.jobs, vehicles: result.vehicles, focusedJobId: null, updatedAt: new Date().toISOString() } : state
+    if (!state.company) return state
+    const now = Date.now()
+    const jobs = state.jobs.filter((job) => job.status !== 'offered' || jobOfferExpiresAt(job) > now)
+    const result = completeArrivedJobsState(state.company, jobs, state.vehicles, now)
+    if (result) return { company: result.company, jobs: result.jobs, vehicles: result.vehicles, focusedJobId: null, updatedAt: new Date().toISOString() }
+    return jobs.length === state.jobs.length ? state : { jobs, focusedJobId: jobs.some((job) => job.id === state.focusedJobId) ? state.focusedJobId : null, updatedAt: new Date().toISOString() }
   }),
   buyTaxi: (modelId) => set((state) => {
     const model = getTaxiModel(modelId)

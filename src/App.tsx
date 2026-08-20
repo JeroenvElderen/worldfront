@@ -6,7 +6,7 @@ import { TaxiCallPopup } from './components/game/TaxiCallPopup'
 import { GameMap } from './map/GameMap'
 import { CitySetup } from './screens/CitySetup'
 import { useGameStore } from './stores/gameStore'
-import { getJobJourney } from './services/jobEngine'
+import { getJobJourney, jobOfferExpiresAt } from './services/jobEngine'
 
 export default function App() {
   const game = useGameStore()
@@ -32,15 +32,16 @@ export default function App() {
     if (!company) return
     tickJobs()
     const state = useGameStore.getState()
-    const nextArrival = state.jobs
-      .filter((job) => job.status === 'accepted')
+    const nextJobEvent = state.jobs
+      .filter((job) => job.status === 'accepted' || job.status === 'offered')
       .map((job) => {
+        if (job.status === 'offered') return jobOfferExpiresAt(job)
         const vehicle = state.vehicles.find((candidate) => candidate.id === job.assignedVehicleId)
         return vehicle ? getJobJourney(job, vehicle).arrivesAt : Number.POSITIVE_INFINITY
       })
-      .reduce((soonest, arrival) => Math.min(soonest, arrival), Number.POSITIVE_INFINITY)
-    if (!Number.isFinite(nextArrival)) return
-    const timeout = window.setTimeout(tickJobs, Math.max(0, nextArrival - Date.now()) + 50)
+      .reduce((soonest, event) => Math.min(soonest, event), Number.POSITIVE_INFINITY)
+    if (!Number.isFinite(nextJobEvent)) return
+    const timeout = window.setTimeout(tickJobs, Math.max(0, nextJobEvent - Date.now()) + 50)
     return () => window.clearTimeout(timeout)
   }, [company, game.jobs, game.vehicles, tickJobs])
   useEffect(() => {
@@ -65,8 +66,8 @@ export default function App() {
     <GameMap cityId={game.startingCityId} vehicles={game.vehicles} jobs={game.jobs} onOpenJob={game.openJob} />
     {game.company ? <>
       <TopHud company={game.company} />
-      {game.activeSection === 'map' && <TaxiCallPopup focusedJobId={game.focusedJobId} vehicles={game.vehicles} jobs={game.jobs} passengers={game.passengers} onAccept={game.acceptJob} onDecline={game.declineJob} />}
-      {game.activeSection !== 'map' && <SectionSheet section={game.activeSection} vehicles={game.vehicles} cash={game.company.cash} onClose={() => game.setSection('map')} onReset={game.resetGame} onBuyTaxi={game.buyTaxi} onToggleAccessory={game.toggleExteriorAccessory} />}
+      {game.activeSection === 'jobs' && <TaxiCallPopup focusedJobId={game.focusedJobId} vehicles={game.vehicles} jobs={game.jobs} passengers={game.passengers} onAccept={game.acceptJob} onDecline={game.declineJob} onClose={() => game.setSection('map')} />}
+      {game.activeSection !== 'map' && game.activeSection !== 'jobs' && <SectionSheet section={game.activeSection} vehicles={game.vehicles} cash={game.company.cash} onClose={() => game.setSection('map')} onReset={game.resetGame} onBuyTaxi={game.buyTaxi} onToggleAccessory={game.toggleExteriorAccessory} />}
       <BottomNav active={game.activeSection} onChange={game.setSection} />
     </> : <CitySetup onStart={game.initializeCompany} />}
   </div>

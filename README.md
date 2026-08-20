@@ -1,6 +1,6 @@
 # Travel Empire
 
-A mobile-first transport and travel management game foundation built around the real-world Mapbox map.
+A mobile-first transport and travel management game foundation built around a real-world OpenStreetMap base map with Mapbox-powered place and route data.
 
 ## Getting started
 
@@ -11,7 +11,7 @@ A mobile-first transport and travel management game foundation built around the 
    pnpm dev
    ```
 
-Vite prints the local URL (normally `http://localhost:5173`). The bundled public Mapbox token loads the map and generates taxi requests from real Mapbox places, so no environment file is required.
+Vite prints the local URL (normally `http://localhost:5173`). The map uses public OpenStreetMap tiles, while the bundled public Mapbox token generates taxi requests from real Mapbox places, so no environment file is required.
 
 ## Taxi requests
 

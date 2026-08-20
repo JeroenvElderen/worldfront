@@ -9,7 +9,12 @@ import { getJobJourney } from '../services/jobEngine'
 
 interface GameMapProps { cityId: string | null; vehicles: Vehicle[]; jobs: TaxiJob[]; onOpenJob: (jobId: string) => void }
 const token = mapboxAccessToken
-const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
+// Keep the visible base map independent from the Mapbox token. A revoked or
+// origin-restricted token otherwise leaves Mapbox GL's background visible but
+// cannot load any streets, which looks like a blue/black screen. Mapbox remains
+// available for place and route data, while public OSM tiles make the map itself
+// resilient to token failures.
+const baseMapStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
 const routePosition = (coordinates: number[][], progress: number): Coordinates => {
   const lengths = coordinates.slice(1).map((coordinate, index) => Math.hypot(coordinate[0] - coordinates[index][0], coordinate[1] - coordinates[index][1]))
@@ -90,7 +95,7 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
     const animationRunners = new Set<() => void>()
     const instance = new mapboxgl.Map({
       container: container.current,
-      style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle,
+      style: baseMapStyle,
       center: viewport.current?.center ?? selected?.coordinates ?? irelandOverview.center,
       zoom: viewport.current?.zoom ?? selected?.mapZoom ?? irelandOverview.zoom,
       attributionControl: false,

@@ -3,6 +3,7 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 import { getCity } from '../data/cities'
 import { getTaxiModel } from '../data/taxis'
 import { cityServices, contractOffers } from '../data/services'
+import { getServiceVehicleModel } from '../data/serviceVehicles'
 import type { Company, Driver, ExteriorAccessory, GameSave, ServiceType, Vehicle } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
 import { levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
@@ -11,7 +12,7 @@ import { acceptJobState, completeArrivedJobsState, completeJobState, getJobJourn
 import { createDynamicEvent, energyUseForJob, fatigueUseForJob, FINANCE_PERIOD_MS, startRecoveryTrip } from '../services/operationsEngine'
 
 type Section = 'map' | 'jobs' | 'fleet' | 'services' | 'company'
-interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; establishDivision: (service: ServiceType) => void; upgradeHub: () => void; acceptContract: (contractId: string) => void; resetGame: () => void }
+interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; buyServiceVehicle: (modelId: string) => void; leaseTaxi: (modelId: string) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; establishDivision: (service: ServiceType) => void; upgradeHub: () => void; acceptContract: (contractId: string) => void; resetGame: () => void }
 interface GameState extends GameSave { activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
 
 const blankSave: GameSave = { id: 'autosave', version: 4, updatedAt: new Date(0).toISOString(), company: null, startingCityId: null, vehicles: [], drivers: [], jobs: [], agencies: [], tours: [], passengers: [], jobRequestHistory: [], loans: [], divisions: [], contracts: contractOffers, hub: { level: 1 }, activeEvent: null, nextEventAt: new Date(0).toISOString(), nextOperatingPaymentAt: new Date(0).toISOString() }
@@ -34,7 +35,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   },
   refreshJobs: async () => {
     const state = useGameStore.getState()
-    const availableTaxi = state.vehicles.find((vehicle) => vehicle.status === 'available')
+    const availableTaxi = state.vehicles.find((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available')
     if (!state.startingCityId || state.jobsLoading || !availableTaxi) return
     const city = getCity(state.startingCityId)
     if (!city) return
@@ -42,8 +43,8 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     try {
       const level = levelForReputation(state.company?.reputation ?? 0)
       const searchArea = availableTaxi.position ? { ...city, coordinates: availableTaxi.position } : city
-      const taxiPositions = state.vehicles.filter((vehicle) => vehicle.status === 'available').map((vehicle) => vehicle.position ?? city.coordinates)
-      const maxDistanceKm = maxJobDistanceForFleet(level, state.vehicles.length)
+      const taxiPositions = state.vehicles.filter((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available').map((vehicle) => vehicle.position ?? city.coordinates)
+      const maxDistanceKm = maxJobDistanceForFleet(level, state.vehicles.filter((vehicle) => vehicle.type === 'taxi').length)
       const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, state.activeEvent?.fareMultiplier ?? 1)
       set((latest) => ({ jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...generated.jobs], passengers: [...latest.passengers, ...generated.passengers], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }))
     } catch (error) {
@@ -52,7 +53,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   },
   addRandomJob: async () => {
     const state = useGameStore.getState()
-    const availableTaxi = state.vehicles.find((vehicle) => vehicle.status === 'available')
+    const availableTaxi = state.vehicles.find((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available')
     if (!state.startingCityId || state.jobsLoading || !availableTaxi || state.jobs.filter((job) => job.status === 'offered').length >= MAX_JOB_OFFERS) return
     const city = getCity(state.startingCityId)
     if (!city) return
@@ -60,8 +61,8 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     try {
       const level = levelForReputation(state.company?.reputation ?? 0)
       const searchArea = availableTaxi.position ? { ...city, coordinates: availableTaxi.position } : city
-      const taxiPositions = state.vehicles.filter((vehicle) => vehicle.status === 'available').map((vehicle) => vehicle.position ?? city.coordinates)
-      const maxDistanceKm = maxJobDistanceForFleet(level, state.vehicles.length)
+      const taxiPositions = state.vehicles.filter((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available').map((vehicle) => vehicle.position ?? city.coordinates)
+      const maxDistanceKm = maxJobDistanceForFleet(level, state.vehicles.filter((vehicle) => vehicle.type === 'taxi').length)
       const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, state.activeEvent?.fareMultiplier ?? 1)
       set((latest) => ({ jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...generated.jobs], passengers: [...latest.passengers, ...generated.passengers], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }))
     } catch (error) {
@@ -139,6 +140,17 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     const driver: Driver = { id: crypto.randomUUID(), name: `Driver ${state.drivers.length + 1}`, rating: 4.5, salary: 650, status: 'available', fatigue: 0, home: city.coordinates, shift: 'day' }
     const taxi: Vehicle = { id: crypto.randomUUID(), name: `${model.brand} ${model.name} ${modelNumber}`, type: 'taxi', modelId: model.id, powertrain: model.powertrain, exteriorAccessories: [], value: model.price, condition: 100, fuel: 100, capacity: model.capacity, topSpeedKmh: model.topSpeedKmh, status: 'available', cityId: city.id, position: city.coordinates, ownership: 'owned', driverId: driver.id }
     return { company: { ...state.company, cash: state.company.cash - taxi.value }, vehicles: [...state.vehicles, taxi], drivers: [...state.drivers, driver], updatedAt: new Date().toISOString() }
+  }),
+  buyServiceVehicle: (modelId) => set((state) => {
+    const model = getServiceVehicleModel(modelId)
+    const city = getCity(state.startingCityId)
+    if (!model || !city || !state.company || state.company.cash < model.price || !(state.divisions ?? []).some((division) => division.type === model.service)) return state
+    const number = state.vehicles.filter((vehicle) => vehicle.modelId === model.id).length + 1
+    const serviceFleetSize = state.vehicles.filter((vehicle) => vehicle.serviceType).length
+    const angle = serviceFleetSize * 2.4
+    const position = [city.coordinates[0] + Math.cos(angle) * 0.0025, city.coordinates[1] + Math.sin(angle) * 0.0018] as const
+    const vehicle: Vehicle = { id: crypto.randomUUID(), name: `${model.name} ${number}`, type: model.type, serviceType: model.service, modelId: model.id, value: model.price, condition: 100, fuel: 100, capacity: model.capacity, topSpeedKmh: model.topSpeedKmh, status: 'available', cityId: city.id, position: [...position], ownership: 'owned' }
+    return { company: { ...state.company, cash: state.company.cash - model.price }, vehicles: [...state.vehicles, vehicle], updatedAt: new Date().toISOString() }
   }),
   leaseTaxi: (modelId) => set((state) => {
     const model = getTaxiModel(modelId); const city = getCity(state.startingCityId)

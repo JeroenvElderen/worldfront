@@ -39,11 +39,14 @@ export default function App() {
         const vehicle = state.vehicles.find((candidate) => candidate.id === job.assignedVehicleId)
         return vehicle ? getJobJourney(job, vehicle).arrivesAt : Number.POSITIVE_INFINITY
       })
+      .concat(state.vehicles.flatMap((vehicle) => vehicle.serviceTrip ? [new Date(vehicle.serviceTrip.arrivesAt).getTime()] : []))
+      .concat(state.activeEvent ? [new Date(state.activeEvent.expiresAt).getTime()] : [new Date(state.nextEventAt).getTime()])
+      .concat([new Date(state.nextOperatingPaymentAt).getTime(), ...(state.loans ?? []).map((loan) => new Date(loan.nextPaymentAt).getTime())])
       .reduce((soonest, event) => Math.min(soonest, event), Number.POSITIVE_INFINITY)
     if (!Number.isFinite(nextJobEvent)) return
     const timeout = window.setTimeout(tickJobs, Math.max(0, nextJobEvent - Date.now()) + 50)
     return () => window.clearTimeout(timeout)
-  }, [company, game.jobs, game.vehicles, tickJobs])
+  }, [company, game.jobs, game.vehicles, game.activeEvent, game.nextEventAt, game.nextOperatingPaymentAt, game.loans, tickJobs])
   useEffect(() => {
     if (!company) return
     const resumeGame = () => {
@@ -66,8 +69,9 @@ export default function App() {
     <GameMap cityId={game.startingCityId} vehicles={game.vehicles} jobs={game.jobs} focusedJobId={game.focusedJobId} onOpenJob={game.openJob} />
     {game.company ? <>
       <TopHud company={game.company} />
+      {game.activeEvent && <aside className="event-banner"><b>⚡ {game.activeEvent.name}</b><span>{game.activeEvent.description} · Fares ×{game.activeEvent.fareMultiplier.toFixed(2)}</span></aside>}
       {game.activeSection === 'jobs' && <TaxiCallPopup focusedJobId={game.focusedJobId} vehicles={game.vehicles} jobs={game.jobs} passengers={game.passengers} onAccept={game.acceptJob} onDecline={game.declineJob} onClose={() => game.setSection('map')} />}
-      {game.activeSection !== 'map' && game.activeSection !== 'jobs' && <SectionSheet section={game.activeSection} vehicles={game.vehicles} cash={game.company.cash} onClose={() => game.setSection('map')} onReset={game.resetGame} onBuyTaxi={game.buyTaxi} onToggleAccessory={game.toggleExteriorAccessory} />}
+      {game.activeSection !== 'map' && game.activeSection !== 'jobs' && <SectionSheet section={game.activeSection} vehicles={game.vehicles} drivers={game.drivers} loans={game.loans} cash={game.company.cash} onClose={() => game.setSection('map')} onReset={game.resetGame} onBuyTaxi={game.buyTaxi} onLeaseTaxi={game.leaseTaxi} onTakeLoan={game.takeLoan} onSellVehicle={game.sellVehicle} onSetDriverShift={game.setDriverShift} onToggleAccessory={game.toggleExteriorAccessory} />}
       <BottomNav active={game.activeSection} onChange={game.setSection} />
     </> : <CitySetup onStart={game.initializeCompany} />}
   </div>

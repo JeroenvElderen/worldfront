@@ -25,7 +25,7 @@ export default function App() {
    * Generate job offers when taxis are available.
    */
   useEffect(() => {
-    if (!company) return
+    if (!company || !game.hasHydrated) return
 
     const requestOfferForAvailableTaxi = () => {
       if (document.visibilityState === 'hidden') return
@@ -64,6 +64,7 @@ export default function App() {
     availableVehicleCount,
     offeredJobCount,
     addRandomJob,
+    game.hasHydrated,
   ])
 
   /**
@@ -75,7 +76,7 @@ export default function App() {
    * effect and caused the Maximum update depth exceeded loop.
    */
   useEffect(() => {
-    if (!company) return
+    if (!company || !game.hasHydrated) return
 
     const state = useGameStore.getState()
 
@@ -154,6 +155,7 @@ export default function App() {
     game.nextEventAt,
     game.nextOperatingPaymentAt,
     game.loans,
+    game.hasHydrated,
     tickJobs,
   ])
 
@@ -164,13 +166,19 @@ export default function App() {
    * the background.
    */
   useEffect(() => {
-    if (!company) return
+    if (!company || !game.hasHydrated) return
 
     const resumeGame = () => {
       if (document.visibilityState === 'hidden') return
 
       tickJobs()
     }
+
+    // A force-closed WebView starts visible, so none of the resume events are
+    // guaranteed to fire after the persisted save has hydrated. Settle the
+    // offline time immediately; making a taxi available then triggers the job
+    // offer effect above.
+    resumeGame()
 
     document.addEventListener(
       'visibilitychange',
@@ -203,7 +211,7 @@ export default function App() {
         resumeGame,
       )
     }
-  }, [company, tickJobs])
+  }, [company, game.hasHydrated, tickJobs])
 
   if (!game.hasHydrated) {
     return (

@@ -6,7 +6,7 @@ import type { Company, Driver, ExteriorAccessory, GameSave, Vehicle } from '../m
 import { indexedDbStorage } from '../services/saveDatabase'
 import { levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import { generateJobOffers } from '../services/jobOfferService'
-import { acceptJobState, completeArrivedJobsState, completeJobState, jobOfferExpiresAt, MAX_JOB_OFFERS } from '../services/jobEngine'
+import { acceptJobState, completeArrivedJobsState, completeJobState, getJobJourney, jobOfferExpiresAt, MAX_JOB_OFFERS } from '../services/jobEngine'
 import { createDynamicEvent, energyUseForJob, fatigueUseForJob, FINANCE_PERIOD_MS, startRecoveryTrip } from '../services/operationsEngine'
 
 type Section = 'map' | 'jobs' | 'fleet' | 'travel' | 'company'
@@ -93,7 +93,11 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
         const job = state.jobs.find((candidate) => candidate.id === jobId)!
         const previousVehicle = state.vehicles.find((candidate) => candidate.id === job.assignedVehicleId)!
         const driver = drivers.find((candidate) => candidate.id === previousVehicle.driverId)
-        vehicles = vehicles.map((vehicle) => vehicle.id !== previousVehicle.id ? vehicle : startRecoveryTrip({ ...vehicle, fuel: Math.max(0, vehicle.fuel - energyUseForJob(job, previousVehicle, state.activeEvent)) }, driver && { ...driver, fatigue: Math.min(100, driver.fatigue + fatigueUseForJob(job)) }, getCity(vehicle.cityId)?.coordinates ?? job.destination, now))
+        // Base recovery on the actual arrival time. If the app was closed long
+        // enough for both journeys to finish, the service trip can settle in
+        // this same tick instead of leaving the taxi unavailable after launch.
+        const completedAt = getJobJourney(job, previousVehicle).arrivesAt
+        vehicles = vehicles.map((vehicle) => vehicle.id !== previousVehicle.id ? vehicle : startRecoveryTrip({ ...vehicle, fuel: Math.max(0, vehicle.fuel - energyUseForJob(job, previousVehicle, state.activeEvent)) }, driver && { ...driver, fatigue: Math.min(100, driver.fatigue + fatigueUseForJob(job)) }, getCity(vehicle.cityId)?.coordinates ?? job.destination, completedAt))
         drivers = drivers.map((candidate) => candidate.id !== driver?.id ? candidate : { ...candidate, fatigue: Math.min(100, candidate.fatigue + fatigueUseForJob(job)), status: vehicles.find((vehicle) => vehicle.driverId === candidate.id)?.status === 'maintenance' ? 'driving' : 'available' })
       }
     }

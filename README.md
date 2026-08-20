@@ -19,6 +19,21 @@ When a taxi is available, the phone searches Mapbox directly for real points of 
 
 The Mapbox public token is embedded in the app and should use URL/app restrictions appropriate for a public client. Mapbox network access is required when a city is first searched; previously loaded offers and saved game data remain on the device.
 
+## Battery use
+
+The map is deliberately updated once per second while a taxi is moving instead
+of continuously rendering at the display frame rate. Journey timers and Mapbox
+rendering stop whenever the app is
+in the background, then catch up from the saved timestamps as soon as it becomes
+visible again. New job offers are generated in response to an idle taxi rather
+than from a repeating 30-second timer. Tile-expiry refreshes and label fades are
+also disabled, and the tile cache is capped, which avoids recurring network,
+CPU, GPU, and memory work without changing game outcomes.
+
+Vehicles are rendered as small map dots and journey route lines are omitted.
+This keeps the map uncluttered and avoids the extra route request and line-layer
+updates that were previously used only for decoration.
+
 ## Android
 
 The native project is generated from the Capacitor configuration after dependencies are installed:
@@ -48,4 +63,4 @@ pnpm build
 
 ## Current milestone
 
-The game includes the first-time city flow, local autosave, starter company, fleet purchasing, map base marker, HUD, and navigable game sections. While a taxi is idle, a locally generated taxi call arrives every 30 seconds (up to six open calls), and each available taxi can take its own metered fare, calculated from the passenger's actual journey distance. Completed jobs earn reputation, with every 50 reputation advancing the company one level. Level 1 journeys start at 6 km and are capped at 10 km with one vehicle, 15 km with two, and 20 km with three or more; after level 1, every level unlocks another 20 km of job range without an artificial distance cap, eventually opening the whole country. Every taxi remains visible on the map; when dispatched it drives from its current position to the pickup before continuing to the destination at eight times real-world speed, so the trip takes an eighth of its estimated real-world time. With a Mapbox token these routes use `driving-traffic`, so they follow drivable roads and current traffic-aware restrictions rather than drawing straight lines. Hiring, travel agencies and multiple save-slot UI are reserved for future milestones. The IndexedDB save schema uses a named `autosave` key so additional slots can be introduced without replacing the persistence layer.
+The game includes the first-time city flow, local autosave, starter company, fleet purchasing, map base marker, HUD, and navigable game sections. When a taxi becomes available, a locally generated taxi call is requested immediately, with at most one open call per available taxi; there is no periodic polling timer. Each available taxi can take its own metered fare, calculated from the passenger's actual journey distance. Completed jobs earn reputation, with every 50 reputation advancing the company one level. Level 1 journeys start at 6 km and are capped at 10 km with one vehicle, 15 km with two, and 20 km with three or more; after level 1, every level unlocks another 20 km of job range without an artificial distance cap, eventually opening the whole country. Every taxi remains visible on the map; when dispatched it drives from its current position to the pickup before continuing to the destination at eight times real-world speed, so the trip takes an eighth of its estimated real-world time. With a Mapbox token these routes use `driving-traffic`, so they follow drivable roads and current traffic-aware restrictions rather than drawing straight lines. Hiring, travel agencies and multiple save-slot UI are reserved for future milestones. The IndexedDB save schema uses a named `autosave` key so additional slots can be introduced without replacing the persistence layer.

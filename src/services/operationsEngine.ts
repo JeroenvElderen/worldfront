@@ -20,10 +20,13 @@ export const createDynamicEvent = (now = Date.now()): DynamicEvent => {
 
 export const fuelStationForCity = (center: Coordinates): Coordinates => [center[0] + 0.012, center[1] - 0.006]
 
-export const energyUseForJob = (job: TaxiJob, vehicle: Vehicle, event: DynamicEvent | null) => {
+export const energyUseForJob = (job: TaxiJob, vehicle: Vehicle, event: DynamicEvent | null, driver?: Driver) => {
   const pickupKm = vehicle.position ? distanceKmBetween(vehicle.position, job.pickup) : 0
   const basePer100Km = vehicle.powertrain === 'electric' ? 15 : vehicle.powertrain === 'hybrid' ? 8 : 11
-  return Math.max(1, (pickupKm + job.distanceKm) * basePer100Km / 100 * (event?.fuelMultiplier ?? 1))
+  const traitMultiplier = driver?.trait === 'efficient' ? .82 : 1
+  const upgradeMultiplier = (vehicle.upgrades ?? []).includes('eco-tires') ? .9 : 1
+  const rangeMultiplier = (vehicle.upgrades ?? []).includes('range-pack') ? .85 : 1
+  return Math.max(1, (pickupKm + job.distanceKm) * basePer100Km / 100 * (event?.fuelMultiplier ?? 1) * traitMultiplier * upgradeMultiplier * rangeMultiplier)
 }
 
 export const fatigueUseForJob = (job: TaxiJob) => Math.max(8, Math.round(job.durationMinutes / 3))

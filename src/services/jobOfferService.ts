@@ -2,6 +2,7 @@ import type { City, Coordinates, Passenger, TaxiJob } from '../models/game'
 import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
+import { categoryDetails, categoryForRoute } from './earlyGameEngine'
 
 export const MIN_JOB_DISTANCE_KM = 6
 export const MAX_PICKUP_DISTANCE_KM = 5
@@ -165,13 +166,16 @@ export async function generateJobOffers(
     partySize: 1 + Math.floor(Math.random() * 4),
   }))
   const offeredAt = new Date().toISOString()
-  const jobs = routes.map((route, index): TaxiJob => ({
+  const jobs = routes.map((route, index): TaxiJob => {
+    const category = categoryForRoute(route.pickup.name, route.destination.name, route.distanceKm, passengers[index].partySize)
+    const categoryInfo = categoryDetails[category]
+    return ({
     id: crypto.randomUUID(), cityId: city.id,
     pickup: route.pickup.coordinates, destination: route.destination.coordinates,
     pickupLabel: route.pickup.name, destinationLabel: route.destination.name,
-    passengerIds: [passengers[index].id], fare: Math.round(taxiFareForDistance(route.distanceKm) * fareMultiplier * 100) / 100,
-    distanceKm: route.distanceKm, durationMinutes: Math.max(5, Math.round(route.distanceKm * 3.2)), status: 'offered', offeredAt,
-  }))
+    passengerIds: [passengers[index].id], fare: Math.round(taxiFareForDistance(route.distanceKm) * fareMultiplier * categoryInfo.fare * 100) / 100,
+    distanceKm: route.distanceKm, durationMinutes: Math.max(5, Math.round(route.distanceKm * 3.2)), category, requiredUpgrade: categoryInfo.requiredUpgrade, status: 'offered', offeredAt,
+  })})
 
   return {
     jobs,

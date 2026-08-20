@@ -34,7 +34,7 @@ export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {
   const pickupMinutes = job.distanceKm > 0
     ? pickupDistanceKm * job.durationMinutes / job.distanceKm
     : 0
-  const pickupDurationMs = Math.max(2_000, pickupMinutes * SIMULATED_MINUTE_MS)
+  const pickupDurationMs = Math.max(2_000, pickupMinutes * SIMULATED_MINUTE_MS * (job.pickupTimeMultiplier ?? 1))
   const passengerDurationMs = Math.max(5_000, job.durationMinutes * SIMULATED_MINUTE_MS)
   return {
     acceptedAt,
@@ -46,15 +46,16 @@ export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {
 export function acceptJobState(
   jobs: TaxiJob[],
   vehicles: Vehicle[],
-  jobId: string
+  jobId: string,
+  eligibleVehicleIds?: Set<string>,
 ) {
   if (jobs.some((job) => job.id === jobId && job.status === 'accepted')) return null
 
   const job = jobs.find((candidate) => candidate.id === jobId && candidate.status === 'offered')
   const vehicle = (job && vehicles
-    .filter((candidate) => candidate.type === 'taxi' && candidate.status === 'available' && candidate.position)
+    .filter((candidate) => candidate.type === 'taxi' && candidate.status === 'available' && candidate.position && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
     .sort((left, right) => distanceSquared(left.position!, job.pickup) - distanceSquared(right.position!, job.pickup))[0])
-    ?? vehicles.find((candidate) => candidate.type === 'taxi' && candidate.status === 'available')
+    ?? vehicles.find((candidate) => candidate.type === 'taxi' && candidate.status === 'available' && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
   if (!vehicle || !job) return null
 
   return {

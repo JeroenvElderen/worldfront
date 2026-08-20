@@ -65,6 +65,17 @@ const jobColors = ['#38bdf8', '#f97316', '#a78bfa', '#22c55e', '#f43f5e', '#eab3
 type RouteSpeedLimit = { speed: number; unit: 'km/h' | 'mph' } | { unknown: true } | { none: true }
 type RouteDetails = { coordinates: number[][]; speedLimits: RouteSpeedLimit[] }
 
+const journeyCountdown = (remainingMs: number) => {
+  const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1_000))
+  const hours = Math.floor(totalSeconds / 3_600)
+  const minutes = Math.floor(totalSeconds % 3_600 / 60)
+  const seconds = totalSeconds % 60
+  const clock = hours > 0
+    ? [hours, minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':')
+    : [minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':')
+  return `ETA ${clock}`
+}
+
 const speedLimitKmh = (limit: RouteSpeedLimit | undefined) => {
   if (!limit || 'unknown' in limit || 'none' in limit) return null
   return Math.round(limit.unit === 'mph' ? limit.speed * 1.609344 : limit.speed)
@@ -137,8 +148,8 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
           } catch (error) { if ((error as Error).name === 'AbortError') return }
         }
         const sourceId = `taxi-${index}`
-        instance.addSource(sourceId, { type: 'geojson', data: point(start, { speedLabel: '0 km/h' }) })
-        instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': vehicleImageId, 'icon-size': 1, 'icon-allow-overlap': true, 'text-field': ['get', 'speedLabel'], 'text-size': 11, 'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'], 'text-offset': [0, 2.25], 'text-anchor': 'top', 'text-allow-overlap': true }, paint: { 'text-color': '#ffffff', 'text-halo-color': '#10252d', 'text-halo-width': 2 } })
+        instance.addSource(sourceId, { type: 'geojson', data: point(start, { statusLabel: '0 km/h' }) })
+        instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': vehicleImageId, 'icon-size': 1, 'icon-allow-overlap': true, 'text-field': ['get', 'statusLabel'], 'text-size': 11, 'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'], 'text-offset': [0, 2.25], 'text-anchor': 'top', 'text-allow-overlap': true }, paint: { 'text-color': '#ffffff', 'text-halo-color': '#10252d', 'text-halo-width': 2 } })
         if (!job) continue
         const color = jobColors[jobs.filter((candidate) => candidate.status === 'accepted').findIndex((candidate) => candidate.id === job.id) % jobColors.length]
         const pickupRouteId = `pickup-route-${index}`
@@ -158,7 +169,8 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
           const fallbackSpeedKmh = job.durationMinutes > 0 ? job.distanceKm / (job.durationMinutes / 60) : 30
           const motion = routeMotion(activeRoute, elapsed, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
           const progress = motion.progress
-          ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(activeRoute.coordinates, progress), { speedLabel: `${motion.speedKmh} km/h` }))
+          const statusLabel = `${journeyCountdown(journey.arrivesAt - time)}\n${motion.speedKmh} km/h`
+          ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(activeRoute.coordinates, progress), { statusLabel }))
           const activeRouteId = pickingUp ? pickupRouteId : passengerRouteId
           ;(instance.getSource(activeRouteId) as mapboxgl.GeoJSONSource | undefined)?.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: remainingRoute(activeRoute.coordinates, progress) } })
           if (!pickingUp) {

@@ -26,7 +26,7 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, onAcce
     const interval = window.setInterval(() => setNow(Date.now()), 1_000)
     return () => window.clearInterval(interval)
   }, [])
-  const availableTaxis = vehicles.filter((vehicle) => vehicle.status === 'available')
+  const availableTaxis = vehicles.filter((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available')
   const offers = jobs.filter((job) => job.status === 'offered')
 
   return <section className="section-sheet jobs-sheet game-panel" aria-labelledby="jobs-title" aria-live="polite">

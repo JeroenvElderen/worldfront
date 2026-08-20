@@ -52,9 +52,9 @@ export function acceptJobState(
 
   const job = jobs.find((candidate) => candidate.id === jobId && candidate.status === 'offered')
   const vehicle = (job && vehicles
-    .filter((candidate) => candidate.status === 'available' && candidate.position)
+    .filter((candidate) => candidate.type === 'taxi' && candidate.status === 'available' && candidate.position)
     .sort((left, right) => distanceSquared(left.position!, job.pickup) - distanceSquared(right.position!, job.pickup))[0])
-    ?? vehicles.find((candidate) => candidate.status === 'available')
+    ?? vehicles.find((candidate) => candidate.type === 'taxi' && candidate.status === 'available')
   if (!vehicle || !job) return null
 
   return {

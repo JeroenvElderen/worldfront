@@ -109,7 +109,8 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
       if (vehicle.postalRoute && new Date(vehicle.postalRoute.arrivesAt).getTime() <= now) {
         const reputation = company.reputation + 1
         company = { ...company, cash: company.cash + vehicle.postalRoute.reward, reputation, level: levelForReputation(reputation) }
-        return { ...vehicle, position: vehicle.postalRoute.stops.at(-1)?.coordinates ?? vehicle.position, status: 'available' as const, postalRoute: undefined, fuel: Math.max(0, vehicle.fuel - 8) }
+        const plannedHours = vehicle.postalRoute.plannedHours ?? 1
+        return { ...vehicle, position: vehicle.postalRoute.stops.at(-1)?.coordinates ?? vehicle.position, status: 'available' as const, postalRoute: undefined, fuel: Math.max(0, vehicle.fuel - plannedHours * 4) }
       }
       if (!vehicle.serviceTrip || new Date(vehicle.serviceTrip.arrivesAt).getTime() > now) return vehicle
       const fuel = vehicle.serviceTrip.kind === 'fuel' ? 100 : vehicle.fuel

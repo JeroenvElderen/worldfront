@@ -12,8 +12,8 @@ export interface PostVehicleModel {
 }
 
 export const postVehicleModels: PostVehicleModel[] = [
-  { id: 'ford-transit-post', brand: 'Ford', name: 'Transit Courier', price: 22_000, capacity: 180, topSpeedKmh: 165, powertrain: 'diesel', description: 'Compact parcel van · 4-stop routes' },
-  { id: 'vw-id-buzz-post', brand: 'Volkswagen', name: 'ID. Buzz Cargo', price: 36_000, capacity: 260, topSpeedKmh: 145, powertrain: 'electric', description: 'Electric mail van · 4-stop routes' },
+  { id: 'ford-transit-post', brand: 'Ford', name: 'Transit Courier', price: 22_000, capacity: 180, topSpeedKmh: 165, powertrain: 'diesel', description: 'Compact parcel van · automatic day routes' },
+  { id: 'vw-id-buzz-post', brand: 'Volkswagen', name: 'ID. Buzz Cargo', price: 36_000, capacity: 260, topSpeedKmh: 145, powertrain: 'electric', description: 'Electric mail van · automatic day routes' },
 ]
 
 export const getPostVehicleModel = (id: string) =>

@@ -37,11 +37,14 @@ road route the nearest available driver will take to its pickup and destination.
 
 ## Postal service
 
-The Fleet dealership also sells postal vans. Dispatching one starts an automatic
-four-stop delivery round: numbered stop markers and the remaining route appear
-on the map, and the van follows Mapbox's traffic-aware road geometry before
-returning to the depot. Finishing a round earns cash and reputation, and the van
-can then be dispatched again.
+The Fleet dealership also sells postal vans. Dispatching one generates an
+automatic local delivery round of between one and eight hours, with the number
+and positions of its stops varied for every working day. Numbered stop markers
+and the remaining route appear on the map, and the van follows Mapbox's
+traffic-aware road geometry before returning to its depot. Longer rounds carry
+larger rewards and energy costs. Finishing a round earns cash and reputation,
+and the van can then be dispatched again; unlike taxis, postal vehicles do not
+wait for individual customer job offers.
 
 ## Android
 

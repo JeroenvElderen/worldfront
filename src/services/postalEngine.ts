@@ -1,32 +1,41 @@
 import type { Coordinates, PostalRoute, Vehicle } from '../models/game'
 
-export const POST_ROUTE_DURATION_MS = 75_000
+export const POSTAL_MIN_HOURS = 1
+export const POSTAL_MAX_HOURS = 8
+export const POSTAL_HOUR_MS = 60 * 60_000
 
-const stopOffsets: Coordinates[] = [
-  [0.018, 0.008],
-  [0.012, -0.014],
-  [-0.016, -0.009],
-  [-0.013, 0.014],
-]
+const randomInteger = (minimum: number, maximum: number, random: () => number) =>
+  Math.floor(random() * (maximum - minimum + 1)) + minimum
 
-/** Builds a compact, repeatable delivery round around the vehicle's home city. */
-export function createPostalRoute(vehicle: Vehicle, cityCenter: Coordinates, now = Date.now()): PostalRoute {
+/** Builds a self-contained, random delivery round lasting no more than a working day. */
+export function createPostalRoute(vehicle: Vehicle, cityCenter: Coordinates, now = Date.now(), random = Math.random): PostalRoute {
   const start = vehicle.position ?? cityCenter
-  const deliveryStops = stopOffsets.map(([longitude, latitude], index) => ({
-    id: crypto.randomUUID(),
-    label: `Post stop ${index + 1}`,
-    coordinates: [cityCenter[0] + longitude, cityCenter[1] + latitude] as Coordinates,
-  }))
+  const plannedHours = randomInteger(POSTAL_MIN_HOURS, POSTAL_MAX_HOURS, random)
+  const stopCount = Math.max(3, Math.min(16, plannedHours * 2 + randomInteger(-1, 1, random)))
+  const longitudeScale = 1 / Math.max(0.35, Math.cos(cityCenter[1] * Math.PI / 180))
+  const deliveryStops = Array.from({ length: stopCount }, (_, index) => {
+    const angle = (index / stopCount) * Math.PI * 2 + (random() - 0.5) * 0.7
+    const radius = 0.008 + random() * (0.012 + plannedHours * 0.003)
+    return {
+      id: crypto.randomUUID(),
+      label: `Post stop ${index + 1}`,
+      coordinates: [
+        cityCenter[0] + Math.cos(angle) * radius * longitudeScale,
+        cityCenter[1] + Math.sin(angle) * radius,
+      ] as Coordinates,
+    }
+  })
 
   return {
     stops: [
       { id: crypto.randomUUID(), label: 'Postal depot', coordinates: start },
       ...deliveryStops,
-      { id: crypto.randomUUID(), label: 'Postal depot', coordinates: cityCenter },
+      { id: crypto.randomUUID(), label: 'Postal depot', coordinates: start },
     ],
     startedAt: new Date(now).toISOString(),
-    arrivesAt: new Date(now + POST_ROUTE_DURATION_MS).toISOString(),
-    reward: 420,
+    arrivesAt: new Date(now + plannedHours * POSTAL_HOUR_MS).toISOString(),
+    reward: plannedHours * 110 + stopCount * 15,
+    plannedHours,
   }
 }
 

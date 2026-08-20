@@ -3,6 +3,7 @@ import { BottomNav } from './components/game/BottomNav'
 import { SectionSheet } from './components/game/SectionSheet'
 import { TopHud } from './components/game/TopHud'
 import { TaxiCallPopup } from './components/game/TaxiCallPopup'
+import { FinancialDashboard } from './components/game/FinancialDashboard'
 import { GameMap } from './map/GameMap'
 import { CitySetup } from './screens/CitySetup'
 import { useGameStore } from './stores/gameStore'
@@ -270,7 +271,8 @@ export default function App() {
           )}
 
           {game.activeSection !== 'map' &&
-            game.activeSection !== 'jobs' && (
+            game.activeSection !== 'jobs' &&
+            game.activeSection !== 'finance' && (
               <SectionSheet
                 section={game.activeSection}
                 vehicles={game.vehicles}
@@ -305,6 +307,16 @@ export default function App() {
                 }
               />
             )}
+
+          {game.activeSection === 'finance' && (
+            <FinancialDashboard
+              cash={game.company.cash}
+              debt={game.loans.reduce((sum, loan) => sum + loan.balance, 0)}
+              transactions={game.financialTransactions ?? []}
+              vehicles={game.vehicles}
+              onClose={() => game.setSection('map')}
+            />
+          )}
 
           <BottomNav
             active={game.activeSection}

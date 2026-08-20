@@ -2,9 +2,13 @@ import type { Company, TaxiJob, Vehicle } from '../models/game'
 import { levelForReputation } from './companyProgression'
 
 export const MAX_JOB_OFFERS = 6
+export const JOB_OFFER_DURATION_MS = 5 * 60_000
 // Trips take an eighth of their estimated real-world duration (an 8x game clock).
 export const REAL_TIME_TRIP_SCALE = 0.125
 export const SIMULATED_MINUTE_MS = 60_000 * REAL_TIME_TRIP_SCALE
+
+export const jobOfferExpiresAt = (job: TaxiJob) =>
+  new Date(job.offeredAt ?? 0).getTime() + JOB_OFFER_DURATION_MS
 
 const distanceSquared = (from: [number, number], to: [number, number]) => {
   const longitudeScale = Math.cos(((from[1] + to[1]) / 2) * Math.PI / 180)

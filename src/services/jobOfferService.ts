@@ -163,12 +163,13 @@ export async function generateJobOffers(
     name: passengerNames[Math.floor(Math.random() * passengerNames.length)],
     partySize: 1 + Math.floor(Math.random() * 4),
   }))
+  const offeredAt = new Date().toISOString()
   const jobs = routes.map((route, index): TaxiJob => ({
     id: crypto.randomUUID(), cityId: city.id,
     pickup: route.pickup.coordinates, destination: route.destination.coordinates,
     pickupLabel: route.pickup.name, destinationLabel: route.destination.name,
     passengerIds: [passengers[index].id], fare: taxiFareForDistance(route.distanceKm),
-    distanceKm: route.distanceKm, durationMinutes: Math.max(5, Math.round(route.distanceKm * 3.2)), status: 'offered',
+    distanceKm: route.distanceKm, durationMinutes: Math.max(5, Math.round(route.distanceKm * 3.2)), status: 'offered', offeredAt,
   }))
 
   return {

@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { taxiModels } from '../../data/taxis'
 import type { ExteriorAccessory, Vehicle } from '../../models/game'
 
-interface SectionSheetProps { section: Exclude<Section, 'map'>; vehicles: Vehicle[]; cash: number; onClose: () => void; onReset: () => void; onBuyTaxi: (modelId: string) => void; onToggleAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void }
+interface SectionSheetProps { section: Exclude<Section, 'map' | 'jobs'>; vehicles: Vehicle[]; cash: number; onClose: () => void; onReset: () => void; onBuyTaxi: (modelId: string) => void; onToggleAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void }
 const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
 const exteriorAccessories: Array<{ id: ExteriorAccessory; label: string; icon: string }> = [
   { id: 'panoramic-roof', label: 'Panoramic roof', icon: '🌅' }, { id: 'towbar', label: 'Towbar', icon: '🪝' },

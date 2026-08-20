@@ -19,7 +19,7 @@ export const distanceKmBetween = (from: [number, number], to: [number, number]) 
 
 /** A simple metered tariff: flag fall plus a charge for every passenger kilometre. */
 export const taxiFareForDistance = (distanceKm: number) =>
-  Math.round((4.5 + Math.max(0, distanceKm) * 2.1) * 100) / 100
+  Math.round((10 + Math.max(0, distanceKm) * 3.25) * 100) / 100
 
 /** Stable journey timings keep a trip in the same place across map reloads. */
 export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {

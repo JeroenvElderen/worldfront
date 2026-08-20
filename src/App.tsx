@@ -31,7 +31,7 @@ export default function App() {
     {game.company ? <>
       <TopHud company={game.company} />
       {game.activeSection === 'map' && <TaxiCallPopup focusedJobId={game.focusedJobId} vehicles={game.vehicles} jobs={game.jobs} passengers={game.passengers} onAccept={game.acceptJob} onDecline={game.declineJob} />}
-      {game.activeSection !== 'map' && <SectionSheet section={game.activeSection} vehicles={game.vehicles} cash={game.company.cash} onClose={() => game.setSection('map')} onReset={game.resetGame} onBuyTaxi={game.buyTaxi} />}
+      {game.activeSection !== 'map' && <SectionSheet section={game.activeSection} vehicles={game.vehicles} cash={game.company.cash} onClose={() => game.setSection('map')} onReset={game.resetGame} onBuyTaxi={game.buyTaxi} onToggleAccessory={game.toggleExteriorAccessory} />}
       <BottomNav active={game.activeSection} onChange={game.setSection} />
     </> : <CitySetup onStart={game.initializeCompany} />}
   </div>

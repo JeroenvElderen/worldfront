@@ -1,10 +1,11 @@
 export type Coordinates = [longitude: number, latitude: number]
 export type VehicleStatus = 'available' | 'on-job' | 'maintenance'
 export type TaxiPowertrain = 'diesel' | 'hybrid' | 'electric'
+export type ExteriorAccessory = 'panoramic-roof' | 'towbar' | 'roof-rack' | 'mud-flaps' | 'wind-deflectors'
 
 export interface City { id: string; name: string; countryCode: string; coordinates: Coordinates; mapZoom: number }
 export interface Company { id: string; name: string; cash: number; reputation: number; level: number; homeCityId: string; foundedAt: string }
-export interface Vehicle { id: string; name: string; type: 'taxi' | 'coach' | 'van'; powertrain?: TaxiPowertrain; value: number; condition: number; fuel: number; capacity: number; topSpeedKmh?: number; status: VehicleStatus; cityId: string; position?: Coordinates; driverId?: string }
+export interface Vehicle { id: string; name: string; type: 'taxi' | 'coach' | 'van'; modelId?: string; powertrain?: TaxiPowertrain; exteriorAccessories?: ExteriorAccessory[]; value: number; condition: number; fuel: number; capacity: number; topSpeedKmh?: number; status: VehicleStatus; cityId: string; position?: Coordinates; driverId?: string }
 export interface Driver { id: string; name: string; rating: number; salary: number; status: 'available' | 'driving' | 'off-duty' }
 export interface Passenger { id: string; name: string; partySize: number }
 export interface TaxiJob { id: string; cityId: string; pickup: Coordinates; destination: Coordinates; pickupLabel: string; destinationLabel: string; passengerIds: string[]; fare: number; distanceKm: number; durationMinutes: number; status: 'offered' | 'accepted' | 'complete'; assignedVehicleId?: string; acceptedAt?: string }

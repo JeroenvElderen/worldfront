@@ -5,6 +5,7 @@ import { featureCollection, point } from '@turf/helpers'
 import { getCity, irelandOverview } from '../data/cities'
 import type { Coordinates, TaxiJob, Vehicle } from '../models/game'
 import { getJobJourney } from '../services/jobEngine'
+import { getTaxiModel } from '../data/taxis'
 
 interface GameMapProps { cityId: string | null; vehicles: Vehicle[]; jobs: TaxiJob[]; onOpenJob: (jobId: string) => void }
 const configuredToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined
@@ -34,12 +35,13 @@ const remainingRoute = (coordinates: number[][], progress: number) => {
   return [routePosition(coordinates, progress), ...coordinates.slice(segment + 1)]
 }
 
-const mapIcon = (kind: 'vehicle' | 'pickup' | 'destination') => {
+const mapIcon = (kind: 'vehicle' | 'pickup' | 'destination', vehicle?: Vehicle) => {
   const canvas = document.createElement('canvas')
   canvas.width = 64
   canvas.height = 64
   const context = canvas.getContext('2d')!
-  context.fillStyle = kind === 'vehicle' ? '#0f766e' : kind === 'pickup' ? '#f59e0b' : '#ef4444'
+  const model = vehicle ? getTaxiModel(vehicle.modelId ?? vehicle.powertrain ?? '') : undefined
+  context.fillStyle = kind === 'vehicle' ? (model?.color ?? '#0f766e') : kind === 'pickup' ? '#f59e0b' : '#ef4444'
   context.beginPath(); context.arc(32, 32, 29, 0, Math.PI * 2); context.fill()
   context.strokeStyle = '#fff'; context.lineWidth = 4; context.stroke()
   context.fillStyle = '#fff'
@@ -48,6 +50,9 @@ const mapIcon = (kind: 'vehicle' | 'pickup' | 'destination') => {
     context.beginPath(); context.moveTo(20, 29); context.lineTo(25, 20); context.lineTo(41, 20); context.lineTo(47, 29); context.fill()
     context.fillStyle = '#0f766e'; context.fillRect(27, 23, 12, 7)
     context.fillStyle = '#fff'; context.beginPath(); context.arc(21, 46, 5, 0, Math.PI * 2); context.arc(44, 46, 5, 0, Math.PI * 2); context.fill()
+    context.fillStyle = '#fff'; context.font = '900 13px sans-serif'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText(model?.marker ?? 'T', 33, 35)
+    if (vehicle?.exteriorAccessories?.includes('roof-rack')) { context.strokeStyle = '#fff'; context.lineWidth = 2; context.strokeRect(23, 16, 20, 4) }
+    if (vehicle?.exteriorAccessories?.includes('towbar')) { context.fillStyle = '#fff'; context.beginPath(); context.arc(55, 40, 3, 0, Math.PI * 2); context.fill() }
   } else if (kind === 'pickup') {
     context.font = '900 43px sans-serif'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText('!', 32, 34)
   } else {
@@ -85,6 +90,7 @@ const routeMotion = (route: RouteDetails, elapsed: number, fallbackSpeedKmh: num
 function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
+  const viewport = useRef<{ center: Coordinates; zoom: number } | null>(null)
   const pickupJobIds = useRef(new Set<string>())
   const pickupHandlers = useRef(new Map<string, { enter: () => void; leave: () => void; click: (event: mapboxgl.MapMouseEvent) => void }>())
   const [mapRevision, setMapRevision] = useState(0)
@@ -96,14 +102,13 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
     const selected = getCity(cityId)
     const abortController = new AbortController()
     const animationFrames: number[] = []
-    const instance = new mapboxgl.Map({ container: container.current, style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle, center: selected?.coordinates ?? irelandOverview.center, zoom: selected?.mapZoom ?? irelandOverview.zoom, attributionControl: false, pitchWithRotate: false })
+    const instance = new mapboxgl.Map({ container: container.current, style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle, center: viewport.current?.center ?? selected?.coordinates ?? irelandOverview.center, zoom: viewport.current?.zoom ?? selected?.mapZoom ?? irelandOverview.zoom, attributionControl: false, pitchWithRotate: false })
     map.current = instance
     pickupJobIds.current.clear()
     pickupHandlers.current.clear()
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
     instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right')
     instance.on('load', async () => {
-      instance.addImage('vehicle-marker', mapIcon('vehicle'), { pixelRatio: 2 })
       instance.addImage('pickup-marker', mapIcon('pickup'), { pixelRatio: 2 })
       instance.addImage('destination-marker', mapIcon('destination'), { pixelRatio: 2 })
       instance.addSource('company-base', { type: 'geojson', data: featureCollection(selected ? [point(selected.coordinates)] : []) })
@@ -111,6 +116,8 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
       instance.addLayer({ id: 'base', type: 'circle', source: 'company-base', paint: { 'circle-radius': 9, 'circle-color': '#0f766e', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } })
 
       for (const [index, vehicle] of vehicles.entries()) {
+        const vehicleImageId = `vehicle-marker-${index}`
+        instance.addImage(vehicleImageId, mapIcon('vehicle', vehicle), { pixelRatio: 2 })
         const job = jobs.find((candidate) => candidate.status === 'accepted' && (candidate.assignedVehicleId === vehicle.id || (!candidate.assignedVehicleId && vehicle.status === 'on-job')))
         const start = vehicle.position ?? selected?.coordinates
         if (!start) continue
@@ -131,7 +138,7 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
         }
         const sourceId = `taxi-${index}`
         instance.addSource(sourceId, { type: 'geojson', data: point(start, { speedLabel: '0 km/h' }) })
-        instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': 'vehicle-marker', 'icon-size': 1, 'icon-allow-overlap': true, 'text-field': ['get', 'speedLabel'], 'text-size': 11, 'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'], 'text-offset': [0, 2.25], 'text-anchor': 'top', 'text-allow-overlap': true }, paint: { 'text-color': '#ffffff', 'text-halo-color': '#10252d', 'text-halo-width': 2 } })
+        instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': vehicleImageId, 'icon-size': 1, 'icon-allow-overlap': true, 'text-field': ['get', 'speedLabel'], 'text-size': 11, 'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'], 'text-offset': [0, 2.25], 'text-anchor': 'top', 'text-allow-overlap': true }, paint: { 'text-color': '#ffffff', 'text-halo-color': '#10252d', 'text-halo-width': 2 } })
         if (!job) continue
         const color = jobColors[jobs.filter((candidate) => candidate.status === 'accepted').findIndex((candidate) => candidate.id === job.id) % jobColors.length]
         const pickupRouteId = `pickup-route-${index}`
@@ -167,7 +174,7 @@ function GameMapView({ cityId, vehicles, jobs, onOpenJob }: GameMapProps) {
       }
       setMapRevision((revision) => revision + 1)
     })
-    return () => { abortController.abort(); animationFrames.forEach(cancelAnimationFrame); map.current = null; instance.remove() }
+    return () => { const center = instance.getCenter(); viewport.current = { center: [center.lng, center.lat], zoom: instance.getZoom() }; abortController.abort(); animationFrames.forEach(cancelAnimationFrame); map.current = null; instance.remove() }
     // Offered jobs are synchronized separately so background arrivals do not recreate the map.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cityId, vehicles, acceptedJobsKey])

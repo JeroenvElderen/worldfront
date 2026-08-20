@@ -2,6 +2,7 @@ import type { Company, TaxiJob, Vehicle } from '../models/game'
 import { levelForReputation } from './companyProgression'
 
 export const MAX_JOB_OFFERS = 6
+export const MAX_PICKUP_DISTANCE_KM = 5
 // Trips take an eighth of their estimated real-world duration (an 8x game clock).
 export const REAL_TIME_TRIP_SCALE = 0.125
 export const SIMULATED_MINUTE_MS = 60_000 * REAL_TIME_TRIP_SCALE
@@ -20,6 +21,16 @@ export const distanceKmBetween = (from: [number, number], to: [number, number]) 
 /** A simple metered tariff: flag fall plus a charge for every passenger kilometre. */
 export const taxiFareForDistance = (distanceKm: number) =>
   Math.round((10 + Math.max(0, distanceKm) * 3.25) * 100) / 100
+
+/** Drops open offers that none of the currently idle taxis can collect. */
+export function removeUnreachableJobOffersState(jobs: TaxiJob[], vehicles: Vehicle[]) {
+  const availablePositions = vehicles
+    .filter((vehicle) => vehicle.status === 'available' && vehicle.position)
+    .map((vehicle) => vehicle.position!)
+  return jobs.filter((job) => job.status !== 'offered' || availablePositions.some(
+    (position) => distanceKmBetween(position, job.pickup) <= MAX_PICKUP_DISTANCE_KM
+  ))
+}
 
 /** Stable journey timings keep a trip in the same place across map reloads. */
 export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {

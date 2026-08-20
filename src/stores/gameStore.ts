@@ -6,10 +6,10 @@ import type { Company, ExteriorAccessory, GameSave, Vehicle } from '../models/ga
 import { indexedDbStorage } from '../services/saveDatabase'
 import { levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import { generateJobOffers } from '../services/jobOfferService'
-import { acceptJobState, completeArrivedJobsState, completeJobState, MAX_JOB_OFFERS } from '../services/jobEngine'
+import { acceptJobState, completeArrivedJobsState, completeJobState, MAX_JOB_OFFERS, removeUnreachableJobOffersState } from '../services/jobEngine'
 
-type Section = 'map' | 'fleet' | 'travel' | 'company'
-interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; resetGame: () => void }
+type Section = 'map' | 'jobs' | 'fleet' | 'travel' | 'company'
+interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; pruneUnreachableJobs: () => void; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; resetGame: () => void }
 interface GameState extends GameSave { activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
 
 const blankSave: GameSave = { id: 'autosave', version: 2, updatedAt: new Date(0).toISOString(), company: null, startingCityId: null, vehicles: [], drivers: [], jobs: [], agencies: [], tours: [], passengers: [], jobRequestHistory: [] }
@@ -18,7 +18,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   ...blankSave, activeSection: 'map', focusedJobId: null, hasHydrated: false, jobsLoading: false, jobsError: null,
   setHasHydrated: (hasHydrated) => set({ hasHydrated }),
   setSection: (activeSection) => set({ activeSection }),
-  openJob: (focusedJobId) => set({ focusedJobId, activeSection: 'map' }),
+  openJob: (focusedJobId) => set({ focusedJobId, activeSection: 'jobs' }),
   initializeCompany: (cityId) => {
     if (!getCity(cityId)) return
     const now = new Date().toISOString()
@@ -63,9 +63,14 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
       set({ jobsLoading: false, jobsError: error instanceof Error ? error.message : 'Could not generate a request.' })
     }
   },
+  pruneUnreachableJobs: () => set((state) => {
+    const jobs = removeUnreachableJobOffersState(state.jobs, state.vehicles)
+    return jobs.length === state.jobs.length ? state : { jobs, focusedJobId: jobs.some((job) => job.id === state.focusedJobId) ? state.focusedJobId : null, updatedAt: new Date().toISOString() }
+  }),
   acceptJob: (jobId) => set((state) => {
     const result = acceptJobState(state.jobs, state.vehicles, jobId)
-    return result ? { ...result, updatedAt: new Date().toISOString(), activeSection: 'map' } : state
+    if (!result) return state
+    return { ...result, jobs: removeUnreachableJobOffersState(result.jobs, result.vehicles), focusedJobId: null, updatedAt: new Date().toISOString(), activeSection: 'map' }
   }),
   declineJob: (jobId) => set((state) => ({ jobs: state.jobs.filter((job) => job.id !== jobId), focusedJobId: state.focusedJobId === jobId ? null : state.focusedJobId, updatedAt: new Date().toISOString() })),
   completeJob: (jobId) => set((state) => {

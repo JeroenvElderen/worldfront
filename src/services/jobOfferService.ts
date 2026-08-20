@@ -1,10 +1,9 @@
 import type { City, Coordinates, Passenger, TaxiJob } from '../models/game'
 import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
-import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
+import { distanceKmBetween, MAX_PICKUP_DISTANCE_KM, taxiFareForDistance } from './jobEngine'
 
 export const MIN_JOB_DISTANCE_KM = 6
-export const MAX_PICKUP_DISTANCE_KM = 5
 
 const passengerNames = [
   'Aoife Murphy', 'Cian Kelly', 'Niamh Byrne', 'Oisín Walsh', 'Saoirse Doyle', 'Fionn Ryan',
@@ -143,20 +142,27 @@ export async function generateJobOffers(
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
   const places = await findMapboxPlaces(city, maxDistanceKm, signal)
   const excluded = new Set(excludedRoutes)
-  const routes = shuffled(places.flatMap((pickup) => places.flatMap((destination) => {
+  const eligibleRoutes = places.flatMap((pickup) => places.flatMap((destination) => {
     const distanceKm = Math.round(distanceKmBetween(pickup.coordinates, destination.coordinates) * 10) / 10
     const signature = routeSignature(pickup.name, destination.name)
     return pickup.id !== destination.id &&
-      taxiPositions.every((position) => distanceKmBetween(position, pickup.coordinates) <= MAX_PICKUP_DISTANCE_KM) &&
+      // An offer only needs one taxi that can collect it. Requiring every idle
+      // taxi to be nearby makes generation impossible as soon as the fleet is
+      // spread across the city.
+      taxiPositions.some((position) => distanceKmBetween(position, pickup.coordinates) <= MAX_PICKUP_DISTANCE_KM) &&
       distanceKmBetween(city.coordinates, pickup.coordinates) <= maxDistanceKm &&
       distanceKmBetween(city.coordinates, destination.coordinates) <= maxDistanceKm &&
-      distanceKm >= MIN_JOB_DISTANCE_KM && distanceKm <= maxDistanceKm &&
-      !excluded.has(signature)
+      distanceKm >= MIN_JOB_DISTANCE_KM && distanceKm <= maxDistanceKm
       ? [{ pickup, destination, distanceKm, signature }]
       : []
-  }))).slice(0, count)
+  }))
+  // Prefer unseen journeys, but reuse an older route when the local Mapbox
+  // results have all appeared recently. History should add variety rather than
+  // permanently exhaust the finite route pool.
+  const unseenRoutes = eligibleRoutes.filter((route) => !excluded.has(route.signature))
+  const routes = shuffled(unseenRoutes.length ? unseenRoutes : eligibleRoutes).slice(0, count)
 
-  if (!routes.length) throw new Error(`No new routes have a pickup within ${MAX_PICKUP_DISTANCE_KM} km of every available taxi. Try again when your taxis are closer together.`)
+  if (!routes.length) throw new Error(`No routes have a pickup within ${MAX_PICKUP_DISTANCE_KM} km of an available taxi. Try again after a taxi finishes its current trip.`)
 
   const passengers = routes.map(() => ({
     id: crypto.randomUUID(),

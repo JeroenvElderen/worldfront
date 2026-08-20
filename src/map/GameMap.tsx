@@ -281,13 +281,38 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
 
   useEffect(() => {
     const instance = map.current
-    if (!instance?.isStyleLoaded()) return
+    if (!instance) return
+
     const sourceId = 'focused-job-route'
-    const removeFocusedRoute = () => {
-      if (instance.getLayer(sourceId)) instance.removeLayer(sourceId)
-      if (instance.getSource(sourceId)) instance.removeSource(sourceId)
+
+    const instanceIsUsable = () => {
+      // The map-construction effect can dispose this captured Mapbox instance
+      // before this effect's cleanup runs. Never touch a stale instance.
+      if (map.current !== instance) return false
+
+      try {
+        return instance.isStyleLoaded()
+      } catch {
+        return false
+      }
     }
+
+    const removeFocusedRoute = () => {
+      if (!instanceIsUsable()) return
+
+      try {
+        if (instance.getLayer(sourceId)) instance.removeLayer(sourceId)
+        if (instance.getSource(sourceId)) instance.removeSource(sourceId)
+      } catch {
+        // React effect cleanup can race with Mapbox teardown.
+        // At that point there is nothing left to remove.
+      }
+    }
+
+    if (!instanceIsUsable()) return
+
     removeFocusedRoute()
+
     const job = jobs.find((candidate) => candidate.id === focusedJobId)
     if (!job) return
 
@@ -299,30 +324,81 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         const rightDistance = Math.hypot(right.position![0] - job.pickup[0], right.position![1] - job.pickup[1])
         return leftDistance - rightDistance
       })[0]
+
     const start = assignedVehicle?.position ?? availableVehicle?.position ?? getCity(cityId)?.coordinates
     if (!start) return
 
     const abortController = new AbortController()
+
     const drawRoute = (coordinates: number[][]) => {
-      if (abortController.signal.aborted || !instance.isStyleLoaded()) return
+      if (abortController.signal.aborted || !instanceIsUsable()) return
+
       removeFocusedRoute()
-      instance.addSource(sourceId, { type: 'geojson', data: lineString(coordinates) })
-      instance.addLayer({ id: sourceId, type: 'line', source: sourceId, paint: { 'line-color': '#38bdf8', 'line-width': 2.5, 'line-opacity': 0.95 } })
-    }
-    const loadRoute = async () => {
-      if (!token) return drawRoute([start, job.pickup, job.destination])
+
+      if (!instanceIsUsable()) return
+
       try {
-        const waypoints = [start, job.pickup, job.destination].map((coordinate) => coordinate.join(',')).join(';')
-        const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${waypoints}?continue_straight=true&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
-        if (!response.ok) throw new Error(`Directions request failed: ${response.status}`)
-        const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] } }> }
-        drawRoute(result.routes?.[0]?.geometry.coordinates ?? [start, job.pickup, job.destination])
-      } catch (error) {
-        if ((error as Error).name !== 'AbortError') drawRoute([start, job.pickup, job.destination])
+        instance.addSource(sourceId, {
+          type: 'geojson',
+          data: lineString(coordinates),
+        })
+
+        instance.addLayer({
+          id: sourceId,
+          type: 'line',
+          source: sourceId,
+          paint: {
+            'line-color': '#38bdf8',
+            'line-width': 2.5,
+            'line-opacity': 0.95,
+          },
+        })
+      } catch {
+        // Ignore a draw that loses the race with map/style teardown.
       }
     }
+
+    const loadRoute = async () => {
+      if (!token) {
+        drawRoute([start, job.pickup, job.destination])
+        return
+      }
+
+      try {
+        const waypoints = [start, job.pickup, job.destination]
+          .map((coordinate) => coordinate.join(','))
+          .join(';')
+
+        const response = await fetch(
+          `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${waypoints}?continue_straight=true&geometries=geojson&overview=full&access_token=${token}`,
+          { signal: abortController.signal },
+        )
+
+        if (!response.ok) {
+          throw new Error(`Directions request failed: ${response.status}`)
+        }
+
+        const result = await response.json() as {
+          routes?: Array<{ geometry: { coordinates: number[][] } }>
+        }
+
+        drawRoute(
+          result.routes?.[0]?.geometry.coordinates ??
+            [start, job.pickup, job.destination],
+        )
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') {
+          drawRoute([start, job.pickup, job.destination])
+        }
+      }
+    }
+
     void loadRoute()
-    return () => { abortController.abort(); removeFocusedRoute() }
+
+    return () => {
+      abortController.abort()
+      removeFocusedRoute()
+    }
   }, [cityId, focusedJobId, jobs, vehicles, mapRevision])
 
   return <div ref={container} className="absolute inset-0" aria-label="Interactive game map" />

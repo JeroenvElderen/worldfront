@@ -1,8 +1,10 @@
 import type { Coordinates, PostalRoute, Vehicle } from '../models/game'
+import { SIMULATED_MINUTE_MS } from './jobEngine'
 
 export const POSTAL_MIN_HOURS = 1
 export const POSTAL_MAX_HOURS = 8
-export const POSTAL_HOUR_MS = 60 * 60_000
+// Postal rounds run on the same accelerated game clock as taxi journeys.
+export const POSTAL_HOUR_MS = 60 * SIMULATED_MINUTE_MS
 
 const randomInteger = (minimum: number, maximum: number, random: () => number) =>
   Math.floor(random() * (maximum - minimum + 1)) + minimum

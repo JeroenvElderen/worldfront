@@ -15,4 +15,8 @@ export interface TravelAgency { id: string; name: string; cityId: string; level:
 export interface Tour { id: string; agencyId: string; name: string; stops: Coordinates[]; price: number }
 export interface Loan { id: string; principal: number; balance: number; paymentAmount: number; nextPaymentAt: string }
 export interface DynamicEvent { id: string; name: string; description: string; fareMultiplier: number; fuelMultiplier: number; expiresAt: string }
-export interface GameSave { id: string; version: number; updatedAt: string; company: Company | null; startingCityId: string | null; vehicles: Vehicle[]; drivers: Driver[]; jobs: TaxiJob[]; agencies: TravelAgency[]; tours: Tour[]; passengers: Passenger[]; jobRequestHistory: string[]; loans: Loan[]; activeEvent: DynamicEvent | null; nextEventAt: string; nextOperatingPaymentAt: string }
+export type ServiceType = 'taxi' | 'bicycle' | 'parcel' | 'food' | 'accessible' | 'rental' | 'shuttle' | 'travel'
+export interface Division { id: string; type: ServiceType; level: number; establishedAt: string }
+export interface ServiceContract { id: string; service: ServiceType; client: string; title: string; weeklyIncome: number; requiredVehicles: number; status: 'available' | 'active' }
+export interface TransportHub { level: number }
+export interface GameSave { id: string; version: number; updatedAt: string; company: Company | null; startingCityId: string | null; vehicles: Vehicle[]; drivers: Driver[]; jobs: TaxiJob[]; agencies: TravelAgency[]; tours: Tour[]; passengers: Passenger[]; jobRequestHistory: string[]; loans: Loan[]; divisions: Division[]; contracts: ServiceContract[]; hub: TransportHub; activeEvent: DynamicEvent | null; nextEventAt: string; nextOperatingPaymentAt: string }

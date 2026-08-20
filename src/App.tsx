@@ -3,6 +3,7 @@ import { BottomNav } from './components/game/BottomNav'
 import { SectionSheet } from './components/game/SectionSheet'
 import { TopHud } from './components/game/TopHud'
 import { TaxiCallPopup } from './components/game/TaxiCallPopup'
+import { ServicesPanel } from './components/game/ServicesPanel'
 import { GameMap } from './map/GameMap'
 import { CitySetup } from './screens/CitySetup'
 import { useGameStore } from './stores/gameStore'
@@ -266,7 +267,7 @@ export default function App() {
           )}
 
           {game.activeSection !== 'map' &&
-            game.activeSection !== 'jobs' && (
+            game.activeSection !== 'jobs' && game.activeSection !== 'services' && (
               <SectionSheet
                 section={game.activeSection}
                 vehicles={game.vehicles}
@@ -289,6 +290,10 @@ export default function App() {
                 }
               />
             )}
+
+          {game.activeSection === 'services' && game.company && (
+            <ServicesPanel company={game.company} divisions={game.divisions ?? []} contracts={game.contracts ?? []} hub={game.hub ?? { level: 1 }} onClose={() => game.setSection('map')} onEstablish={game.establishDivision} onUpgradeHub={game.upgradeHub} onAcceptContract={game.acceptContract} />
+          )}
 
           <BottomNav
             active={game.activeSection}

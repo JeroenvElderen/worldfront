@@ -79,14 +79,10 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
   const viewport = useRef<{ center: Coordinates; zoom: number } | null>(null)
   const pickupJobIds = useRef(new Set<string>())
   const pickupHandlers = useRef(new Map<string, { enter: () => void; leave: () => void; click: (event: mapboxgl.MapMouseEvent) => void }>())
-  const knownJourneyAssignments = useRef(new Set<string>())
   const [mapRevision, setMapRevision] = useState(0)
-  // Only rebuild the expensive WebGL map when the fleet's appearance or a new
-  // journey changes. Finishing a job is handled in-place below, avoiding the
-  // visible map flash that used to happen at every arrival.
+  // Job changes are applied to the existing WebGL map by the synchronization
+  // effects below. In particular, accepting a call must never recreate the map.
   const fleetConfigurationKey = vehicles.map((vehicle) => `${vehicle.id}:${vehicle.modelId}:${(vehicle.exteriorAccessories ?? []).join(',')}:${vehicle.serviceTrip?.startedAt ?? ''}`).join('|')
-  for (const job of jobs) if (job.acceptedAt) knownJourneyAssignments.current.add(`${job.id}:${job.acceptedAt}`)
-  const journeyAssignmentsKey = [...knownJourneyAssignments.current].join('|')
 
   useEffect(() => {
     if (!container.current) return
@@ -217,9 +213,9 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       map.current = null
       instance.remove()
     }
-    // Offered jobs are synchronized separately so background arrivals do not recreate the map.
+    // Jobs are synchronized separately so accepting or completing one does not recreate the map.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cityId, fleetConfigurationKey, journeyAssignmentsKey])
+  }, [cityId, fleetConfigurationKey])
 
   useEffect(() => {
     const instance = map.current
@@ -266,6 +262,27 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       pickupJobIds.current.add(job.id)
     }
 
+    // Paint an accepted journey onto the live map. This intentionally mutates
+    // Mapbox sources/layers rather than changing the Map component's identity,
+    // so accepting a job has no blank frame, tile reload, or camera reset.
+    for (const job of jobs.filter((candidate) => candidate.status === 'accepted')) {
+      const vehicleIndex = vehicles.findIndex((vehicle) => vehicle.id === job.assignedVehicleId)
+      if (vehicleIndex < 0) continue
+      const vehicle = vehicles[vehicleIndex]
+      const start = vehicle.position ?? getCity(cityId)?.coordinates
+      if (!start) continue
+      const taxiSourceId = `taxi-${vehicleIndex}`
+      const routeSourceId = `${taxiSourceId}-route`
+      const routeData = lineString([start, job.pickup, job.destination])
+      const routeSource = instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined
+      if (routeSource) routeSource.setData(routeData)
+      else {
+        instance.addSource(routeSourceId, { type: 'geojson', data: routeData })
+        instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': '#0f766e', 'line-width': 1.5, 'line-opacity': 0.8 } })
+      }
+      if (instance.getLayer(taxiSourceId)) instance.setPaintProperty(taxiSourceId, 'circle-color', vehicleColor.pickingUp)
+    }
+
     // Leave the completed taxi dot at its destination without rebuilding the map.
     for (const job of jobs.filter((candidate) => candidate.status === 'complete')) {
       const vehicleIndex = vehicles.findIndex((vehicle) => vehicle.id === job.assignedVehicleId)
@@ -277,7 +294,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       if (instance.getLayer(routeSourceId)) instance.removeLayer(routeSourceId)
       if (instance.getSource(routeSourceId)) instance.removeSource(routeSourceId)
     }
-  }, [jobs, vehicles, mapRevision, onOpenJob])
+  }, [cityId, jobs, vehicles, mapRevision, onOpenJob])
 
   useEffect(() => {
     const instance = map.current

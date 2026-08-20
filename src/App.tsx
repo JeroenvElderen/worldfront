@@ -250,6 +250,7 @@ export default function App() {
               passengers={game.passengers}
               onAccept={game.acceptJob}
               onDecline={game.declineJob}
+              onViewMap={game.showJobOnMap}
               onClose={() =>
                 game.setSection('map')
               }

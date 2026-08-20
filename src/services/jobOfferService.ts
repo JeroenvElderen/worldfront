@@ -1,4 +1,4 @@
-import type { City, Coordinates, Passenger, TaxiJob } from '../models/game'
+import type { City, Coordinates, Passenger, ServiceType, TaxiJob } from '../models/game'
 import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
@@ -140,7 +140,8 @@ export async function generateJobOffers(
   maxDistanceKm = BASE_JOB_DISTANCE_KM,
   signal?: AbortSignal,
   taxiPositions: Coordinates[] = [city.coordinates],
-  fareMultiplier = 1
+  fareMultiplier = 1,
+  serviceType: ServiceType = 'taxi'
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
   const places = await findMapboxPlaces(city, maxDistanceKm, signal)
   const excluded = new Set(excludedRoutes)
@@ -159,17 +160,22 @@ export async function generateJobOffers(
 
   if (!routes.length) throw new Error(`No new routes have a pickup within ${MAX_PICKUP_DISTANCE_KM} km of every available taxi. Try again when your taxis are closer together.`)
 
-  const passengers = routes.map(() => ({
+  const passengers = serviceType === 'taxi' ? routes.map(() => ({
     id: crypto.randomUUID(),
     name: passengerNames[Math.floor(Math.random() * passengerNames.length)],
     partySize: 1 + Math.floor(Math.random() * 4),
-  }))
+  })) : []
+  const serviceLabels: Record<ServiceType, string> = {
+    taxi: 'Passenger', bicycle: 'Express document', food: 'Restaurant order', parcel: 'Parcel delivery',
+    accessible: 'Accessible passenger', rental: 'Vehicle transfer', shuttle: 'Shuttle group', travel: 'Tour group',
+  }
+  const serviceRates: Record<ServiceType, number> = { taxi: 1, bicycle: .8, food: 1, parcel: 1.8, accessible: 2.2, rental: 2, shuttle: 3.5, travel: 5 }
   const offeredAt = new Date().toISOString()
   const jobs = routes.map((route, index): TaxiJob => ({
-    id: crypto.randomUUID(), cityId: city.id,
+    id: crypto.randomUUID(), cityId: city.id, serviceType, customerLabel: serviceLabels[serviceType],
     pickup: route.pickup.coordinates, destination: route.destination.coordinates,
     pickupLabel: route.pickup.name, destinationLabel: route.destination.name,
-    passengerIds: [passengers[index].id], fare: Math.round(taxiFareForDistance(route.distanceKm) * fareMultiplier * 100) / 100,
+    passengerIds: passengers[index] ? [passengers[index].id] : [], fare: Math.round(taxiFareForDistance(route.distanceKm) * serviceRates[serviceType] * fareMultiplier * 100) / 100,
     distanceKm: route.distanceKm, durationMinutes: Math.max(5, Math.round(route.distanceKm * 3.2)), status: 'offered', offeredAt,
   }))
 

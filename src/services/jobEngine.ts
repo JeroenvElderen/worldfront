@@ -25,6 +25,11 @@ export const distanceKmBetween = (from: [number, number], to: [number, number]) 
 export const taxiFareForDistance = (distanceKm: number) =>
   Math.round((10 + Math.max(0, distanceKm) * 3.25) * 100) / 100
 
+export const jobService = (job: TaxiJob) => job.serviceType ?? 'taxi'
+
+const vehicleMatchesJob = (vehicle: Vehicle, job: TaxiJob) =>
+  jobService(job) === 'taxi' ? vehicle.type === 'taxi' && !vehicle.serviceType : vehicle.serviceType === jobService(job)
+
 /** Stable journey timings keep a trip in the same place across map reloads. */
 export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {
   const acceptedAt = job.acceptedAt ? new Date(job.acceptedAt).getTime() : Date.now()
@@ -52,9 +57,9 @@ export function acceptJobState(
 
   const job = jobs.find((candidate) => candidate.id === jobId && candidate.status === 'offered')
   const vehicle = (job && vehicles
-    .filter((candidate) => candidate.type === 'taxi' && candidate.status === 'available' && candidate.position)
+    .filter((candidate) => vehicleMatchesJob(candidate, job) && candidate.status === 'available' && candidate.position)
     .sort((left, right) => distanceSquared(left.position!, job.pickup) - distanceSquared(right.position!, job.pickup))[0])
-    ?? vehicles.find((candidate) => candidate.type === 'taxi' && candidate.status === 'available')
+    ?? vehicles.find((candidate) => vehicleMatchesJob(candidate, job!) && candidate.status === 'available')
   if (!vehicle || !job) return null
 
   return {

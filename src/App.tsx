@@ -7,23 +7,18 @@ import { ServicesPanel } from './components/game/ServicesPanel'
 import { GameMap } from './map/GameMap'
 import { CitySetup } from './screens/CitySetup'
 import { useGameStore } from './stores/gameStore'
-import { getJobJourney, jobOfferExpiresAt } from './services/jobEngine'
+import { getJobJourney, jobOfferExpiresAt, jobService } from './services/jobEngine'
 
 export default function App() {
   const game = useGameStore()
 
   const { company, addRandomJob, tickJobs } = game
 
-  const availableVehicleCount = game.vehicles.filter(
-    (vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available',
-  ).length
-
-  const offeredJobCount = game.jobs.filter(
-    (job) => job.status === 'offered',
-  ).length
+  const availableVehicleCount = game.vehicles.filter((vehicle) => vehicle.status === 'available').length
+  const offeredJobCount = game.jobs.filter((job) => job.status === 'offered').length
 
   /**
-   * Generate job offers when taxis are available.
+   * Generate job offers when taxis or service vehicles are available.
    */
   useEffect(() => {
     if (!company || !game.hasHydrated) return
@@ -33,16 +28,16 @@ export default function App() {
 
       const state = useGameStore.getState()
 
-      const available = state.vehicles.filter(
-        (vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available',
-      ).length
+      const hasVehicleWithoutOffer = state.vehicles.some((vehicle) => {
+        if (vehicle.status !== 'available') return false
+        const service = vehicle.serviceType ?? 'taxi'
+        const available = state.vehicles.filter((candidate) => candidate.status === 'available' && (candidate.serviceType ?? 'taxi') === service).length
+        const offered = state.jobs.filter((job) => job.status === 'offered' && jobService(job) === service).length
+        return offered < available
+      })
 
-      const offered = state.jobs.filter(
-        (job) => job.status === 'offered',
-      ).length
-
-      // Keep at most one open offer per available taxi.
-      if (available > offered) {
+      // Keep at most one matching open offer per available vehicle.
+      if (hasVehicleWithoutOffer) {
         void addRandomJob()
       }
     }

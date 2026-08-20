@@ -156,7 +156,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       instance.addLayer({ id: 'base', type: 'circle', source: 'company-base', paint: { 'circle-radius': 9, 'circle-color': '#0f766e', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } })
 
       for (const [index, vehicle] of vehicles.entries()) {
-        const job = vehicle.type === 'taxi' ? jobs.find((candidate) => candidate.status === 'accepted' && (candidate.assignedVehicleId === vehicle.id || (!candidate.assignedVehicleId && vehicle.status === 'on-job'))) : undefined
+        const job = jobs.find((candidate) => candidate.status === 'accepted' && (candidate.assignedVehicleId === vehicle.id || (!candidate.assignedVehicleId && vehicle.status === 'on-job')))
         const start = vehicle.position ?? selected?.coordinates
         if (!start) continue
         let pickupRoute: RouteDetails = { coordinates: job ? [start, job.pickup] : [start], speedLimits: [] }
@@ -328,7 +328,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       const start = vehicle.position ?? getCity(cityId)?.coordinates
       if (!start) continue
       const taxiSourceId = `taxi-${vehicleIndex}`
-      if (instance.getLayer(taxiSourceId)) instance.setPaintProperty(taxiSourceId, 'circle-color', vehicleColor.pickingUp)
+      if (!vehicle.serviceType && instance.getLayer(taxiSourceId)) instance.setPaintProperty(taxiSourceId, 'circle-color', vehicleColor.pickingUp)
       if (liveJobIds.current.has(job.id)) continue
 
       liveJobIds.current.add(job.id)
@@ -371,7 +371,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
           ? [...remainingRoute(pickupRoute, progress), ...passengerRoute.slice(1)]
           : remainingRoute(passengerRoute, progress)
         ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(remainingCoordinates))
-        instance.setPaintProperty(taxiSourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
+        if (!vehicle.serviceType) instance.setPaintProperty(taxiSourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
         if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
         if (instance.getLayer(`pickup-${job.id}-label`)) instance.setLayoutProperty(`pickup-${job.id}-label`, 'visibility', pickingUp ? 'visible' : 'none')
         if (now < journey.arrivesAt && document.visibilityState !== 'hidden') {
@@ -393,7 +393,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       liveJobTimers.current.delete(job.id)
       liveJobIds.current.delete(job.id)
       taxiSource?.setData(point(job.destination))
-      if (instance.getLayer(`taxi-${vehicleIndex}`)) instance.setPaintProperty(`taxi-${vehicleIndex}`, 'circle-color', vehicleColor.available)
+      if (!vehicles[vehicleIndex].serviceType && instance.getLayer(`taxi-${vehicleIndex}`)) instance.setPaintProperty(`taxi-${vehicleIndex}`, 'circle-color', vehicleColor.available)
       const routeSourceId = `taxi-${vehicleIndex}-route`
       if (instance.getLayer(routeSourceId)) instance.removeLayer(routeSourceId)
       if (instance.getSource(routeSourceId)) instance.removeSource(routeSourceId)

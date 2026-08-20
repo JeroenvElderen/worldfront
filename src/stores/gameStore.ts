@@ -8,7 +8,7 @@ import type { Company, Driver, ExteriorAccessory, GameSave, ServiceType, Vehicle
 import { indexedDbStorage } from '../services/saveDatabase'
 import { levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import { generateJobOffers } from '../services/jobOfferService'
-import { acceptJobState, completeArrivedJobsState, completeJobState, getJobJourney, jobOfferExpiresAt, MAX_JOB_OFFERS } from '../services/jobEngine'
+import { acceptJobState, completeArrivedJobsState, completeJobState, getJobJourney, jobOfferExpiresAt, jobService, MAX_JOB_OFFERS } from '../services/jobEngine'
 import { createDynamicEvent, energyUseForJob, fatigueUseForJob, FINANCE_PERIOD_MS, startRecoveryTrip } from '../services/operationsEngine'
 
 type Section = 'map' | 'jobs' | 'fleet' | 'services' | 'company'
@@ -53,17 +53,24 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   },
   addRandomJob: async () => {
     const state = useGameStore.getState()
-    const availableTaxi = state.vehicles.find((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available')
-    if (!state.startingCityId || state.jobsLoading || !availableTaxi || state.jobs.filter((job) => job.status === 'offered').length >= MAX_JOB_OFFERS) return
+    const offeredJobs = state.jobs.filter((job) => job.status === 'offered')
+    const availableVehicle = state.vehicles.find((vehicle) => {
+      if (vehicle.status !== 'available') return false
+      const service = vehicle.serviceType ?? 'taxi'
+      const availableForService = state.vehicles.filter((candidate) => candidate.status === 'available' && (candidate.serviceType ?? 'taxi') === service).length
+      return offeredJobs.filter((job) => jobService(job) === service).length < availableForService
+    })
+    if (!state.startingCityId || state.jobsLoading || !availableVehicle || offeredJobs.length >= MAX_JOB_OFFERS) return
     const city = getCity(state.startingCityId)
     if (!city) return
     set({ jobsLoading: true, jobsError: null })
     try {
       const level = levelForReputation(state.company?.reputation ?? 0)
-      const searchArea = availableTaxi.position ? { ...city, coordinates: availableTaxi.position } : city
-      const taxiPositions = state.vehicles.filter((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available').map((vehicle) => vehicle.position ?? city.coordinates)
+      const searchArea = availableVehicle.position ? { ...city, coordinates: availableVehicle.position } : city
+      const serviceType = availableVehicle.serviceType ?? 'taxi'
+      const vehiclePositions = state.vehicles.filter((vehicle) => (vehicle.serviceType ?? 'taxi') === serviceType && vehicle.status === 'available').map((vehicle) => vehicle.position ?? city.coordinates)
       const maxDistanceKm = maxJobDistanceForFleet(level, state.vehicles.filter((vehicle) => vehicle.type === 'taxi').length)
-      const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, state.activeEvent?.fareMultiplier ?? 1)
+      const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, vehiclePositions, state.activeEvent?.fareMultiplier ?? 1, serviceType)
       set((latest) => ({ jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...generated.jobs], passengers: [...latest.passengers, ...generated.passengers], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }))
     } catch (error) {
       set({ jobsLoading: false, jobsError: error instanceof Error ? error.message : 'Could not generate a request.' })

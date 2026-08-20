@@ -6,7 +6,7 @@ import { TaxiCallPopup } from './components/game/TaxiCallPopup'
 import { GameMap } from './map/GameMap'
 import { CitySetup } from './screens/CitySetup'
 import { useGameStore } from './stores/gameStore'
-import { JOB_REQUEST_INTERVAL_MS } from './services/jobEngine'
+import { getJobJourney, JOB_REQUEST_INTERVAL_MS } from './services/jobEngine'
 
 export default function App() {
   const game = useGameStore()
@@ -16,15 +16,40 @@ export default function App() {
     // Hydrated saves with no offers should not wait for the first interval.
     const savedJobs = useGameStore.getState().jobs
     if (!savedJobs.some((job) => job.status === 'offered' || job.status === 'accepted')) refreshJobs()
-    const interval = window.setInterval(addRandomJob, JOB_REQUEST_INTERVAL_MS)
-    return () => window.clearInterval(interval)
+    let timeout: number | undefined
+    const scheduleOffer = () => {
+      window.clearTimeout(timeout)
+      if (document.visibilityState !== 'hidden') timeout = window.setTimeout(async () => {
+        await addRandomJob()
+        scheduleOffer()
+      }, JOB_REQUEST_INTERVAL_MS)
+    }
+    const resumeOffers = () => {
+      if (document.visibilityState === 'visible') scheduleOffer()
+      else window.clearTimeout(timeout)
+    }
+    scheduleOffer()
+    document.addEventListener('visibilitychange', resumeOffers)
+    return () => {
+      window.clearTimeout(timeout)
+      document.removeEventListener('visibilitychange', resumeOffers)
+    }
   }, [company, refreshJobs, addRandomJob])
   useEffect(() => {
     if (!company) return
     tickJobs()
-    const interval = window.setInterval(tickJobs, 1_000)
-    return () => window.clearInterval(interval)
-  }, [company, tickJobs])
+    const state = useGameStore.getState()
+    const nextArrival = state.jobs
+      .filter((job) => job.status === 'accepted')
+      .map((job) => {
+        const vehicle = state.vehicles.find((candidate) => candidate.id === job.assignedVehicleId)
+        return vehicle ? getJobJourney(job, vehicle).arrivesAt : Number.POSITIVE_INFINITY
+      })
+      .reduce((soonest, arrival) => Math.min(soonest, arrival), Number.POSITIVE_INFINITY)
+    if (!Number.isFinite(nextArrival)) return
+    const timeout = window.setTimeout(tickJobs, Math.max(0, nextArrival - Date.now()) + 50)
+    return () => window.clearTimeout(timeout)
+  }, [company, game.jobs, game.vehicles, tickJobs])
   useEffect(() => {
     if (!company) return
     const resumeGame = () => {
@@ -32,7 +57,6 @@ export default function App() {
       // Mobile WebViews suspend timers in the background. Settle overdue trips first
       // so their taxis are available before immediately requesting a new offer.
       tickJobs()
-      void addRandomJob()
     }
     document.addEventListener('visibilitychange', resumeGame)
     window.addEventListener('pageshow', resumeGame)
@@ -42,7 +66,7 @@ export default function App() {
       window.removeEventListener('pageshow', resumeGame)
       window.removeEventListener('focus', resumeGame)
     }
-  }, [company, tickJobs, addRandomJob])
+  }, [company, tickJobs])
   if (!game.hasHydrated) return <div className="loading">TRAVEL EMPIRE</div>
   return <div className="game-shell">
     <GameMap cityId={game.startingCityId} vehicles={game.vehicles} jobs={game.jobs} onOpenJob={game.openJob} />

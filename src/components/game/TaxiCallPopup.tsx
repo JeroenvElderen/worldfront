@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Passenger, TaxiJob, Vehicle } from '../../models/game'
 import { distanceKmBetween, jobOfferExpiresAt } from '../../services/jobEngine'
 import { categoryDetails, vehicleCanTakeJob } from '../../services/earlyGameEngine'
+import { travelOperationFor } from '../../services/travelOperations'
 
 interface TaxiCallPopupProps {
   focusedJobId: string | null
@@ -29,25 +30,34 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, onAcce
   }, [])
   const availableTaxis = vehicles.filter((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available')
   const offers = jobs.filter((job) => job.status === 'offered')
+  const activeJobs = jobs.filter((job) => job.status === 'accepted')
+  const staffedTaxis = vehicles.filter((vehicle) => vehicle.type === 'taxi' && vehicle.driverId)
 
   return <section className="section-sheet jobs-sheet game-panel" aria-labelledby="jobs-title" aria-live="polite">
     <div className="sheet-handle" /><button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
-    <small>JOBS</small><h2 id="jobs-title">Available taxi calls</h2>
-    <p>Calls stay available for five minutes. Your taxis can wait until you choose a job.</p>
+    <small>TRAVEL OPERATIONS</small><h2 id="jobs-title">Dispatch centre</h2>
+    <p>Review live passenger and logistics requests, check the required capability, then dispatch the nearest suitable vehicle.</p>
+    <div className="operations-overview" aria-label="Operations overview">
+      <span><small>OPEN REQUESTS</small><b>{offers.length}</b></span>
+      <span><small>ACTIVE TRIPS</small><b>{activeJobs.length}</b></span>
+      <span><small>READY TAXIS</small><b>{availableTaxis.filter((vehicle) => vehicle.driverId).length}/{staffedTaxis.length}</b></span>
+    </div>
     <div className="job-list">{offers.length ? offers.map((job) => {
       const passenger = passengers.find((candidate) => job.passengerIds.includes(candidate.id))
       const taxi = availableTaxis.filter((vehicle) => vehicle.driverId && vehicleCanTakeJob(vehicle, job, passenger?.partySize ?? 1))
         .map((vehicle) => ({ vehicle, distance: vehicle.position ? distanceKmBetween(vehicle.position, job.pickup) : Infinity }))
         .sort((left, right) => left.distance - right.distance)[0]
       const category = categoryDetails[job.category ?? 'standard']
+      const operation = travelOperationFor(job)
       return <article className={`job-card ${job.id === focusedJobId ? 'focused' : ''}`} key={job.id}>
-        <div><strong>{category.icon} {category.label} · {passenger?.name ?? 'A passenger'}</strong><small>{passenger?.partySize ?? 1} passenger(s) · Expires in <b className="job-timer">{remainingTime(job, now)}</b></small></div>
+        <header className="operation-heading"><span className="operation-icon">{operation.icon}</span><div><small>{operation.service} · {operation.reference}</small><strong>{operation.title}</strong></div><b className={`priority-pill priority-${operation.priority.toLowerCase().replace(' ', '-')}`}>{operation.priority}</b></header>
+        <div className="operation-customer"><strong>{category.label} · {passenger?.name ?? 'A passenger'}</strong><small>{passenger?.partySize ?? 1} passenger(s) · Dispatch window <b className="job-timer">{remainingTime(job, now)}</b></small></div>
         <div className="job-route"><span>●</span><div><strong>{job.pickupLabel}</strong><i /><strong>{job.destinationLabel}</strong></div></div>
         <div className="job-meta"><span>{taxi && Number.isFinite(taxi.distance) ? `${taxi.distance.toFixed(1)} km to pickup` : 'No suitable staffed taxi'}</span><span>{job.distanceKm} km trip</span><b>{money.format(job.fare)}</b></div>
-        {job.requiredUpgrade && !taxi && <small className="job-requirement">Requires premium seats and enough passenger capacity.</small>}
+        <div className="operation-requirements"><small>RESOURCE CHECK</small>{operation.requirements.map((requirement) => <span className={taxi ? 'ready' : 'missing'} key={requirement}>{taxi ? '✓' : '!'} {requirement}</span>)}</div>
         <button className="view-job-map" onClick={() => onViewMap(job.id)}>View route on map</button>
-        <div className="call-actions"><button className="decline-call" onClick={() => onDecline(job.id)}>Decline</button><button className="accept-call" disabled={!taxi} onClick={() => onAccept(job.id)}>{taxi ? 'Accept job' : 'No taxi available'}</button></div>
+        <div className="call-actions"><button className="decline-call" onClick={() => onDecline(job.id)}>Pass request</button><button className="accept-call" disabled={!taxi} onClick={() => onAccept(job.id)}>{taxi ? 'Dispatch nearest taxi' : 'Resource unavailable'}</button></div>
       </article>
-    }) : <div className="job-empty"><strong>No calls waiting</strong><p>New jobs will appear here when a taxi is available.</p></div>}</div>
+    }) : <div className="job-empty"><strong>Operations under control</strong><p>New travel requests will appear when a staffed taxi becomes available.</p></div>}</div>
   </section>
 }

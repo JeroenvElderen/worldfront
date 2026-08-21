@@ -19,6 +19,8 @@ When a taxi is available, the phone searches Mapbox directly for real points of 
 
 The Mapbox public token is embedded in the app and should use URL/app restrictions appropriate for a public client. Mapbox network access is required when a city is first searched; previously loaded offers and saved game data remain on the device.
 
+The Dispatch screen presents each call as a Travel Empire operation, with a service type, priority, reference number, dispatch window, and resource checklist. This operational layer reuses the existing nearest-suitable-taxi assignment and does not change vehicle markers, road routing, or journey behaviour.
+
 ## Battery use
 
 The map is deliberately updated once per second while a taxi is moving instead

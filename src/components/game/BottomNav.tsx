@@ -2,7 +2,7 @@ import type { Section } from '../../stores/gameStore'
 
 const items: { id: Section; label: string; hint: string; icon: string }[] = [
   { id: 'map', label: 'Map', hint: 'Live operations', icon: '⌖' },
-  { id: 'jobs', label: 'Jobs', hint: 'Calls & routes', icon: '☷' },
+  { id: 'jobs', label: 'Dispatch', hint: 'Travel operations', icon: '☷' },
   { id: 'fleet', label: 'Fleet', hint: 'Vehicles', icon: '◈' },
   { id: 'travel', label: 'Travel', hint: 'Grow network', icon: '✈' },
   { id: 'finance', label: 'Finance', hint: 'Performance', icon: '€' },

@@ -327,6 +327,7 @@ export default function App() {
                 loans={game.loans}
                 company={game.company}
                 activeCityId={game.activeCityId ?? game.startingCityId!}
+                ownedCityIds={game.ownedCityIds ?? game.branches.map((branch) => branch.cityId)}
                 branches={game.branches ?? []}
                 customCities={game.customCities ?? []}
                 agencies={game.agencies ?? []}
@@ -351,7 +352,8 @@ export default function App() {
                 onBuyRentalCar={game.buyRentalCar}
                 onStartRental={game.startRental}
                 onBuyCountryLicense={game.buyCountryLicense}
-                onOpenBranch={game.openBranch}
+                onBuyCity={game.buyCity}
+                onBuildDepot={game.buildDepot}
                 onUpgradeDepotFacility={game.upgradeDepotFacility}
                 onSwitchCity={game.switchCity}
                 onOpenAgency={game.openAgency}

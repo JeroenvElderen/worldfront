@@ -12,7 +12,7 @@ export type GoalMetric = 'fares' | 'earnings' | 'safe-jobs' | 'postal-rounds' | 
 export type TransactionCategory = 'fares' | 'tips' | 'postal' | 'rentals' | 'tours' | 'coach' | 'rail' | 'ferry' | 'airline' | 'contracts' | 'expansion' | 'goals' | 'vehicles' | 'maintenance' | 'energy' | 'upgrades' | 'payroll' | 'leases' | 'loans'
 export type Specialization = 'mobility' | 'tourism' | 'logistics' | 'sustainability'
 
-export interface City { id: string; name: string; countryCode: string; countryName?: string; regionCode?: string; regionName?: string; coordinates: Coordinates; mapZoom: number; serviceRadiusKm?: number }
+export interface City { id: string; name: string; countryCode: string; countryName?: string; regionCode?: string; regionName?: string; coordinates: Coordinates; mapZoom: number }
 export interface Company { id: string; name: string; cash: number; reputation: number; level: number; homeCityId: string; foundedAt: string }
 export interface PostalStop { id: string; label: string; coordinates: Coordinates }
 export interface PostalRoute { stops: PostalStop[]; startedAt: string; arrivesAt: string; reward: number; plannedHours?: number }

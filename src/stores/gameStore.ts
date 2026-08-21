@@ -1,13 +1,14 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import { cities, CITY_EXPANSION_DISTANCE_KM, CITY_PURCHASE_COST, countries, DEPOT_BUILD_COST, getCity } from '../data/cities'
+import { cities, CITY_PURCHASE_COST, countries, DEPOT_BUILD_COST, getCity } from '../data/cities'
 import { transportModels } from '../data/transport'
 import { getTaxiModel } from '../data/taxis'
 import { getPostVehicleModel } from '../data/postVehicles'
 import type { City, Company, DepotFacility, Driver, ExteriorAccessory, FinancialTransaction, GameSave, RefuelStrategy, Specialization, TransactionCategory, TransportMode, Vehicle, VehicleUpgrade } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
 import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation } from '../services/companyProgression'
-import { generateJobOffers, jobServiceRadiusKm } from '../services/jobOfferService'
+import { generateJobOffers, townJobSearchRangeKm } from '../services/jobOfferService'
+import { combineTownBoundaries, isTownAdjacentToTerritory } from '../services/territory'
 import { acceptJobState, completeArrivedJobsState, completeJobState, distanceKmBetween, getJobJourney, jobDestination, jobOfferExpiresAt, jobPickup, MAX_JOB_OFFERS } from '../services/jobEngine'
 import { createDynamicEvent, energyUseForJob, fatigueUseForJob, startRecoveryTrip } from '../services/operationsEngine'
 import { nextMonthlyPaymentAt } from '../services/gameTime'
@@ -105,8 +106,9 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
       const searchArea = city
       const taxis = state.vehicles.filter((vehicle) => vehicle.type === 'taxi')
       const taxiPositions = [city.coordinates, ...taxis.filter((vehicle) => vehicle.status === 'available').map((vehicle) => vehicle.position ?? city.coordinates)]
-      const maxDistanceKm = jobServiceRadiusKm(city)
-      const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, state.activeEvent?.fareMultiplier ?? 1)
+      const maxDistanceKm = townJobSearchRangeKm(city)
+      const territory = combineTownBoundaries(state.ownedCityIds)
+      const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, state.activeEvent?.fareMultiplier ?? 1, territory)
       set((latest) => {
         const openSlots = Math.max(0, availableStaffedTaxiCount(latest) - latest.jobs.filter((job) => job.status === 'offered').length)
         const acceptedJobs = generated.jobs.slice(0, openSlots)
@@ -128,8 +130,9 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
       const searchArea = city
       const taxis = state.vehicles.filter((vehicle) => vehicle.type === 'taxi')
       const taxiPositions = [city.coordinates, ...taxis.filter((vehicle) => vehicle.status === 'available').map((vehicle) => vehicle.position ?? city.coordinates)]
-      const maxDistanceKm = jobServiceRadiusKm(city)
-      const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, state.activeEvent?.fareMultiplier ?? 1)
+      const maxDistanceKm = townJobSearchRangeKm(city)
+      const territory = combineTownBoundaries(state.ownedCityIds)
+      const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, state.activeEvent?.fareMultiplier ?? 1, territory)
       set((latest) => {
         const openSlots = Math.max(0, availableStaffedTaxiCount(latest) - latest.jobs.filter((job) => job.status === 'offered').length)
         const acceptedJobs = generated.jobs.slice(0, openSlots)
@@ -364,7 +367,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   buyCity: (cityId) => set((state) => {
     const city = getCity(cityId, state.customCities)
     const ownedCities = (state.ownedCityIds ?? state.branches.map((branch) => branch.cityId)).flatMap((ownedId) => { const owned = getCity(ownedId, state.customCities); return owned ? [owned] : [] })
-    const isNearby = Boolean(city && ownedCities.some((owned) => owned.countryCode === city.countryCode && distanceKmBetween(owned.coordinates, city.coordinates) <= CITY_EXPANSION_DISTANCE_KM))
+    const isNearby = Boolean(city && isTownAdjacentToTerritory(city.id, ownedCities.map((owned) => owned.id)))
     const duplicatesOwnedPlace = Boolean(city && ownedCities.some((owned) => owned.countryCode === city.countryCode && distanceKmBetween(owned.coordinates, city.coordinates) < 2))
     const cost = state.specialization === 'mobility' ? Math.round(CITY_PURCHASE_COST * .9) : CITY_PURCHASE_COST
     if (!city || !cities.some((candidate) => candidate.id === cityId) || !isNearby || duplicatesOwnedPlace || !state.company || state.company.level < 2 || state.company.cash < cost || !(state.countryLicenses ?? ['IE']).includes(city.countryCode)) return state

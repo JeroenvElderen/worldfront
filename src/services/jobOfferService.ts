@@ -3,6 +3,8 @@ import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 import { categoryDetails, categoryForRoute } from './earlyGameEngine'
+import type { TerritoryPolygon } from './territory'
+import { isInsideTerritory } from './territory'
 
 export const MIN_JOB_DISTANCE_KM = 1.5
 export const MAX_PICKUP_DISTANCE_KM = 5
@@ -32,8 +34,8 @@ const MAPBOX_REQUEST_INTERVAL_MS = 250
 interface PlaceCacheEntry { loadedRadiusKm: number; places: MapboxPlace[]; pending?: Promise<void> }
 const placeCache = new Map<string, PlaceCacheEntry>()
 
-/** Job coverage belongs to the purchased town, rather than growing with the fleet. */
-export const jobServiceRadiusKm = (city: City) => city.serviceRadiusKm ?? (city.mapZoom >= 13 ? 7 : city.mapZoom >= 12 ? 12 : 18)
+/** Search reach and maximum trip length; territory polygons, not this value, decide eligibility. */
+export const townJobSearchRangeKm = (city: City) => city.mapZoom >= 13 ? 8 : city.mapZoom >= 12 ? 12 : 18
 
 const isCoordinates = (value: unknown): value is Coordinates =>
   Array.isArray(value) && value.length >= 2 && value.slice(0, 2).every((part) => typeof part === 'number' && Number.isFinite(part))
@@ -170,7 +172,8 @@ export async function generateJobOffers(
   maxDistanceKm = BASE_JOB_DISTANCE_KM,
   signal?: AbortSignal,
   taxiPositions: Coordinates[] = [city.coordinates],
-  fareMultiplier = 1
+  fareMultiplier = 1,
+  territory?: TerritoryPolygon | null,
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
   const places = await findMapboxPlaces(city, maxDistanceKm, signal)
   const excluded = new Set(excludedRoutes)
@@ -178,9 +181,8 @@ export async function generateJobOffers(
     const distanceKm = Math.round(distanceKmBetween(pickup.coordinates, destination.coordinates) * 10) / 10
     const signature = routeSignature(pickup.name, destination.name)
     return pickup.id !== destination.id &&
+      (!territory || (isInsideTerritory(pickup.coordinates, territory) && isInsideTerritory(destination.coordinates, territory))) &&
       taxiPositions.some((position) => distanceKmBetween(position, pickup.coordinates) <= MAX_PICKUP_DISTANCE_KM) &&
-      distanceKmBetween(city.coordinates, pickup.coordinates) <= maxDistanceKm &&
-      distanceKmBetween(city.coordinates, destination.coordinates) <= maxDistanceKm &&
       distanceKm >= MIN_JOB_DISTANCE_KM && distanceKm <= maxDistanceKm &&
       !excluded.has(signature)
       ? [{ pickup, destination, distanceKm, signature }]

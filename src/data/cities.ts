@@ -2,13 +2,13 @@ import type { City } from '../models/game'
 
 // Adding a new country only requires appending cities with their ISO country code.
 export const cities: City[] = [
-  { id: 'ie-bray', name: 'Bray', countryCode: 'IE', coordinates: [-6.1111, 53.2028], mapZoom: 13, serviceRadiusKm: 7 },
+  { id: 'ie-bray', name: 'Bray', countryCode: 'IE', coordinates: [-6.1111, 53.2028], mapZoom: 13 },
   { id: 'ie-dublin', name: 'Dublin', countryCode: 'IE', coordinates: [-6.2603, 53.3498], mapZoom: 12 },
-  { id: 'ie-greystones', name: 'Greystones', countryCode: 'IE', coordinates: [-6.0632, 53.1408], mapZoom: 13, serviceRadiusKm: 6 },
-  { id: 'ie-wicklow', name: 'Wicklow', countryCode: 'IE', coordinates: [-6.0494, 52.9808], mapZoom: 13, serviceRadiusKm: 7 },
-  { id: 'ie-naas', name: 'Naas', countryCode: 'IE', coordinates: [-6.6669, 53.2158], mapZoom: 13, serviceRadiusKm: 8 },
-  { id: 'ie-drogheda', name: 'Drogheda', countryCode: 'IE', coordinates: [-6.3478, 53.7179], mapZoom: 13, serviceRadiusKm: 8 },
-  { id: 'ie-dundalk', name: 'Dundalk', countryCode: 'IE', coordinates: [-6.405, 54.0009], mapZoom: 13, serviceRadiusKm: 8 },
+  { id: 'ie-greystones', name: 'Greystones', countryCode: 'IE', coordinates: [-6.0632, 53.1408], mapZoom: 13 },
+  { id: 'ie-wicklow', name: 'Wicklow', countryCode: 'IE', coordinates: [-6.0494, 52.9808], mapZoom: 13 },
+  { id: 'ie-naas', name: 'Naas', countryCode: 'IE', coordinates: [-6.6669, 53.2158], mapZoom: 13 },
+  { id: 'ie-drogheda', name: 'Drogheda', countryCode: 'IE', coordinates: [-6.3478, 53.7179], mapZoom: 13 },
+  { id: 'ie-dundalk', name: 'Dundalk', countryCode: 'IE', coordinates: [-6.405, 54.0009], mapZoom: 13 },
   { id: 'ie-cork', name: 'Cork', countryCode: 'IE', coordinates: [-8.4756, 51.8985], mapZoom: 12 },
   { id: 'ie-galway', name: 'Galway', countryCode: 'IE', coordinates: [-9.0568, 53.2707], mapZoom: 12 },
   { id: 'ie-limerick', name: 'Limerick', countryCode: 'IE', coordinates: [-8.6305, 52.6638], mapZoom: 12 },

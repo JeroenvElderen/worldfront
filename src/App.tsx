@@ -272,6 +272,7 @@ export default function App() {
     <div className="game-shell">
       <GameMap
         cityId={game.activeCityId ?? game.startingCityId}
+        ownedCityIds={game.ownedCityIds ?? []}
         customCities={game.customCities ?? []}
         vehicles={game.vehicles}
         jobs={game.jobs}

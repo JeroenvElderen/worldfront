@@ -8,8 +8,10 @@ import type { Coordinates, TaxiJob, Vehicle } from '../models/game'
 import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
+import { cities } from '../data/cities'
+import { combineTownBoundaries, getTownBoundary } from '../services/territory'
 
-interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; onOpenJob: (jobId: string) => void }
+interface GameMapProps { cityId: string | null; ownedCityIds: string[]; customCities: import('../models/game').City[]; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; onOpenJob: (jobId: string) => void }
 const token = mapboxAccessToken
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
@@ -76,7 +78,7 @@ const missionColor = (jobId: string) => {
   return `hsl(${hash % 360}, 100%, 60%)`
 }
 
-function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpenJob }: GameMapProps) {
+function GameMapView({ cityId, ownedCityIds, customCities, vehicles, jobs, focusedJobId, onOpenJob }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const pickupJobIds = useRef(new Set<string>())
@@ -143,6 +145,14 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
       instance.setStyle(fallbackStyle)
     })
     instance.on('load', async () => {
+      const ownedTerritory = combineTownBoundaries(ownedCityIds)
+      const lockedBoundaries = cities.flatMap((town) => ownedCityIds.includes(town.id) ? [] : (getTownBoundary(town.id) ? [getTownBoundary(town.id)!] : []))
+      instance.addSource('owned-territory', { type: 'geojson', data: ownedTerritory ?? featureCollection([]) })
+      instance.addLayer({ id: 'owned-territory-fill', type: 'fill', source: 'owned-territory', paint: { 'fill-color': '#14b8a6', 'fill-opacity': 0.2 } })
+      instance.addLayer({ id: 'owned-territory-line', type: 'line', source: 'owned-territory', paint: { 'line-color': '#2dd4bf', 'line-width': 3 } })
+      instance.addSource('locked-towns', { type: 'geojson', data: featureCollection(lockedBoundaries) })
+      instance.addLayer({ id: 'locked-towns-fill', type: 'fill', source: 'locked-towns', paint: { 'fill-color': '#334155', 'fill-opacity': 0.16 } })
+      instance.addLayer({ id: 'locked-towns-line', type: 'line', source: 'locked-towns', paint: { 'line-color': '#64748b', 'line-width': 1.5, 'line-dasharray': [2, 2] } })
       instance.addSource('company-base', { type: 'geojson', data: featureCollection(selected ? [point(selected.coordinates)] : []) })
       instance.addLayer({ id: 'base-halo', type: 'circle', source: 'company-base', paint: { 'circle-radius': 22, 'circle-color': '#22d3a7', 'circle-opacity': 0.22, 'circle-stroke-width': 1, 'circle-stroke-color': '#5eead4' } })
       instance.addLayer({ id: 'base', type: 'circle', source: 'company-base', paint: { 'circle-radius': 9, 'circle-color': '#0f766e', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } })
@@ -338,6 +348,20 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
     // into this instance below instead of tearing down the WebGL map and reloading tiles.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    const instance = map.current
+    if (!instance) return
+    const updateTerritory = () => {
+      const owned = combineTownBoundaries(ownedCityIds)
+      const locked = cities.flatMap((town) => ownedCityIds.includes(town.id) ? [] : (getTownBoundary(town.id) ? [getTownBoundary(town.id)!] : []))
+      ;(instance.getSource('owned-territory') as mapboxgl.GeoJSONSource | undefined)?.setData(owned ?? featureCollection([]))
+      ;(instance.getSource('locked-towns') as mapboxgl.GeoJSONSource | undefined)?.setData(featureCollection(locked))
+    }
+    if (instance.isStyleLoaded()) updateTerritory()
+    else instance.once('load', updateTerritory)
+    return () => { instance.off('load', updateTerritory) }
+  }, [ownedCityIds, mapRevision])
 
   useEffect(() => {
     const instance = map.current
@@ -657,6 +681,7 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
 
 export const GameMap = memo(GameMapView, (previous, next) =>
   previous.cityId === next.cityId &&
+  previous.ownedCityIds === next.ownedCityIds &&
   previous.customCities === next.customCities &&
   previous.vehicles === next.vehicles &&
   previous.focusedJobId === next.focusedJobId &&

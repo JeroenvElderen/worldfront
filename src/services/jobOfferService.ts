@@ -4,7 +4,7 @@ import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 import { categoryDetails, categoryForRoute } from './earlyGameEngine'
 
-export const MIN_JOB_DISTANCE_KM = 6
+export const MIN_JOB_DISTANCE_KM = 1.5
 export const MAX_PICKUP_DISTANCE_KM = 5
 
 const passengerNames = [
@@ -31,6 +31,9 @@ export const placeSearches = [
 const MAPBOX_REQUEST_INTERVAL_MS = 250
 interface PlaceCacheEntry { loadedRadiusKm: number; places: MapboxPlace[]; pending?: Promise<void> }
 const placeCache = new Map<string, PlaceCacheEntry>()
+
+/** Job coverage belongs to the purchased town, rather than growing with the fleet. */
+export const jobServiceRadiusKm = (city: City) => city.serviceRadiusKm ?? (city.mapZoom >= 13 ? 7 : city.mapZoom >= 12 ? 12 : 18)
 
 const isCoordinates = (value: unknown): value is Coordinates =>
   Array.isArray(value) && value.length >= 2 && value.slice(0, 2).every((part) => typeof part === 'number' && Number.isFinite(part))

@@ -207,21 +207,35 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         let pickupRoute: RouteDetails = { coordinates: job ? [start, jobPickup(job)] : [start], speedLimits: [] }
         let passengerRoute: RouteDetails = { coordinates: job ? [jobPickup(job), jobDestination(job)] : [start], speedLimits: [] }
         if (job && token) {
-          try {
-            const fetchRoute = async (from: Coordinates, to: Coordinates) => {
-              const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?alternatives=true&annotations=maxspeed&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
-              if (!response.ok) throw new Error(`Directions request failed: ${response.status}`)
-              const result = await response.json() as { routes?: Array<{ duration: number; geometry: { coordinates: number[][] }; legs: Array<{ annotation?: { maxspeed?: RouteSpeedLimit[] } }> }> }
-              const route = result.routes?.reduce((fastest, candidate) => candidate.duration < fastest.duration ? candidate : fastest)
-              return route && { coordinates: route.geometry.coordinates, speedLimits: route.legs.flatMap((leg) => leg.annotation?.maxspeed ?? []) }
-            }
-            pickupRoute = await fetchRoute(start, jobPickup(job)) ?? pickupRoute
-            passengerRoute = await fetchRoute(jobPickup(job), jobDestination(job)) ?? passengerRoute
-          } catch (error) { if ((error as Error).name === 'AbortError') return }
+          const fetchRoute = async (from: Coordinates, to: Coordinates) => {
+            const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?alternatives=true&annotations=maxspeed&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
+            if (!response.ok) throw new Error(`Directions request failed: ${response.status}`)
+            const result = await response.json() as { routes?: Array<{ duration: number; geometry: { coordinates: number[][] }; legs: Array<{ annotation?: { maxspeed?: RouteSpeedLimit[] } }> }> }
+            const route = result.routes?.reduce((fastest, candidate) => candidate.duration < fastest.duration ? candidate : fastest)
+            return route && { coordinates: route.geometry.coordinates, speedLimits: route.legs.flatMap((leg) => leg.annotation?.maxspeed ?? []) }
+          }
+          // A slow or unavailable Directions response must never delay the
+          // vehicle marker. Start on fallback geometry and upgrade the active
+          // route whenever both road routes arrive.
+          void Promise.all([
+            fetchRoute(start, jobPickup(job)),
+            fetchRoute(jobPickup(job), jobDestination(job)),
+          ]).then(([toPickup, toDestination]) => {
+            if (abortController.signal.aborted || map.current !== instance) return
+            pickupRoute = toPickup ?? pickupRoute
+            passengerRoute = toDestination ?? passengerRoute
+          }).catch(() => undefined)
         }
+        // Directions may still be loading when the live-map effect starts a
+        // newly accepted job using its immediate straight-line fallback. Let
+        // that runner retain ownership instead of replacing its moving marker
+        // when these load-time requests eventually finish.
+        if (job && liveJobIds.current.has(job.id)) continue
         const sourceId = `taxi-${index}`
-        instance.addSource(sourceId, { type: 'geojson', data: point(start) })
-        instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': vehicle.type === 'post' ? vehicleColor.postal : job ? vehicleColor.pickingUp : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available, 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
+        if (!instance.getSource(sourceId)) {
+          instance.addSource(sourceId, { type: 'geojson', data: point(start) })
+          instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': vehicle.type === 'post' ? vehicleColor.postal : job ? vehicleColor.pickingUp : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available, 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
+        }
         if (!job && vehicle.serviceTrip) {
           const service = vehicle.serviceTrip
           let serviceTimer: number | undefined
@@ -259,7 +273,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
           const time = Date.now()
           const pickingUp = time < journey.pickupAt
           const elapsed = pickingUp
-            ? Math.max(0, Math.min(1, (time - journey.acceptedAt) / (journey.pickupAt - journey.acceptedAt)))
+            ? Math.max(0, Math.min(1, (time - journey.departsAt) / (journey.pickupAt - journey.departsAt)))
             : Math.max(0, Math.min(1, (time - journey.pickupAt) / (journey.arrivesAt - journey.pickupAt)))
           const activeRoute = pickingUp ? pickupRoute : passengerRoute
           const fallbackSpeedKmh = job.durationMinutes > 0 ? job.distanceKm / (job.durationMinutes / 60) : 30
@@ -456,7 +470,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         }
         const now = Date.now()
         const pickingUp = now < journey.pickupAt
-        const from = pickingUp ? journey.acceptedAt : journey.pickupAt
+        const from = pickingUp ? journey.departsAt : journey.pickupAt
         const to = pickingUp ? journey.pickupAt : journey.arrivesAt
         const route = pickingUp ? pickupRoute : passengerRoute
         const progress = Math.max(0, Math.min(1, (now - from) / (to - from)))
@@ -473,7 +487,8 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         }
       }
 
-      // Move immediately on acceptance rather than waiting for the first tick.
+      // Start the runner now so it can hold the marker through the dispatch
+      // pause, then pull away without waiting for a separate game tick.
       liveJobRunners.current.set(job.id, animate)
       animate()
     }

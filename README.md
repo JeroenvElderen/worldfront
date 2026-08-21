@@ -66,6 +66,16 @@ above a configurable minimum fare. Rotating airport, postal, and tourism contrac
 offer milestone rewards, and each company can choose a permanent mobility,
 tourism, logistics, or sustainability specialization.
 
+## International network
+
+At company level 3, operating licenses open eight European countries and their
+city markets. Licensed cities support new local branches and become destinations
+for the wider passenger network. Levels 4–6 introduce intercity trains, passenger
+ferries, and regional airliners. Players purchase each asset, design routes from
+their active city, dispatch a correctly positioned vehicle, and collect ticket
+revenue and reputation when the scheduled service arrives. Assets retain their
+location, condition, and lifetime revenue between journeys.
+
 ## Android
 
 The native project is generated from the Capacitor configuration after dependencies are installed:

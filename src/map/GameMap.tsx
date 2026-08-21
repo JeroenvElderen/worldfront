@@ -99,6 +99,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
   const pickupHandlers = useRef(new Map<string, { enter: () => void; leave: () => void; click: (event: mapboxgl.MapMouseEvent) => void }>())
   const liveJobIds = useRef(new Set<string>())
   const liveJobTimers = useRef(new Map<string, number>())
+  const liveJobRunners = useRef(new Map<string, () => void>())
   const [mapRevision, setMapRevision] = useState(0)
   // Job changes are applied to the existing WebGL map by the synchronization
   // effects below. In particular, accepting a call must never recreate the map.
@@ -108,6 +109,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     if (!container.current) return
     const currentLiveJobIds = liveJobIds.current
     const currentLiveJobTimers = liveJobTimers.current
+    const currentLiveJobRunners = liveJobRunners.current
     if (token) mapboxgl.accessToken = token
     const selected = getCity(cityId)
     const abortController = new AbortController()
@@ -132,6 +134,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     currentLiveJobIds.clear()
     currentLiveJobTimers.forEach(window.clearTimeout)
     currentLiveJobTimers.clear()
+    currentLiveJobRunners.clear()
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
     instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right')
     instance.on('load', async () => {
@@ -288,10 +291,13 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       if (document.visibilityState === 'hidden') {
         animationTimers.forEach(window.clearTimeout)
         animationTimers.clear()
+        currentLiveJobTimers.forEach(window.clearTimeout)
+        currentLiveJobTimers.clear()
         instance.stop()
         return
       }
       animationRunners.forEach((run) => run())
+      currentLiveJobRunners.forEach((run) => run())
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => {
@@ -301,6 +307,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       animationTimers.forEach(window.clearTimeout)
       currentLiveJobTimers.forEach(window.clearTimeout)
       currentLiveJobTimers.clear()
+      currentLiveJobRunners.clear()
       currentLiveJobIds.clear()
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       map.current = null
@@ -412,6 +419,11 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
 
       const animate = () => {
         if (map.current !== instance || !instance.getSource(taxiSourceId)) return
+        const timer = liveJobTimers.current.get(job.id)
+        if (timer !== undefined) {
+          window.clearTimeout(timer)
+          liveJobTimers.current.delete(job.id)
+        }
         const now = Date.now()
         const pickingUp = now < journey.pickupAt
         const from = pickingUp ? journey.acceptedAt : journey.pickupAt
@@ -429,10 +441,13 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         if (instance.getLayer(`pickup-${job.id}-label`)) instance.setLayoutProperty(`pickup-${job.id}-label`, 'visibility', pickingUp ? 'visible' : 'none')
         if (now < journey.arrivesAt && document.visibilityState !== 'hidden') {
           liveJobTimers.current.set(job.id, window.setTimeout(animate, JOURNEY_UPDATE_INTERVAL_MS))
+        } else if (now >= journey.arrivesAt) {
+          liveJobRunners.current.delete(job.id)
         }
       }
 
       // Move immediately on acceptance rather than waiting for the first tick.
+      liveJobRunners.current.set(job.id, animate)
       animate()
     }
 
@@ -444,6 +459,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       const timer = liveJobTimers.current.get(job.id)
       if (timer !== undefined) window.clearTimeout(timer)
       liveJobTimers.current.delete(job.id)
+      liveJobRunners.current.delete(job.id)
       liveJobIds.current.delete(job.id)
       taxiSource?.setData(point(job.destination))
       if (instance.getLayer(`taxi-${vehicleIndex}`)) instance.setPaintProperty(`taxi-${vehicleIndex}`, 'circle-color', vehicleColor.available)

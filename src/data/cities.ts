@@ -2,17 +2,11 @@ import type { City } from '../models/game'
 
 // Adding a new country only requires appending cities with their ISO country code.
 export const cities: City[] = [
-  { id: 'ie-bray', name: 'Bray', countryCode: 'IE', coordinates: [-6.1111, 53.2028], mapZoom: 13 },
-  { id: 'ie-dublin', name: 'Dublin', countryCode: 'IE', coordinates: [-6.2603, 53.3498], mapZoom: 12 },
-  { id: 'ie-greystones', name: 'Greystones', countryCode: 'IE', coordinates: [-6.0632, 53.1408], mapZoom: 13 },
-  { id: 'ie-wicklow', name: 'Wicklow', countryCode: 'IE', coordinates: [-6.0494, 52.9808], mapZoom: 13 },
-  { id: 'ie-naas', name: 'Naas', countryCode: 'IE', coordinates: [-6.6669, 53.2158], mapZoom: 13 },
-  { id: 'ie-drogheda', name: 'Drogheda', countryCode: 'IE', coordinates: [-6.3478, 53.7179], mapZoom: 13 },
-  { id: 'ie-dundalk', name: 'Dundalk', countryCode: 'IE', coordinates: [-6.405, 54.0009], mapZoom: 13 },
-  { id: 'ie-cork', name: 'Cork', countryCode: 'IE', coordinates: [-8.4756, 51.8985], mapZoom: 12 },
-  { id: 'ie-galway', name: 'Galway', countryCode: 'IE', coordinates: [-9.0568, 53.2707], mapZoom: 12 },
-  { id: 'ie-limerick', name: 'Limerick', countryCode: 'IE', coordinates: [-8.6305, 52.6638], mapZoom: 12 },
-  { id: 'ie-waterford', name: 'Waterford', countryCode: 'IE', coordinates: [-7.1101, 52.2593], mapZoom: 12 },
+  { id: 'ie-wicklow', name: 'County Wicklow', countryCode: 'IE', countryName: 'Ireland', regionCode: 'WW', regionName: 'County Wicklow', coordinates: [-6.42, 53.02], mapZoom: 9.2 },
+  { id: 'ie-dublin', name: 'County Dublin', countryCode: 'IE', countryName: 'Ireland', regionCode: 'D', regionName: 'County Dublin', coordinates: [-6.26, 53.4], mapZoom: 9.2 },
+  { id: 'ie-kildare', name: 'County Kildare', countryCode: 'IE', countryName: 'Ireland', regionCode: 'KE', regionName: 'County Kildare', coordinates: [-6.75, 53.18], mapZoom: 9.2 },
+  { id: 'ie-carlow', name: 'County Carlow', countryCode: 'IE', countryName: 'Ireland', regionCode: 'CW', regionName: 'County Carlow', coordinates: [-6.78, 52.72], mapZoom: 9.4 },
+  { id: 'ie-wexford', name: 'County Wexford', countryCode: 'IE', countryName: 'Ireland', regionCode: 'WX', regionName: 'County Wexford', coordinates: [-6.52, 52.45], mapZoom: 9.1 },
   { id: 'gb-london', name: 'London', countryCode: 'GB', coordinates: [-0.1276, 51.5072], mapZoom: 11 },
   { id: 'gb-manchester', name: 'Manchester', countryCode: 'GB', coordinates: [-2.2426, 53.4808], mapZoom: 12 },
   { id: 'gb-edinburgh', name: 'Edinburgh', countryCode: 'GB', coordinates: [-3.1883, 55.9533], mapZoom: 12 },

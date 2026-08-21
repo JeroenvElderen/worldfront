@@ -277,7 +277,10 @@ export default function App() {
         vehicles={game.vehicles}
         jobs={game.jobs}
         focusedJobId={game.focusedJobId}
+        companyLevel={game.company?.level ?? 1}
+        cash={game.company?.cash ?? 0}
         onOpenJob={game.openJob}
+        onBuyCounty={game.buyCity}
       />
 
       {game.company ? (

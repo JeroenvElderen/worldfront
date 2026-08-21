@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { mapboxAccessToken } from '../config/mapbox'
+import { cities } from '../data/cities'
 import type { City, Coordinates } from '../models/game'
 
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'osm', type: 'raster', source: 'osm' }] }
@@ -10,10 +11,10 @@ const slug = (value: string) => value.toLowerCase().normalize('NFKD').replace(/[
 
 async function reversePlace([longitude, latitude]: Coordinates): Promise<ReversePlace> {
   if (mapboxAccessToken) {
-    const response = await fetch(`https://api.mapbox.com/search/geocode/v6/reverse?longitude=${longitude}&latitude=${latitude}&types=place,locality,region,country&access_token=${mapboxAccessToken}`)
+    const response = await fetch(`https://api.mapbox.com/search/geocode/v6/reverse?longitude=${longitude}&latitude=${latitude}&types=district,place,locality,region,country&access_token=${mapboxAccessToken}`)
     if (!response.ok) throw new Error('We could not identify that place. Try another point.')
     const data = await response.json() as { features?: Array<{ properties?: { feature_type?: string; name?: string; short_code?: string; context?: { place?: { name?: string }; region?: { name?: string; region_code?: string }; country?: { name?: string; country_code?: string } } } }> }
-    const feature = data.features?.find((item) => ['place', 'locality'].includes(item.properties?.feature_type ?? '')) ?? data.features?.[0]
+    const feature = data.features?.find((item) => item.properties?.feature_type === 'district') ?? data.features?.find((item) => ['place', 'locality'].includes(item.properties?.feature_type ?? '')) ?? data.features?.[0]
     const context = feature?.properties?.context
     const name = feature?.properties?.name ?? context?.place?.name
     const countryCode = context?.country?.country_code?.toUpperCase()
@@ -24,7 +25,7 @@ async function reversePlace([longitude, latitude]: Coordinates): Promise<Reverse
   if (!response.ok) throw new Error('We could not identify that place. Try another point.')
   const data = await response.json() as { address?: Record<string, string> }
   const address = data.address ?? {}
-  const name = address.city ?? address.town ?? address.village ?? address.municipality
+  const name = address.county ?? address.city ?? address.town ?? address.village ?? address.municipality
   if (!name || !address.country_code) throw new Error('Select a town or city on land.')
   const region = address.state ?? address.county ?? name
   return { name, region, regionCode: region, country: address.country ?? address.country_code.toUpperCase(), countryCode: address.country_code.toUpperCase() }
@@ -32,7 +33,7 @@ async function reversePlace([longitude, latitude]: Coordinates): Promise<Reverse
 
 function SelectionMap({ onSelect }: { onSelect: (city: City | null) => void }) {
   const container = useRef<HTMLDivElement>(null)
-  const [status, setStatus] = useState('Tap anywhere to choose your headquarters')
+  const [status, setStatus] = useState('Tap a county to choose your headquarters')
   useEffect(() => {
     if (!container.current) return
     if (mapboxAccessToken) mapboxgl.accessToken = mapboxAccessToken
@@ -45,8 +46,10 @@ function SelectionMap({ onSelect }: { onSelect: (city: City | null) => void }) {
       setStatus('Finding this place…')
       try {
         const place = await reversePlace(coordinates)
-        const city: City = { id: `custom-${slug(place.countryCode)}-${slug(place.regionCode)}-${slug(place.name)}-${Math.abs(Math.round(lngLat.lng * 1000))}`, name: place.name, countryCode: place.countryCode, countryName: place.country, regionCode: place.regionCode, regionName: place.region, coordinates, mapZoom: 12 }
-        onSelect(city); setStatus(`${place.name} · ${place.region}, ${place.country}`)
+        const countyName = place.name.toLowerCase().replace(/^county\s+/, '')
+        const knownCounty = cities.find((county) => county.countryCode === place.countryCode && county.name.toLowerCase().replace(/^county\s+/, '') === countyName)
+        const city: City = knownCounty ?? { id: `custom-${slug(place.countryCode)}-${slug(place.regionCode)}-${slug(place.name)}-${Math.abs(Math.round(lngLat.lng * 1000))}`, name: place.name.startsWith('County ') ? place.name : `County ${place.name}`, countryCode: place.countryCode, countryName: place.country, regionCode: place.regionCode, regionName: place.name, coordinates, mapZoom: 9.2 }
+        onSelect(city); setStatus(`${city.name} · ${place.country}`)
       } catch (error) { onSelect(null); setStatus((error as Error).message) }
     })
     return () => { marker?.remove(); map.remove() }
@@ -57,12 +60,12 @@ function SelectionMap({ onSelect }: { onSelect: (city: City | null) => void }) {
 export function CitySetup({ onStart }: { onStart: (city: City) => void }) {
   const [selected, setSelected] = useState<City | null>(null)
   return <div className="setup-backdrop"><main className="setup-sheet game-panel">
-    <small className="eyebrow">CHOOSE ANY PLACE IN THE WORLD</small>
+    <small className="eyebrow">CHOOSE YOUR FIRST COUNTY</small>
     <h1>Where will your<br/><em>empire begin?</em></h1>
-    <p>Tap a town or city on the map. Your first regional operating license is included, so you can open more branches there.</p>
+    <p>Tap a county on the map. Jobs stay inside the counties you own, and neighbouring counties can be added as your company grows.</p>
     <SelectionMap onSelect={setSelected}/>
     <div className="license-preview"><span>📜</span><div><small>INCLUDED OPERATING LICENSE</small><strong>{selected ? `${selected.regionName}, ${selected.countryName}` : 'Select a place to continue'}</strong></div><b>{selected ? 'Included' : '—'}</b></div>
     <div className="starter"><span>🚕</span><div><small>YOUR STARTER VEHICLE</small><strong>Compact Taxi</strong></div><b>Included</b></div>
-    <button className="start-button" disabled={!selected} onClick={() => selected && onStart(selected)}>Start in {selected?.name ?? 'your city'} <span>→</span></button>
+    <button className="start-button" disabled={!selected} onClick={() => selected && onStart(selected)}>Start in {selected?.name ?? 'your county'} <span>→</span></button>
   </main></div>
 }

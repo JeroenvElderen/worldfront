@@ -319,6 +319,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
     window.addEventListener('pageshow', handleVisibilityChange)
+    window.addEventListener('focus', handleVisibilityChange)
     window.addEventListener('online', handleVisibilityChange)
     return () => {
       abortController.abort()
@@ -329,6 +330,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       currentLiveJobIds.clear()
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('pageshow', handleVisibilityChange)
+      window.removeEventListener('focus', handleVisibilityChange)
       window.removeEventListener('online', handleVisibilityChange)
       canvas.removeEventListener('webglcontextlost', handleContextLost)
       canvas.removeEventListener('webglcontextrestored', handleContextRestored)

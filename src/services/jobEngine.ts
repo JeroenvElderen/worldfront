@@ -1,5 +1,5 @@
 import type { Company, TaxiJob, Vehicle } from '../models/game'
-import { levelForReputation } from './companyProgression'
+import { addReputation, levelForReputation } from './companyProgression'
 
 export const MAX_JOB_OFFERS = 6
 export const JOB_OFFER_DURATION_MS = 5 * 60_000
@@ -84,7 +84,8 @@ export function completeJobState(
   const paidDistanceKm = distanceKmBetween(job.pickup, job.destination)
   // The offered fare can include a live-event surge, so preserve it at settlement.
   const meteredFare = job.fare || taxiFareForDistance(paidDistanceKm)
-  const reputation = company.reputation + 1
+  // Manual settlement has no calculated feedback, so award the one-star floor.
+  const reputation = addReputation(company.reputation, 0.2)
 
   return {
     company: { ...company, cash: company.cash + meteredFare, reputation, level: levelForReputation(reputation) },

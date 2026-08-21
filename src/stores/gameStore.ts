@@ -6,7 +6,7 @@ import { getTaxiModel } from '../data/taxis'
 import { getPostVehicleModel } from '../data/postVehicles'
 import type { Company, Driver, ExteriorAccessory, FinancialTransaction, GameSave, RefuelStrategy, Specialization, TransactionCategory, TransportMode, Vehicle, VehicleUpgrade } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
-import { levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
+import { addReputation, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import { generateJobOffers } from '../services/jobOfferService'
 import { acceptJobState, completeArrivedJobsState, completeJobState, distanceKmBetween, getJobJourney, jobOfferExpiresAt, MAX_JOB_OFFERS } from '../services/jobEngine'
 import { createDynamicEvent, energyUseForJob, fatigueUseForJob, startRecoveryTrip } from '../services/operationsEngine'
@@ -159,13 +159,15 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
         const outcome = calculateJobOutcome(job, previousVehicle, driver)
         const emptyDistanceKm = previousVehicle.position ? distanceKmBetween(previousVehicle.position, job.pickup) : 0
         const journeyDistanceKm = emptyDistanceKm + job.distanceKm
-        company = { ...company, cash: company.cash + outcome.tip, reputation: company.reputation - 1 + outcome.reputationEarned, level: levelForReputation(company.reputation - 1 + outcome.reputationEarned) }
+        // completeArrivedJobsState already applied the one-star (0.2) floor.
+        const reputation = addReputation(company.reputation, outcome.reputationEarned - 0.2)
+        company = { ...company, cash: company.cash + outcome.tip, reputation, level: levelForReputation(reputation) }
         financialTransactions = addTransactions(
           financialTransactions,
           transaction('fares', `${previousVehicle.name} fare`, job.fare, previousVehicle.id, new Date(completedAt).toISOString()),
           ...(outcome.tip > 0 ? [transaction('tips', `${previousVehicle.name} tip`, outcome.tip, previousVehicle.id, new Date(completedAt).toISOString())] : []),
         )
-        result.jobs = result.jobs.map((candidate) => candidate.id === jobId ? { ...candidate, satisfaction: outcome.satisfaction, tip: outcome.tip, reputationEarned: outcome.reputationEarned } : candidate)
+        result.jobs = result.jobs.map((candidate) => candidate.id === jobId ? { ...candidate, satisfaction: outcome.satisfaction, customerRating: outcome.customerRating, tip: outcome.tip, reputationEarned: outcome.reputationEarned } : candidate)
         const batteryWear = previousVehicle.powertrain === 'electric' ? journeyDistanceKm / 30_000 : 0
         const depleted = { ...previousVehicle, position: job.destination, status: 'available' as const, odometerKm: (previousVehicle.odometerKm ?? 0) + journeyDistanceKm, lifetimeRevenue: (previousVehicle.lifetimeRevenue ?? 0) + job.fare + outcome.tip, batteryHealth: Math.max(60, (previousVehicle.batteryHealth ?? 100) - batteryWear), condition: Math.max(0, previousVehicle.condition - outcome.wear), fuel: Math.max(0, previousVehicle.fuel - energyUseForJob(job, previousVehicle, state.activeEvent, driver)) }
         const tiredDriver = driver && { ...driver, fatigue: Math.min(100, driver.fatigue + fatigueUseForJob(job)) }
@@ -184,7 +186,8 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
       if (vehicle.scheduledJourney && new Date(vehicle.scheduledJourney.arrivesAt).getTime() <= now) {
         const journey = vehicle.scheduledJourney
         const bonus = state.specialization === 'tourism' && journey.kind === 'tour' ? Math.round(journey.reward * .2) : 0
-        company = { ...company, cash: company.cash + journey.reward + bonus, reputation: company.reputation + 2 }
+        const reputation = addReputation(company.reputation, 1)
+        company = { ...company, cash: company.cash + journey.reward + bonus, reputation, level: levelForReputation(reputation) }
         financialTransactions = addTransactions(financialTransactions, transaction(journey.kind === 'tour' ? 'tours' : 'coach', `${vehicle.name} ${journey.kind} service`, journey.reward + bonus, vehicle.id, journey.arrivesAt))
         if (journey.kind === 'tour') state = { ...state, contracts: advanceContracts(state.contracts ?? [], 'tour') }
         return { ...vehicle, position: journey.destination, status: 'available' as const, scheduledJourney: undefined, odometerKm: (vehicle.odometerKm ?? 0) + journey.distanceKm, lifetimeRevenue: (vehicle.lifetimeRevenue ?? 0) + journey.reward + bonus, fuel: Math.max(0, vehicle.fuel - journey.distanceKm / 8), condition: Math.max(0, vehicle.condition - journey.distanceKm / 350) }
@@ -196,7 +199,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
         return { ...vehicle, position: waypoints.at(-1) ?? vehicle.position, status: 'available' as const, rentalJourney: undefined, odometerKm: (vehicle.odometerKm ?? 0) + distanceKm, lifetimeRevenue: (vehicle.lifetimeRevenue ?? 0) + reward, batteryHealth: vehicle.powertrain === 'electric' ? Math.max(60, (vehicle.batteryHealth ?? 100) - distanceKm / 30_000) : vehicle.batteryHealth, fuel: Math.max(0, vehicle.fuel - distanceKm / 5), condition: Math.max(0, vehicle.condition - distanceKm / 250) }
       }
       if (vehicle.postalRoute && new Date(vehicle.postalRoute.arrivesAt).getTime() <= now) {
-        const reputation = company.reputation + 1
+        const reputation = addReputation(company.reputation, 0.5)
         company = { ...company, cash: company.cash + vehicle.postalRoute.reward, reputation, level: levelForReputation(reputation) }
         const plannedHours = vehicle.postalRoute.plannedHours ?? 1
         state = { ...state, goals: updateGoals(state.goals ?? [], 'postal-rounds', 1) }
@@ -220,7 +223,8 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     transportAssets = transportAssets.map((asset) => {
       if (!asset.journey || new Date(asset.journey.arrivesAt).getTime() > now) return asset
       const journey = asset.journey
-      company = { ...company, cash: company.cash + journey.reward, reputation: company.reputation + 3, level: levelForReputation(company.reputation + 3) }
+      const reputation = addReputation(company.reputation, 1.3)
+      company = { ...company, cash: company.cash + journey.reward, reputation, level: levelForReputation(reputation) }
       financialTransactions = addTransactions(financialTransactions, transaction(asset.mode === 'airliner' ? 'airline' : asset.mode === 'train' ? 'rail' : 'ferry', `${asset.name} scheduled service`, journey.reward, undefined, journey.arrivesAt))
       return { ...asset, cityId: journey.destinationCityId, status: 'available' as const, lifetimeRevenue: asset.lifetimeRevenue + journey.reward, condition: Math.max(0, asset.condition - journey.distanceKm / 2_500), journey: undefined }
     })
@@ -255,7 +259,8 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     const contractRewards = (state.contracts ?? []).filter((contract) => contract.completed && contract.reward > 0)
     const contractReward = contractRewards.reduce((sum, contract) => sum + contract.reward, 0)
     if (contractReward) {
-      company = { ...company, cash: company.cash + contractReward, reputation: company.reputation + contractRewards.length * 3 }
+      const reputation = addReputation(company.reputation, contractRewards.length * 1.3)
+      company = { ...company, cash: company.cash + contractReward, reputation, level: levelForReputation(reputation) }
       financialTransactions = addTransactions(financialTransactions, ...contractRewards.map((contract) => transaction('contracts', `Contract: ${contract.name}`, contract.reward)))
     }
     const contracts = (state.contracts ?? []).map((contract) => contract.completed ? { ...contract, reward: 0 } : contract)
@@ -431,7 +436,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   claimGoal: (goalId) => set((state) => {
     const goal = state.goals.find((item) => item.id === goalId && item.completed && !item.claimed)
     if (!state.company || !goal) return state
-    const reputation = state.company.reputation + goal.reputationReward
+    const reputation = addReputation(state.company.reputation, goal.reputationReward)
     return { company: { ...state.company, cash: state.company.cash + goal.cashReward, reputation, level: levelForReputation(reputation) }, goals: state.goals.map((item) => item.id === goalId ? { ...item, claimed: true } : item), financialTransactions: addTransactions(state.financialTransactions, transaction('goals', `Goal reward: ${goal.label}`, goal.cashReward)), updatedAt: new Date().toISOString() }
   }),
   toggleExteriorAccessory: (vehicleId, accessory) => set((state) => ({

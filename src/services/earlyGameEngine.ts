@@ -44,7 +44,7 @@ export function createGoals(now = Date.now()): CompanyGoal[] {
   const picked = [...goalTemplates].sort(() => Math.random() - .5).slice(0, 3)
   return [...picked.map((template) => ({ template, cadence: 'daily' as const })), { template: goalTemplates[Math.floor(Math.random() * goalTemplates.length)], cadence: 'weekly' as const }].map(({ template, cadence }) => {
     const target = template[cadence]
-    return { id: crypto.randomUUID(), cadence, metric: template.metric, label: template.label(target), target, progress: 0, cashReward: cadence === 'daily' ? 650 : 3_500, reputationReward: cadence === 'daily' ? 2 : 10, expiresAt: new Date(now + (cadence === 'daily' ? 24 : 168) * 60 * 60_000).toISOString(), completed: false, claimed: false }
+    return { id: crypto.randomUUID(), cadence, metric: template.metric, label: template.label(target), target, progress: 0, cashReward: cadence === 'daily' ? 650 : 3_500, reputationReward: cadence === 'daily' ? 0.5 : 1.3, expiresAt: new Date(now + (cadence === 'daily' ? 24 : 168) * 60 * 60_000).toISOString(), completed: false, claimed: false }
   })
 }
 
@@ -81,10 +81,11 @@ export function calculateJobOutcome(job: TaxiJob, vehicle: Vehicle, driver?: Dri
   satisfaction = Math.round(Math.max(35, Math.min(100, satisfaction)))
   const charmingMultiplier = driver?.trait === 'charming' ? 1.4 : 1
   const tip = satisfaction >= 70 ? Math.round(job.fare * ((satisfaction - 60) / 200) * charmingMultiplier * 100) / 100 : 0
-  const reputationEarned = satisfaction >= 90 ? (driver?.trait === 'charming' ? 3 : 2) : satisfaction >= 65 ? 1 : 0
+  const customerRating = Math.max(1, Math.min(5, Math.ceil(satisfaction / 20)))
+  const reputationEarned = customerRating * 0.2
   const baseWear = Math.max(.15, job.distanceKm * .035)
   const wear = baseWear * (driver?.trait === 'careful' ? .75 : 1) * ((vehicle.upgrades ?? []).includes('dash-camera') ? .9 : 1)
-  return { satisfaction, tip, reputationEarned, wear: Math.round(wear * 100) / 100 }
+  return { satisfaction, customerRating, tip, reputationEarned, wear: Math.round(wear * 100) / 100 }
 }
 
 export function pickupSpeedMultiplier(driver?: Driver) {

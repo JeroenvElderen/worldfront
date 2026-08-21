@@ -24,9 +24,9 @@ const routePosition = (coordinates: number[][], progress: number): Coordinates =
   return [start[0] + (end[0] - start[0]) * amount, start[1] + (end[1] - start[1]) * amount]
 }
 
-// One-second movement steps keep the small taxi dots useful without continuously
-// waking the CPU and GPU to render decorative intermediate positions.
-const JOURNEY_UPDATE_INTERVAL_MS = 1_000
+// Keep moving markers synchronized with the browser's paint cycle. Calculating
+// their position from the current time (rather than accumulating frame deltas)
+// also lets a journey resume at the exact right point after a background pause.
 type RouteSpeedLimit = { speed: number; unit: 'km/h' | 'mph' } | { unknown: true } | { none: true }
 type RouteDetails = { coordinates: number[][]; speedLimits: RouteSpeedLimit[] }
 
@@ -105,7 +105,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     pickupJobIds.current.clear()
     pickupHandlers.current.clear()
     currentLiveJobIds.clear()
-    currentLiveJobTimers.forEach(window.clearTimeout)
+    currentLiveJobTimers.forEach(window.cancelAnimationFrame)
     currentLiveJobTimers.clear()
     currentLiveJobRunners.clear()
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
@@ -160,10 +160,13 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
           instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': vehicleColor.rental, 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
           let rentalTimer: number | undefined
           const animateRental = () => {
-            if (rentalTimer !== undefined) animationTimers.delete(rentalTimer)
+            if (rentalTimer !== undefined) {
+              window.cancelAnimationFrame(rentalTimer)
+              animationTimers.delete(rentalTimer)
+            }
             const progress = rentalJourneyProgress(rental)
             ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(roadCoordinates, progress)))
-            if (progress < 1 && document.visibilityState !== 'hidden') { rentalTimer = window.setTimeout(animateRental, JOURNEY_UPDATE_INTERVAL_MS); animationTimers.add(rentalTimer) }
+            if (progress < 1 && document.visibilityState !== 'hidden') { rentalTimer = window.requestAnimationFrame(animateRental); animationTimers.add(rentalTimer) }
           }
           animationRunners.add(animateRental); animateRental(); continue
         }
@@ -191,10 +194,13 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
           instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': vehicleColor.postal, 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
           let postalTimer: number | undefined
           const animatePostal = () => {
-            if (postalTimer !== undefined) animationTimers.delete(postalTimer)
+            if (postalTimer !== undefined) {
+              window.cancelAnimationFrame(postalTimer)
+              animationTimers.delete(postalTimer)
+            }
             const progress = postalRouteProgress(postal)
             ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(roadCoordinates, progress)))
-            if (progress < 1 && document.visibilityState !== 'hidden') { postalTimer = window.setTimeout(animatePostal, JOURNEY_UPDATE_INTERVAL_MS); animationTimers.add(postalTimer) }
+            if (progress < 1 && document.visibilityState !== 'hidden') { postalTimer = window.requestAnimationFrame(animatePostal); animationTimers.add(postalTimer) }
           }
           animationRunners.add(animatePostal); animatePostal(); continue
         }
@@ -220,12 +226,15 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
           const service = vehicle.serviceTrip
           let serviceTimer: number | undefined
           const animateService = () => {
-            if (serviceTimer !== undefined) animationTimers.delete(serviceTimer)
+            if (serviceTimer !== undefined) {
+              window.cancelAnimationFrame(serviceTimer)
+              animationTimers.delete(serviceTimer)
+            }
             const startedAt = new Date(service.startedAt).getTime()
             const arrivesAt = new Date(service.arrivesAt).getTime()
             const progress = Math.max(0, Math.min(1, (Date.now() - startedAt) / (arrivesAt - startedAt)))
             ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition([service.from, service.destination], progress)))
-            if (progress < 1 && document.visibilityState !== 'hidden') { serviceTimer = window.setTimeout(animateService, JOURNEY_UPDATE_INTERVAL_MS); animationTimers.add(serviceTimer) }
+            if (progress < 1 && document.visibilityState !== 'hidden') { serviceTimer = window.requestAnimationFrame(animateService); animationTimers.add(serviceTimer) }
           }
           animationRunners.add(animateService); animateService(); continue
         }
@@ -235,15 +244,18 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         let animationTimer: number | undefined
         const scheduleAnimation = () => {
           if (animationTimer !== undefined) {
-            window.clearTimeout(animationTimer)
+            window.cancelAnimationFrame(animationTimer)
             animationTimers.delete(animationTimer)
           }
           if (document.visibilityState === 'hidden') return
-          animationTimer = window.setTimeout(animate, JOURNEY_UPDATE_INTERVAL_MS)
+          animationTimer = window.requestAnimationFrame(animate)
           animationTimers.add(animationTimer)
         }
         const animate = () => {
-          if (animationTimer !== undefined) animationTimers.delete(animationTimer)
+          if (animationTimer !== undefined) {
+            window.cancelAnimationFrame(animationTimer)
+            animationTimers.delete(animationTimer)
+          }
           const time = Date.now()
           const pickingUp = time < journey.pickupAt
           const elapsed = pickingUp
@@ -267,9 +279,9 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     })
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
-        animationTimers.forEach(window.clearTimeout)
+        animationTimers.forEach(window.cancelAnimationFrame)
         animationTimers.clear()
-        currentLiveJobTimers.forEach(window.clearTimeout)
+        currentLiveJobTimers.forEach(window.cancelAnimationFrame)
         currentLiveJobTimers.clear()
         instance.stop()
         return
@@ -285,8 +297,8 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     window.addEventListener('online', handleVisibilityChange)
     return () => {
       abortController.abort()
-      animationTimers.forEach(window.clearTimeout)
-      currentLiveJobTimers.forEach(window.clearTimeout)
+      animationTimers.forEach(window.cancelAnimationFrame)
+      currentLiveJobTimers.forEach(window.cancelAnimationFrame)
       currentLiveJobTimers.clear()
       currentLiveJobRunners.clear()
       currentLiveJobIds.clear()
@@ -439,7 +451,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         if (map.current !== instance || !instance.getSource(taxiSourceId)) return
         const timer = liveJobTimers.current.get(job.id)
         if (timer !== undefined) {
-          window.clearTimeout(timer)
+          window.cancelAnimationFrame(timer)
           liveJobTimers.current.delete(job.id)
         }
         const now = Date.now()
@@ -455,7 +467,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         // The halo waits at pickup, then rides with the passenger's vehicle.
         passengerSource?.setData(point(pickingUp ? job.pickup : currentPosition, { title: job.pickupLabel }))
         if (now < journey.arrivesAt && document.visibilityState !== 'hidden') {
-          liveJobTimers.current.set(job.id, window.setTimeout(animate, JOURNEY_UPDATE_INTERVAL_MS))
+          liveJobTimers.current.set(job.id, window.requestAnimationFrame(animate))
         } else if (now >= journey.arrivesAt) {
           liveJobRunners.current.delete(job.id)
         }
@@ -472,7 +484,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       if (vehicleIndex < 0) continue
       const taxiSource = instance.getSource(`taxi-${vehicleIndex}`) as mapboxgl.GeoJSONSource | undefined
       const timer = liveJobTimers.current.get(job.id)
-      if (timer !== undefined) window.clearTimeout(timer)
+      if (timer !== undefined) window.cancelAnimationFrame(timer)
       liveJobTimers.current.delete(job.id)
       liveJobRunners.current.delete(job.id)
       liveJobIds.current.delete(job.id)

@@ -149,7 +149,7 @@ export async function generateJobOffers(
     const distanceKm = Math.round(distanceKmBetween(pickup.coordinates, destination.coordinates) * 10) / 10
     const signature = routeSignature(pickup.name, destination.name)
     return pickup.id !== destination.id &&
-      taxiPositions.every((position) => distanceKmBetween(position, pickup.coordinates) <= MAX_PICKUP_DISTANCE_KM) &&
+      taxiPositions.some((position) => distanceKmBetween(position, pickup.coordinates) <= MAX_PICKUP_DISTANCE_KM) &&
       distanceKmBetween(city.coordinates, pickup.coordinates) <= maxDistanceKm &&
       distanceKmBetween(city.coordinates, destination.coordinates) <= maxDistanceKm &&
       distanceKm >= MIN_JOB_DISTANCE_KM && distanceKm <= maxDistanceKm &&
@@ -158,7 +158,7 @@ export async function generateJobOffers(
       : []
   }))).slice(0, count)
 
-  if (!routes.length) throw new Error(`No new routes have a pickup within ${MAX_PICKUP_DISTANCE_KM} km of every available taxi. Try again when your taxis are closer together.`)
+  if (!routes.length) throw new Error(`No new routes have a pickup within ${MAX_PICKUP_DISTANCE_KM} km of an available taxi. Try again after a taxi has moved.`)
 
   const passengers = routes.map(() => ({
     id: crypto.randomUUID(),

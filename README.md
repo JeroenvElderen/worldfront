@@ -30,8 +30,8 @@ than from a repeating 30-second timer. Tile-expiry refreshes and label fades are
 also disabled, and the tile cache is capped, which avoids recurring network,
 CPU, GPU, and memory work without changing game outcomes.
 
-Vehicles are rendered as small, color-coded map dots: green taxis are available,
-orange taxis are driving to a pickup, and red taxis have their client aboard.
+Vehicles are rendered as small map dots, with a consistent purple marker for
+every vehicle type and operating state.
 Active journeys follow a thin route line, and selecting a job highlights the
 road route the nearest available driver will take to its pickup and destination.
 
@@ -110,5 +110,10 @@ The game includes the first-time city flow, local autosave, starter company, fle
 Vehicle lifecycle management now tracks odometer mileage, age-based depreciation, lifetime revenue and expenses, escalating high-mileage service costs, major-service intervals, manufacturer warranty status, and electric-battery health. The Fleet screen estimates market value, net return, and replacement recommendations for every vehicle. A dedicated Financials tab records income and expenses in an on-device ledger, with cash flow, operating profit, category breakdowns, fleet value, debt, net worth, and recent transactions.
 
 Early-company management includes four rotating driver candidates with gameplay traits, daily and weekly goals, categorized passenger requests with vehicle requirements, satisfaction-based tips and reputation, vehicle wear and three maintenance plans, functional upgrades, and per-vehicle refueling strategies. Newly purchased vehicles are delivered without a driver and must be staffed from the Company screen; the starter taxi includes a careful driver so a new game remains immediately playable.
+
+Every branch includes a depot builder, with three levels each for parking,
+workshops, energy facilities, and driver lounges. These upgrades expand fleet
+capacity and reduce local servicing, energy, and payroll costs; the founding
+branch is identified as the company headquarters.
 
 Fleet operations now track energy and driver fatigue. A taxi that runs low automatically drives to a fuel or charging station; a tired driver takes the taxi home to rest, with both recovery journeys shown on the map. Players can select day or night shifts in Fleet. The Company screen offers interest-bearing loans, while the dealership supports vehicle leasing and owned vehicles can be sold at a condition-adjusted value. The HUD shows an accelerated calendar and clock, advancing one game minute per real second. Recurring driver, lease, and loan payments are collected at the start of each game month. Timed city events create temporary fare and energy-use modifiers and are announced above the map.

@@ -350,6 +350,7 @@ export default function App() {
                 onStartRental={game.startRental}
                 onBuyCountryLicense={game.buyCountryLicense}
                 onOpenBranch={game.openBranch}
+                onUpgradeDepotFacility={game.upgradeDepotFacility}
                 onSwitchCity={game.switchCity}
                 onOpenAgency={game.openAgency}
                 onCreateTour={game.createTour}

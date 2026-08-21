@@ -2,14 +2,15 @@ import { memo, useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { featureCollection, lineString, point } from '@turf/helpers'
+import { circle } from '@turf/turf'
 import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, irelandOverview } from '../data/cities'
-import type { Coordinates, TaxiJob, Vehicle } from '../models/game'
+import type { Branch, Coordinates, TaxiJob, Vehicle } from '../models/game'
 import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
 
-interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; onOpenJob: (jobId: string) => void }
+interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; serviceRadiusKm: number; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; placingStation: boolean; onBuildStation: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void }
 const token = mapboxAccessToken
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
@@ -76,7 +77,7 @@ const missionColor = (jobId: string) => {
   return `hsl(${hash % 360}, 100%, 60%)`
 }
 
-function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpenJob }: GameMapProps) {
+function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles, jobs, focusedJobId, placingStation, onBuildStation, onOpenJob }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const pickupJobIds = useRef(new Set<string>())
@@ -85,6 +86,18 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
   const liveJobTimers = useRef(new Map<string, number>())
   const liveJobRunners = useRef(new Map<string, () => void>())
   const [mapRevision, setMapRevision] = useState(0)
+
+  useEffect(() => {
+    const instance = map.current
+    if (!instance) return
+    instance.getCanvas().classList.toggle('placing-depot', placingStation)
+    const handlePlacement = (event: mapboxgl.MapMouseEvent) => {
+      if (!placingStation) return
+      onBuildStation([event.lngLat.lng, event.lngLat.lat])
+    }
+    instance.on('click', handlePlacement)
+    return () => { instance.off('click', handlePlacement); instance.getCanvas().classList.remove('placing-depot') }
+  }, [placingStation, onBuildStation])
 
   useEffect(() => {
     if (!container.current) return
@@ -102,8 +115,10 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
       style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle,
       center: selected?.coordinates ?? irelandOverview.center,
       zoom: selected?.mapZoom ?? irelandOverview.zoom,
+      pitch: 48,
+      bearing: -12,
       attributionControl: false,
-      pitchWithRotate: false,
+      pitchWithRotate: true,
       // Avoid periodic network and render work when the already-cached map is
       // perfectly adequate for this mostly static management-game viewport.
       refreshExpiredTiles: false,
@@ -118,7 +133,7 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
     currentLiveJobTimers.clear()
     currentLiveJobRunners.clear()
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
-    instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right')
+    instance.addControl(new mapboxgl.NavigationControl({ showCompass: true, visualizePitch: true }), 'bottom-right')
     const canvas = instance.getCanvas()
     const handleContextLost = (event: Event) => {
       event.preventDefault()
@@ -143,6 +158,15 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
       instance.setStyle(fallbackStyle)
     })
     instance.on('load', async () => {
+      if (token) {
+        instance.addSource('mapbox-dem', { type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1', tileSize: 512, maxzoom: 14 })
+        instance.setTerrain({ source: 'mapbox-dem', exaggeration: 1.15 })
+        if (instance.getSource('composite')) instance.addLayer({
+          id: '3d-buildings', type: 'fill-extrusion', source: 'composite', 'source-layer': 'building', minzoom: 14,
+          filter: ['==', ['get', 'extrude'], 'true'],
+          paint: { 'fill-extrusion-color': '#b8c7c3', 'fill-extrusion-height': ['coalesce', ['get', 'height'], 5], 'fill-extrusion-base': ['coalesce', ['get', 'min_height'], 0], 'fill-extrusion-opacity': .72 },
+        })
+      }
       instance.addSource('company-base', { type: 'geojson', data: featureCollection(selected ? [point(selected.coordinates)] : []) })
       instance.addLayer({ id: 'base-halo', type: 'circle', source: 'company-base', paint: { 'circle-radius': 22, 'circle-color': '#22d3a7', 'circle-opacity': 0.22, 'circle-stroke-width': 1, 'circle-stroke-color': '#5eead4' } })
       instance.addLayer({ id: 'base', type: 'circle', source: 'company-base', paint: { 'circle-radius': 9, 'circle-color': '#0f766e', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } })
@@ -353,6 +377,33 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
     else instance.once('load', updateBase)
     return () => { instance.off('load', updateBase) }
   }, [cityId, customCities, mapRevision])
+
+  useEffect(() => {
+    const instance = map.current
+    if (!instance) return
+    const updateDepots = () => {
+      const stationCoordinates = branches.flatMap((station) => {
+        const coordinates = station.coordinates ?? getCity(station.cityId, customCities)?.coordinates
+        return coordinates ? [{ station, coordinates }] : []
+      })
+      const features = stationCoordinates.map(({ station, coordinates }) => point(coordinates, { name: station.name }))
+      const data = featureCollection(features)
+      const coverageData = featureCollection(stationCoordinates.map(({ coordinates }) => circle(coordinates, serviceRadiusKm, { steps: 64, units: 'kilometers' })))
+      const source = instance.getSource('depot-network') as mapboxgl.GeoJSONSource | undefined
+      const coverageSource = instance.getSource('service-coverage') as mapboxgl.GeoJSONSource | undefined
+      if (source && coverageSource) { source.setData(data); coverageSource.setData(coverageData); return }
+      instance.addSource('service-coverage', { type: 'geojson', data: coverageData })
+      instance.addLayer({ id: 'service-coverage-fill', type: 'fill', source: 'service-coverage', paint: { 'fill-color': '#22d3a7', 'fill-opacity': .08 } })
+      instance.addLayer({ id: 'service-coverage-line', type: 'line', source: 'service-coverage', paint: { 'line-color': '#5eead4', 'line-width': 1.5, 'line-opacity': .65, 'line-dasharray': [3, 2] } })
+      instance.addSource('depot-network', { type: 'geojson', data })
+      instance.addLayer({ id: 'depot-network-halo', type: 'circle', source: 'depot-network', paint: { 'circle-radius': 13, 'circle-color': '#f59e0b', 'circle-opacity': .18 } })
+      instance.addLayer({ id: 'depot-network', type: 'circle', source: 'depot-network', paint: { 'circle-radius': 6, 'circle-color': '#fbbf24', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } })
+      instance.addLayer({ id: 'depot-network-label', type: 'symbol', source: 'depot-network', minzoom: 8, layout: { 'text-field': ['get', 'name'], 'text-size': 10, 'text-offset': [0, 1.4], 'text-anchor': 'top', 'text-allow-overlap': false }, paint: { 'text-color': '#ffffff', 'text-halo-color': '#10201f', 'text-halo-width': 2 } })
+    }
+    if (instance.isStyleLoaded()) updateDepots()
+    else instance.once('load', updateDepots)
+    return () => { instance.off('load', updateDepots) }
+  }, [branches, customCities, mapRevision, serviceRadiusKm])
 
   useEffect(() => {
     const instance = map.current

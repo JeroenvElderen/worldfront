@@ -32,7 +32,7 @@ async function reversePlace([longitude, latitude]: Coordinates): Promise<Reverse
 
 function SelectionMap({ onSelect }: { onSelect: (city: City | null) => void }) {
   const container = useRef<HTMLDivElement>(null)
-  const [status, setStatus] = useState('Tap anywhere to choose your headquarters')
+  const [status, setStatus] = useState('Tap anywhere to place Station 1')
   useEffect(() => {
     if (!container.current) return
     if (mapboxAccessToken) mapboxgl.accessToken = mapboxAccessToken
@@ -59,10 +59,10 @@ export function CitySetup({ onStart }: { onStart: (city: City) => void }) {
   return <div className="setup-backdrop"><main className="setup-sheet game-panel">
     <small className="eyebrow">CHOOSE ANY PLACE IN THE WORLD</small>
     <h1>Where will your<br/><em>empire begin?</em></h1>
-    <p>Tap a town or city on the map. Your first regional operating license is included, so you can open more branches there.</p>
+    <p>Tap a town or city on the map. Station 1 and its first taxi are included; build more stations from the map as your company grows.</p>
     <SelectionMap onSelect={setSelected}/>
     <div className="license-preview"><span>📜</span><div><small>INCLUDED OPERATING LICENSE</small><strong>{selected ? `${selected.regionName}, ${selected.countryName}` : 'Select a place to continue'}</strong></div><b>{selected ? 'Included' : '—'}</b></div>
-    <div className="starter"><span>🚕</span><div><small>YOUR STARTER VEHICLE</small><strong>Compact Taxi</strong></div><b>Included</b></div>
+    <div className="starter"><span>🚕</span><div><small>STATION 1 + STARTER VEHICLE</small><strong>First station · Compact Taxi</strong></div><b>Included</b></div>
     <button className="start-button" disabled={!selected} onClick={() => selected && onStart(selected)}>Start in {selected?.name ?? 'your city'} <span>→</span></button>
   </main></div>
 }

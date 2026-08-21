@@ -318,6 +318,7 @@ export default function App() {
               <SectionSheet
                 section={game.activeSection}
                 vehicles={game.vehicles}
+                garageLevel={game.garageLevel ?? 0}
                 drivers={game.drivers}
                 driverCandidates={game.driverCandidates}
                 goals={game.goals}
@@ -342,6 +343,7 @@ export default function App() {
                 onReset={game.resetGame}
                 onBuyTaxi={game.buyTaxi}
                 onLeaseTaxi={game.leaseTaxi}
+                onUpgradeGarage={game.upgradeGarage}
                 onBuyPostVehicle={game.buyPostVehicle}
                 onStartPostalRoute={game.startPostalRoute}
                 onBuyRentalCar={game.buyRentalCar}

@@ -1,6 +1,14 @@
 export const BASE_JOB_DISTANCE_KM = 20
 export const JOB_DISTANCE_PER_LEVEL_KM = 20
 export const REPUTATION_PER_LEVEL = 50
+export const LEASING_UNLOCK_LEVEL = 5
+export const FLEET_SLOTS_PER_LEVEL = 2
+export const GARAGE_UPGRADE_SLOTS = 3
+
+export const fleetSlotCapacity = (companyLevel: number, garageLevel = 0) =>
+  Math.max(1, Math.floor(companyLevel)) * FLEET_SLOTS_PER_LEVEL + Math.max(0, Math.floor(garageLevel)) * GARAGE_UPGRADE_SLOTS
+
+export const garageUpgradeCost = (garageLevel = 0) => 10_000 * (Math.max(0, Math.floor(garageLevel)) + 1)
 
 /** Reputation is awarded in tenths; normalize additions to avoid float artifacts. */
 export const addReputation = (reputation: number, amount: number) =>

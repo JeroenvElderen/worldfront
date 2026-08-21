@@ -87,6 +87,10 @@ const vehicleColor = {
   rental: '#8b5cf6',
 } as const
 
+const VEHICLE_MARKER_RADIUS = 4
+const VEHICLE_MARKER_STROKE_WIDTH = 1.5
+const JOB_MARKER_SIZE = 0.65
+
 function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
@@ -158,7 +162,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
             } catch (error) { if ((error as Error).name === 'AbortError') return }
           }
           instance.addSource(sourceId, { type: 'geojson', data: point(routePosition(roadCoordinates, rentalJourneyProgress(rental))) })
-          instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 7, 'circle-color': vehicleColor.rental, 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
+          instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': vehicleColor.rental, 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
           let rentalTimer: number | undefined
           const animateRental = () => {
             if (rentalTimer !== undefined) animationTimers.delete(rentalTimer)
@@ -192,7 +196,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
             instance.addLayer({ id: `${stopId}-label`, type: 'symbol', source: stopId, layout: { 'text-field': `${stopIndex + 1}`, 'text-size': 9 }, paint: { 'text-color': '#422006' } })
           })
           instance.addSource(sourceId, { type: 'geojson', data: point(start) })
-          instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 6, 'circle-color': vehicleColor.postal, 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
+          instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': vehicleColor.postal, 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
           let postalTimer: number | undefined
           const animatePostal = () => {
             if (postalTimer !== undefined) animationTimers.delete(postalTimer)
@@ -225,7 +229,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
           instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': '#0f766e', 'line-width': 2.5, 'line-opacity': 0.9 } })
         }
         instance.addSource(sourceId, { type: 'geojson', data: point(start) })
-        instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 6, 'circle-color': vehicle.type === 'post' ? vehicleColor.postal : job ? vehicleColor.pickingUp : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available, 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
+        instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': vehicle.type === 'post' ? vehicleColor.postal : job ? vehicleColor.pickingUp : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available, 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
         if (!job && vehicle.serviceTrip) {
           const service = vehicle.serviceTrip
           let serviceTimer: number | undefined
@@ -349,11 +353,11 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         continue
       }
       instance.addSource(sourceId, { type: 'geojson', data: point(job.pickup, { title: job.pickupLabel }) })
-      instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': markerImage, 'icon-size': 1, 'icon-allow-overlap': true } })
+      instance.addLayer({ id: sourceId, type: 'symbol', source: sourceId, layout: { 'icon-image': markerImage, 'icon-size': JOB_MARKER_SIZE, 'icon-allow-overlap': true } })
       instance.addLayer({ id: `${sourceId}-label`, type: 'symbol', source: sourceId, layout: { 'text-field': job.status === 'offered' ? `AVAILABLE · €${Math.round(job.fare)}` : 'PICKUP', 'text-size': 11, 'text-offset': [0, 1.8], 'text-anchor': 'top', 'text-allow-overlap': true }, paint: { 'text-color': job.status === 'offered' ? '#fef08a' : '#fff', 'text-halo-color': '#15252f', 'text-halo-width': 2 } })
       const destinationId = `destination-${job.id}`
       instance.addSource(destinationId, { type: 'geojson', data: point(job.destination, { title: job.destinationLabel }) })
-      instance.addLayer({ id: destinationId, type: 'symbol', source: destinationId, layout: { 'icon-image': destinationMarkerImage, 'icon-size': 0.8, 'icon-allow-overlap': true } })
+      instance.addLayer({ id: destinationId, type: 'symbol', source: destinationId, layout: { 'icon-image': destinationMarkerImage, 'icon-size': JOB_MARKER_SIZE, 'icon-allow-overlap': true } })
       instance.addLayer({ id: `${destinationId}-label`, type: 'symbol', source: destinationId, layout: { 'text-field': 'DESTINATION', 'text-size': 10, 'text-offset': [0, 1.6], 'text-anchor': 'top' }, paint: { 'text-color': '#fff', 'text-halo-color': '#15252f', 'text-halo-width': 2 } })
       const handlers = {
         enter: () => { instance.getCanvas().style.cursor = 'pointer' },

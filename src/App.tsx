@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { BottomNav } from './components/game/BottomNav'
 import { SectionSheet } from './components/game/SectionSheet'
 import { TopHud } from './components/game/TopHud'
@@ -12,7 +13,7 @@ import { getJobJourney, jobOfferExpiresAt } from './services/jobEngine'
 export default function App() {
   const game = useGameStore()
 
-  const { company, addRandomJob, tickJobs } = game
+  const { company, addRandomJob, pauseGame, resumeGame, tickJobs } = game
 
   const availableVehicleCount = game.vehicles.filter(
     (vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available' && vehicle.driverId,
@@ -166,59 +167,60 @@ export default function App() {
     tickJobs,
   ])
 
-  /**
-   * Settle overdue game state after returning to the app.
-   *
-   * Mobile WebViews may suspend timers while the app is in
-   * the background.
-   */
+  /** Pause native mobile games while the app is in the background. */
   useEffect(() => {
     if (!company || !game.hasHydrated) return
 
-    const resumeGame = () => {
+    const handleVisibilityChange = () => {
+      if (Capacitor.isNativePlatform() && document.visibilityState === 'hidden') {
+        pauseGame()
+        return
+      }
+
       if (document.visibilityState === 'hidden') return
 
+      // resumeGame shifts every native game deadline by the time spent in the
+      // background. It is a no-op on desktop, where pausedAt is never set.
+      resumeGame()
       tickJobs()
     }
 
-    // A force-closed WebView starts visible, so none of the resume events are
-    // guaranteed to fire after the persisted save has hydrated. Settle the
-    // offline time immediately; making a taxi available then triggers the job
-    // offer effect above.
-    resumeGame()
+    // A force-closed WebView starts visible. Resume a persisted pause as soon
+    // as its save hydrates rather than waiting for a lifecycle event.
+    handleVisibilityChange()
 
     document.addEventListener(
       'visibilitychange',
-      resumeGame,
+      handleVisibilityChange,
     )
 
     window.addEventListener(
       'pageshow',
-      resumeGame,
+      handleVisibilityChange,
     )
 
     window.addEventListener(
       'focus',
-      resumeGame,
+      handleVisibilityChange,
     )
 
     return () => {
       document.removeEventListener(
         'visibilitychange',
-        resumeGame,
+        handleVisibilityChange,
       )
 
       window.removeEventListener(
         'pageshow',
-        resumeGame,
+        handleVisibilityChange,
       )
 
       window.removeEventListener(
         'focus',
-        resumeGame,
+        handleVisibilityChange,
       )
     }
-  }, [company, game.hasHydrated, tickJobs])
+  }, [company, game.hasHydrated, pauseGame, resumeGame, tickJobs])
 
   if (!game.hasHydrated) {
     return (

@@ -16,10 +16,10 @@ import { maintenanceCost, vehicleMarketValue } from '../services/vehicleEconomic
 import { calculateJobOutcome, createDriverCandidates, createGoals, pickupSpeedMultiplier, updateGoals, upgradeDetails, vehicleCanTakeJob } from '../services/earlyGameEngine'
 
 type Section = 'map' | 'jobs' | 'fleet' | 'finance' | 'travel' | 'company'
-interface GameActions { initializeCompany: (cityId: string) => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; buyPostVehicle: (modelId: string) => void; startPostalRoute: (vehicleId: string) => void; buyRentalCar: (modelId: string) => void; startRental: (vehicleId: string) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; hireDriver: (candidateId: string, vehicleId: string) => void; refreshDriverCandidates: () => void; serviceVehicle: (vehicleId: string, service: 'quick' | 'full' | 'preventative') => void; installUpgrade: (vehicleId: string, upgrade: VehicleUpgrade) => void; setRefuelStrategy: (vehicleId: string, strategy: RefuelStrategy) => void; refuelVehicle: (vehicleId: string) => void; claimGoal: (goalId: string) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; resetGame: () => void }
+interface GameActions { initializeCompany: (cityId: string) => void; pauseGame: () => void; resumeGame: () => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; buyPostVehicle: (modelId: string) => void; startPostalRoute: (vehicleId: string) => void; buyRentalCar: (modelId: string) => void; startRental: (vehicleId: string) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; hireDriver: (candidateId: string, vehicleId: string) => void; refreshDriverCandidates: () => void; serviceVehicle: (vehicleId: string, service: 'quick' | 'full' | 'preventative') => void; installUpgrade: (vehicleId: string, upgrade: VehicleUpgrade) => void; setRefuelStrategy: (vehicleId: string, strategy: RefuelStrategy) => void; refuelVehicle: (vehicleId: string) => void; claimGoal: (goalId: string) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; resetGame: () => void }
 interface GameState extends GameSave { activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
 
-const blankSave: GameSave = { id: 'autosave', version: 6, updatedAt: new Date(0).toISOString(), company: null, startingCityId: null, vehicles: [], drivers: [], driverCandidates: [], jobs: [], agencies: [], tours: [], passengers: [], goals: [], jobRequestHistory: [], loans: [], financialTransactions: [], activeEvent: null, nextEventAt: new Date(0).toISOString(), nextOperatingPaymentAt: new Date(0).toISOString() }
+const blankSave: GameSave = { id: 'autosave', version: 7, updatedAt: new Date(0).toISOString(), pausedAt: null, company: null, startingCityId: null, vehicles: [], drivers: [], driverCandidates: [], jobs: [], agencies: [], tours: [], passengers: [], goals: [], jobRequestHistory: [], loans: [], financialTransactions: [], activeEvent: null, nextEventAt: new Date(0).toISOString(), nextOperatingPaymentAt: new Date(0).toISOString() }
 
 
 const transaction = (category: TransactionCategory, description: string, amount: number, vehicleId?: string, occurredAt = new Date().toISOString()): FinancialTransaction => ({
@@ -30,6 +30,8 @@ const addTransactions = (existing: FinancialTransaction[] | undefined, ...entrie
 const newVehicleLifecycle = (price: number, purchasedAt = new Date().toISOString()) => ({
   purchasePrice: price, purchasedAt, odometerKm: 0, lifetimeRevenue: 0, lifetimeExpenses: 0, batteryHealth: 100, lastServiceAtKm: 0,
 })
+const shiftDate = (value: string, milliseconds: number) =>
+  new Date(new Date(value).getTime() + milliseconds).toISOString()
 
 export const useGameStore = create<GameState & GameActions>()(persist((set) => ({
   ...blankSave, activeSection: 'map', focusedJobId: null, hasHydrated: false, jobsLoading: false, jobsError: null,
@@ -47,6 +49,37 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     const vehicle: Vehicle = { id: crypto.randomUUID(), name: `${starter.brand} ${starter.name} 1`, type: 'taxi', modelId: starter.id, powertrain: starter.powertrain, exteriorAccessories: [], upgrades: [], refuelStrategy: 'automatic', value: starter.price, ...newVehicleLifecycle(starter.price, now), condition: 100, fuel: 100, capacity: starter.capacity, topSpeedKmh: starter.topSpeedKmh, status: 'available', cityId, position: home, driverId: driver.id, ownership: 'owned' }
     set({ ...blankSave, company, startingCityId: cityId, vehicles: [vehicle], drivers: [driver], driverCandidates: createDriverCandidates(home), goals: createGoals(), financialTransactions: [transaction('loans', 'Founder capital', 25_000, undefined, now)], activeEvent: createDynamicEvent(), nextEventAt: new Date(Date.now() + 8 * 60_000).toISOString(), nextOperatingPaymentAt: nextMonthlyPaymentAt(now), updatedAt: now, activeSection: 'map', hasHydrated: true, jobsLoading: false, jobsError: null })
   },
+  pauseGame: () => set((state) => state.company && !state.pausedAt
+    ? { pausedAt: new Date().toISOString() }
+    : state),
+  resumeGame: () => set((state) => {
+    if (!state.pausedAt) return state
+
+    const pausedFor = Math.max(0, Date.now() - new Date(state.pausedAt).getTime())
+    const shift = (value: string | undefined) => value ? shiftDate(value, pausedFor) : value
+
+    return {
+      pausedAt: null,
+      company: state.company ? { ...state.company, foundedAt: shiftDate(state.company.foundedAt, pausedFor) } : null,
+      jobs: state.jobs.map((job) => ({ ...job, offeredAt: shift(job.offeredAt), acceptedAt: shift(job.acceptedAt) })),
+      vehicles: state.vehicles.map((vehicle) => ({
+        ...vehicle,
+        purchasedAt: shift(vehicle.purchasedAt),
+        postalRoute: vehicle.postalRoute ? { ...vehicle.postalRoute, startedAt: shiftDate(vehicle.postalRoute.startedAt, pausedFor), arrivesAt: shiftDate(vehicle.postalRoute.arrivesAt, pausedFor) } : undefined,
+        rentalJourney: vehicle.rentalJourney ? { ...vehicle.rentalJourney, startedAt: shiftDate(vehicle.rentalJourney.startedAt, pausedFor), arrivesAt: shiftDate(vehicle.rentalJourney.arrivesAt, pausedFor) } : undefined,
+        serviceTrip: vehicle.serviceTrip ? { ...vehicle.serviceTrip, startedAt: shiftDate(vehicle.serviceTrip.startedAt, pausedFor), arrivesAt: shiftDate(vehicle.serviceTrip.arrivesAt, pausedFor) } : undefined,
+      })),
+      drivers: state.drivers.map((driver) => ({ ...driver, missedShiftUntil: shift(driver.missedShiftUntil) })),
+      driverCandidates: state.driverCandidates.map((candidate) => ({ ...candidate, expiresAt: shiftDate(candidate.expiresAt, pausedFor) })),
+      goals: state.goals.map((goal) => ({ ...goal, expiresAt: shiftDate(goal.expiresAt, pausedFor) })),
+      loans: state.loans.map((loan) => ({ ...loan, nextPaymentAt: shiftDate(loan.nextPaymentAt, pausedFor) })),
+      financialTransactions: state.financialTransactions.map((entry) => ({ ...entry, occurredAt: shiftDate(entry.occurredAt, pausedFor) })),
+      activeEvent: state.activeEvent ? { ...state.activeEvent, expiresAt: shiftDate(state.activeEvent.expiresAt, pausedFor) } : null,
+      nextEventAt: shiftDate(state.nextEventAt, pausedFor),
+      nextOperatingPaymentAt: shiftDate(state.nextOperatingPaymentAt, pausedFor),
+      updatedAt: new Date().toISOString(),
+    }
+  }),
   refreshJobs: async () => {
     const state = useGameStore.getState()
     const availableTaxi = state.vehicles.find((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available' && vehicle.driverId)

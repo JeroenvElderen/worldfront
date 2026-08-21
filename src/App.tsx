@@ -179,8 +179,8 @@ export default function App() {
 
       if (document.visibilityState === 'hidden') return
 
-      // resumeGame shifts every native game deadline by the time spent in the
-      // background. It is a no-op on desktop, where pausedAt is never set.
+      // Clear the persisted pause marker, then settle every deadline that
+      // elapsed while the native WebView was suspended.
       resumeGame()
       tickJobs()
     }
@@ -221,6 +221,31 @@ export default function App() {
       )
     }
   }, [company, game.hasHydrated, pauseGame, resumeGame, tickJobs])
+
+  /**
+   * A small foreground watchdog makes lifecycle recovery self-healing. Mobile
+   * WebViews can occasionally miss a timer or visibility event while Android
+   * restores the activity; re-running these idempotent actions repairs overdue
+   * journeys and replenishes offers without requiring a restart.
+   */
+  useEffect(() => {
+    if (!company || !game.hasHydrated) return
+
+    const recover = () => {
+      if (document.visibilityState === 'hidden') return
+      tickJobs()
+      void useGameStore.getState().addRandomJob()
+    }
+
+    recover()
+    const interval = window.setInterval(recover, 15_000)
+    window.addEventListener('online', recover)
+
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('online', recover)
+    }
+  }, [company, game.hasHydrated, tickJobs])
 
   if (!game.hasHydrated) {
     return (

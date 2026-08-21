@@ -15,7 +15,7 @@ Vite prints the local URL (normally `http://localhost:5173`). The bundled public
 
 ## Taxi requests
 
-When a taxi is available, the phone searches Mapbox directly for real points of interest around that taxi's current location, then the game's own on-device selection logic creates varied journeys from those authoritative names and coordinates. Incoming requests appear as calls over the map instead of living in a separate jobs tab, and can be accepted or declined immediately. No Ollama installation, AI provider, game server, custom HTTP endpoint, tunnel, or curated location list is required. Routes start at 6 km, Mapbox results are cached for the current app session, and the last 100 route signatures remain in the autosave to keep offers varied.
+When a taxi is available, the phone searches Mapbox directly for real points of interest around that taxi's current location, including restaurants, parks, malls, dealerships, hospitals, offices, transport hubs, schools, entertainment and public services. The game's own on-device selection logic creates varied journeys from those authoritative names and coordinates. Incoming requests appear as calls over the map instead of living in a separate jobs tab, and can be accepted or declined immediately. A foreground watchdog retries failed generation after lifecycle or network interruptions. No Ollama installation, AI provider, game server, custom HTTP endpoint, tunnel, or curated location list is required. Routes start at 6 km, Mapbox results are cached for the current app session, and the last 100 route signatures remain in the autosave to keep offers varied.
 
 The Mapbox public token is embedded in the app and should use URL/app restrictions appropriate for a public client. Mapbox network access is required when a city is first searched; previously loaded offers and saved game data remain on the device.
 
@@ -23,9 +23,9 @@ The Mapbox public token is embedded in the app and should use URL/app restrictio
 
 The map is deliberately updated once per second while a taxi is moving instead
 of continuously rendering at the display frame rate. Journey timers and Mapbox
-rendering stop whenever the app is
-in the background, then catch up from the saved timestamps as soon as it becomes
-visible again. New job offers are generated in response to an idle taxi rather
+rendering stop whenever the app is in the background, then journeys and other
+deadlines catch up from their saved timestamps as soon as it becomes visible
+again. New job offers are generated in response to an idle taxi rather
 than from a repeating 30-second timer. Tile-expiry refreshes and label fades are
 also disabled, and the tile cache is capped, which avoids recurring network,
 CPU, GPU, and memory work without changing game outcomes.

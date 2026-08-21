@@ -101,6 +101,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
   const liveJobTimers = useRef(new Map<string, number>())
   const liveJobRunners = useRef(new Map<string, () => void>())
   const [mapRevision, setMapRevision] = useState(0)
+  const [mapRecoveryRevision, setMapRecoveryRevision] = useState(0)
   // Job changes are applied to the existing WebGL map by the synchronization
   // effects below. In particular, accepting a call must never recreate the map.
   const fleetConfigurationKey = vehicles.map((vehicle) => `${vehicle.id}:${vehicle.modelId}:${(vehicle.exteriorAccessories ?? []).join(',')}:${vehicle.serviceTrip?.startedAt ?? ''}:${vehicle.postalRoute?.startedAt ?? ''}:${vehicle.rentalJourney?.startedAt ?? ''}`).join('|')
@@ -115,6 +116,13 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     const abortController = new AbortController()
     const animationTimers = new Set<number>()
     const animationRunners = new Set<() => void>()
+    let usingFallbackStyle = !token
+    let recoveryRequested = false
+    const requestRecovery = () => {
+      if (recoveryRequested) return
+      recoveryRequested = true
+      setMapRecoveryRevision((revision) => revision + 1)
+    }
     const instance = new mapboxgl.Map({
       container: container.current,
       style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle,
@@ -137,6 +145,25 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     currentLiveJobRunners.clear()
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
     instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right')
+    const canvas = instance.getCanvas()
+    const handleContextLost = (event: Event) => {
+      event.preventDefault()
+      requestRecovery()
+    }
+    canvas.addEventListener('webglcontextlost', handleContextLost)
+    instance.on('error', (event) => {
+      if (map.current !== instance || usingFallbackStyle) return
+      const message = event.error?.message?.toLowerCase() ?? ''
+      // Authentication/style/tile failures must not leave a permanently black
+      // canvas. OpenStreetMap raster tiles keep the game usable, while a lost
+      // WebGL context is handled by rebuilding the entire map.
+      if (message.includes('webgl') || message.includes('context lost')) {
+        requestRecovery()
+        return
+      }
+      usingFallbackStyle = true
+      instance.setStyle(fallbackStyle)
+    })
     instance.on('load', async () => {
       instance.addImage('new-job-marker', mapIcon('new-job'), { pixelRatio: 2 })
       instance.addImage('active-job-marker', mapIcon('active-job'), { pixelRatio: 2 })
@@ -296,10 +323,14 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         instance.stop()
         return
       }
+      instance.resize()
+      instance.triggerRepaint()
       animationRunners.forEach((run) => run())
       currentLiveJobRunners.forEach((run) => run())
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('pageshow', handleVisibilityChange)
+    window.addEventListener('online', handleVisibilityChange)
     return () => {
       const center = instance.getCenter()
       viewport.current = { center: [center.lng, center.lat], zoom: instance.getZoom() }
@@ -310,12 +341,15 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       currentLiveJobRunners.clear()
       currentLiveJobIds.clear()
       document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('pageshow', handleVisibilityChange)
+      window.removeEventListener('online', handleVisibilityChange)
+      canvas.removeEventListener('webglcontextlost', handleContextLost)
       map.current = null
       instance.remove()
     }
     // Jobs are synchronized separately so accepting or completing one does not recreate the map.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cityId, fleetConfigurationKey])
+  }, [cityId, fleetConfigurationKey, mapRecoveryRevision])
 
   useEffect(() => {
     const instance = map.current

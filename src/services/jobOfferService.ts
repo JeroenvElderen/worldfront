@@ -20,7 +20,14 @@ interface MapboxFeature {
 }
 
 const mapboxToken = mapboxAccessToken
-const placeSearches = ['airport', 'train station', 'hotel', 'hospital', 'shopping centre', 'museum', 'university', 'stadium', 'tourist attraction', 'restaurant']
+/** Broad everyday POIs make calls feel like real city journeys, not a transport-only list. */
+export const placeSearches = [
+  'airport', 'train station', 'bus station', 'hotel', 'hospital', 'medical clinic',
+  'restaurant', 'cafe', 'shopping centre', 'supermarket', 'car dealership',
+  'office', 'business park', 'park', 'museum', 'university', 'school', 'stadium',
+  'cinema', 'theatre', 'tourist attraction', 'government office', 'courthouse',
+  'bank', 'pharmacy',
+]
 const MAPBOX_REQUEST_INTERVAL_MS = 250
 interface PlaceCacheEntry { loadedRadiusKm: number; places: MapboxPlace[]; pending?: Promise<void> }
 const placeCache = new Map<string, PlaceCacheEntry>()

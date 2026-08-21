@@ -9,7 +9,7 @@ import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
 
-interface GameMapProps { cityId: string | null; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; onOpenJob: (jobId: string) => void }
+interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; onOpenJob: (jobId: string) => void }
 const token = mapboxAccessToken
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
@@ -67,7 +67,7 @@ const missionColor = (jobId: string) => {
   return `hsl(${hash % 360}, 100%, 60%)`
 }
 
-function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMapProps) {
+function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpenJob }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const pickupJobIds = useRef(new Set<string>())
@@ -83,7 +83,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     const currentLiveJobTimers = liveJobTimers.current
     const currentLiveJobRunners = liveJobRunners.current
     if (token) mapboxgl.accessToken = token
-    const selected = getCity(cityId)
+    const selected = getCity(cityId, customCities)
     const abortController = new AbortController()
     const animationTimers = new Set<number>()
     const animationRunners = new Set<() => void>()
@@ -332,7 +332,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
 
   useEffect(() => {
     const instance = map.current
-    const selected = getCity(cityId)
+    const selected = getCity(cityId, customCities)
     if (!instance || !selected) return
 
     instance.easeTo({ center: selected.coordinates, zoom: selected.mapZoom, duration: 650 })
@@ -343,7 +343,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     if (instance.isStyleLoaded()) updateBase()
     else instance.once('load', updateBase)
     return () => { instance.off('load', updateBase) }
-  }, [cityId, mapRevision])
+  }, [cityId, customCities, mapRevision])
 
   useEffect(() => {
     const instance = map.current
@@ -355,7 +355,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       instance.resize()
       instance.triggerRepaint()
     })
-    const selected = getCity(cityId)
+    const selected = getCity(cityId, customCities)
 
     // Fleet purchases no longer require a map reconstruction. Add any new
     // vehicle source and layer directly to the live style.
@@ -426,7 +426,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       const vehicleIndex = vehicles.findIndex((vehicle) => vehicle.id === job.assignedVehicleId)
       if (vehicleIndex < 0) continue
       const vehicle = vehicles[vehicleIndex]
-      const start = vehicle.position ?? getCity(cityId)?.coordinates
+      const start = vehicle.position ?? getCity(cityId, customCities)?.coordinates
       if (!start) continue
       const taxiSourceId = `taxi-${vehicleIndex}`
       if (instance.getLayer(taxiSourceId)) instance.setPaintProperty(taxiSourceId, 'circle-color', vehicleColor.pickingUp)
@@ -506,7 +506,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       taxiSource?.setData(point(jobDestination(job)))
       if (instance.getLayer(`taxi-${vehicleIndex}`)) instance.setPaintProperty(`taxi-${vehicleIndex}`, 'circle-color', vehicleColor.available)
     }
-  }, [cityId, jobs, vehicles, mapRevision, onOpenJob])
+  }, [cityId, customCities, jobs, vehicles, mapRevision, onOpenJob])
 
   useEffect(() => {
     const instance = map.current
@@ -558,7 +558,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         return leftDistance - rightDistance
       })[0]
 
-    const start = assignedVehicle?.position ?? availableVehicle?.position ?? getCity(cityId)?.coordinates
+    const start = assignedVehicle?.position ?? availableVehicle?.position ?? getCity(cityId, customCities)?.coordinates
     if (!start) return
 
     const abortController = new AbortController()
@@ -638,13 +638,14 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       abortController.abort()
       removeFocusedRoute()
     }
-  }, [cityId, focusedJobId, jobs, vehicles, mapRevision])
+  }, [cityId, customCities, focusedJobId, jobs, vehicles, mapRevision])
 
   return <div ref={container} className="absolute inset-0" aria-label="Interactive game map" />
 }
 
 export const GameMap = memo(GameMapView, (previous, next) =>
   previous.cityId === next.cityId &&
+  previous.customCities === next.customCities &&
   previous.vehicles === next.vehicles &&
   previous.focusedJobId === next.focusedJobId &&
   previous.onOpenJob === next.onOpenJob &&

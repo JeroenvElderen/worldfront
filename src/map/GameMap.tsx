@@ -52,11 +52,11 @@ const routeMotion = (route: RouteDetails, elapsed: number, fallbackSpeedKmh: num
 }
 
 const vehicleColor = {
-  available: '#22c55e',
-  pickingUp: '#f59e0b',
-  carryingPassenger: '#ef4444',
-  maintenance: '#64748b',
-  postal: '#ec4899',
+  available: '#8b5cf6',
+  pickingUp: '#8b5cf6',
+  carryingPassenger: '#8b5cf6',
+  maintenance: '#8b5cf6',
+  postal: '#8b5cf6',
   rental: '#8b5cf6',
 } as const
 
@@ -404,6 +404,15 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       if (!start) continue
       const taxiSourceId = `taxi-${vehicleIndex}`
       if (instance.getLayer(taxiSourceId)) instance.setPaintProperty(taxiSourceId, 'circle-color', vehicleColor.pickingUp)
+      const passengerSourceId = `pickup-${job.id}`
+      if (instance.getLayer(passengerSourceId) && instance.getLayer(taxiSourceId)) {
+        // Once assigned, the pickup dot becomes a passenger halo. Keep it
+        // underneath the purple vehicle dot so the vehicle marker stays clear.
+        instance.setPaintProperty(passengerSourceId, 'circle-radius', VEHICLE_MARKER_RADIUS + 3)
+        instance.setPaintProperty(passengerSourceId, 'circle-opacity', .45)
+        instance.setPaintProperty(passengerSourceId, 'circle-stroke-width', 0)
+        instance.moveLayer(passengerSourceId, taxiSourceId)
+      }
       if (liveJobIds.current.has(job.id)) continue
 
       liveJobIds.current.add(job.id)
@@ -442,7 +451,9 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         const currentPosition = routePosition(route, progress)
         ;(instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(point(currentPosition))
         instance.setPaintProperty(taxiSourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
-        if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
+        const passengerSource = instance.getSource(passengerSourceId) as mapboxgl.GeoJSONSource | undefined
+        // The halo waits at pickup, then rides with the passenger's vehicle.
+        passengerSource?.setData(point(pickingUp ? job.pickup : currentPosition, { title: job.pickupLabel }))
         if (now < journey.arrivesAt && document.visibilityState !== 'hidden') {
           liveJobTimers.current.set(job.id, window.setTimeout(animate, JOURNEY_UPDATE_INTERVAL_MS))
         } else if (now >= journey.arrivesAt) {

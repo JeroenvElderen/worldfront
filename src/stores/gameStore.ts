@@ -4,9 +4,9 @@ import { countries, getCity } from '../data/cities'
 import { transportModels } from '../data/transport'
 import { getTaxiModel } from '../data/taxis'
 import { getPostVehicleModel } from '../data/postVehicles'
-import type { Company, Driver, ExteriorAccessory, FinancialTransaction, GameSave, RefuelStrategy, Specialization, TransactionCategory, TransportMode, Vehicle, VehicleUpgrade } from '../models/game'
+import type { Company, DepotFacility, Driver, ExteriorAccessory, FinancialTransaction, GameSave, RefuelStrategy, Specialization, TransactionCategory, TransportMode, Vehicle, VehicleUpgrade } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
-import { addReputation, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
+import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import { generateJobOffers } from '../services/jobOfferService'
 import { acceptJobState, completeArrivedJobsState, completeJobState, distanceKmBetween, getJobJourney, jobOfferExpiresAt, MAX_JOB_OFFERS } from '../services/jobEngine'
 import { createDynamicEvent, energyUseForJob, fatigueUseForJob, startRecoveryTrip } from '../services/operationsEngine'
@@ -17,7 +17,7 @@ import { maintenanceCost, vehicleMarketValue } from '../services/vehicleEconomic
 import { calculateJobOutcome, createDriverCandidates, createGoals, pickupSpeedMultiplier, updateGoals, upgradeDetails, vehicleCanTakeJob } from '../services/earlyGameEngine'
 
 type Section = 'map' | 'jobs' | 'fleet' | 'finance' | 'travel' | 'company'
-interface GameActions { initializeCompany: (cityId: string) => void; pauseGame: () => void; resumeGame: () => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; upgradeGarage: () => void; buyPostVehicle: (modelId: string) => void; startPostalRoute: (vehicleId: string) => void; buyRentalCar: (modelId: string) => void; startRental: (vehicleId: string) => void; buyCountryLicense: (countryCode: string) => void; openBranch: (cityId: string) => void; switchCity: (cityId: string) => void; openAgency: () => void; createTour: () => void; dispatchTour: (tourId: string, vehicleId: string) => void; buyTourBus: () => void; buyCoach: () => void; createCoachRoute: (toCityId: string) => void; dispatchCoach: (routeId: string, vehicleId: string) => void; buyTransportAsset: (mode: TransportMode) => void; createTransportRoute: (mode: TransportMode, toCityId: string) => void; dispatchTransport: (routeId: string, assetId: string) => void; setAutomation: (patch: Partial<GameSave['automation']>) => void; acceptContract: (contractId: string) => void; chooseSpecialization: (specialization: Specialization) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; hireDriver: (candidateId: string, vehicleId: string) => void; refreshDriverCandidates: () => void; serviceVehicle: (vehicleId: string, service: 'quick' | 'full' | 'preventative') => void; installUpgrade: (vehicleId: string, upgrade: VehicleUpgrade) => void; setRefuelStrategy: (vehicleId: string, strategy: RefuelStrategy) => void; refuelVehicle: (vehicleId: string) => void; claimGoal: (goalId: string) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; resetGame: () => void }
+interface GameActions { initializeCompany: (cityId: string) => void; upgradeDepotFacility: (cityId: string, facility: DepotFacility) => void; pauseGame: () => void; resumeGame: () => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; upgradeGarage: () => void; buyPostVehicle: (modelId: string) => void; startPostalRoute: (vehicleId: string) => void; buyRentalCar: (modelId: string) => void; startRental: (vehicleId: string) => void; buyCountryLicense: (countryCode: string) => void; openBranch: (cityId: string) => void; switchCity: (cityId: string) => void; openAgency: () => void; createTour: () => void; dispatchTour: (tourId: string, vehicleId: string) => void; buyTourBus: () => void; buyCoach: () => void; createCoachRoute: (toCityId: string) => void; dispatchCoach: (routeId: string, vehicleId: string) => void; buyTransportAsset: (mode: TransportMode) => void; createTransportRoute: (mode: TransportMode, toCityId: string) => void; dispatchTransport: (routeId: string, assetId: string) => void; setAutomation: (patch: Partial<GameSave['automation']>) => void; acceptContract: (contractId: string) => void; chooseSpecialization: (specialization: Specialization) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; hireDriver: (candidateId: string, vehicleId: string) => void; refreshDriverCandidates: () => void; serviceVehicle: (vehicleId: string, service: 'quick' | 'full' | 'preventative') => void; installUpgrade: (vehicleId: string, upgrade: VehicleUpgrade) => void; setRefuelStrategy: (vehicleId: string, strategy: RefuelStrategy) => void; refuelVehicle: (vehicleId: string) => void; claimGoal: (goalId: string) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; resetGame: () => void }
 interface GameState extends GameSave { activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
 
 const initialContracts = () => [
@@ -46,8 +46,8 @@ const fitOffersToAvailableTaxis = (jobs: GameSave['jobs'], taxiCount: number) =>
 const newVehicleLifecycle = (price: number, purchasedAt = new Date().toISOString()) => ({
   purchasePrice: price, purchasedAt, odometerKm: 0, lifetimeRevenue: 0, lifetimeExpenses: 0, batteryHealth: 100, lastServiceAtKm: 0,
 })
-const hasFleetSlot = (state: Pick<GameState, 'company' | 'garageLevel' | 'vehicles'>) =>
-  Boolean(state.company && state.vehicles.length < fleetSlotCapacity(state.company.level, state.garageLevel ?? 0))
+const hasFleetSlot = (state: Pick<GameState, 'company' | 'garageLevel' | 'vehicles' | 'branches'>) =>
+  Boolean(state.company && state.vehicles.length < fleetSlotCapacity(state.company.level, state.garageLevel ?? 0, state.branches))
 const advanceContracts = (contracts: GameSave['contracts'], category: GameSave['contracts'][number]['category']) => contracts.map((contract) => {
   if (!contract.accepted || contract.completed || contract.category !== category) return contract
   const progress = Math.min(contract.target, contract.progress + 1)
@@ -67,8 +67,23 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     const home = getCity(cityId)!.coordinates
     const driver: Driver = { id: crypto.randomUUID(), name: 'Alex Morgan', rating: 4.7, salary: 650, status: 'available', fatigue: 0, home, shift: 'day', trait: 'careful' }
     const vehicle: Vehicle = { id: crypto.randomUUID(), name: `${starter.brand} ${starter.name} 1`, type: 'taxi', modelId: starter.id, powertrain: starter.powertrain, exteriorAccessories: [], upgrades: [], refuelStrategy: 'automatic', value: starter.price, ...newVehicleLifecycle(starter.price, now), condition: 100, fuel: 100, capacity: starter.capacity, topSpeedKmh: starter.topSpeedKmh, status: 'available', cityId, position: home, driverId: driver.id, ownership: 'owned' }
-    set({ ...blankSave, company, startingCityId: cityId, activeCityId: cityId, branches: [{ id: crypto.randomUUID(), cityId, name: `${getCity(cityId)!.name} HQ`, openedAt: now, managerName: 'Alex Morgan' }], contracts: initialContracts(), vehicles: [vehicle], drivers: [driver], driverCandidates: createDriverCandidates(home), goals: createGoals(), financialTransactions: [transaction('loans', 'Founder capital', 25_000, undefined, now)], activeEvent: createDynamicEvent(), nextEventAt: new Date(Date.now() + 8 * 60_000).toISOString(), nextOperatingPaymentAt: nextMonthlyPaymentAt(now), updatedAt: now, activeSection: 'map', hasHydrated: true, jobsLoading: false, jobsError: null })
+    set({ ...blankSave, company, startingCityId: cityId, activeCityId: cityId, branches: [{ id: crypto.randomUUID(), cityId, name: `${getCity(cityId)!.name} HQ`, openedAt: now, managerName: 'Alex Morgan', isHeadquarters: true, depot: { parking: 0, workshop: 0, energy: 0, lounge: 0 } }], contracts: initialContracts(), vehicles: [vehicle], drivers: [driver], driverCandidates: createDriverCandidates(home), goals: createGoals(), financialTransactions: [transaction('loans', 'Founder capital', 25_000, undefined, now)], activeEvent: createDynamicEvent(), nextEventAt: new Date(Date.now() + 8 * 60_000).toISOString(), nextOperatingPaymentAt: nextMonthlyPaymentAt(now), updatedAt: now, activeSection: 'map', hasHydrated: true, jobsLoading: false, jobsError: null })
   },
+  upgradeDepotFacility: (cityId, facility) => set((state) => {
+    const branch = state.branches.find((candidate) => candidate.cityId === cityId)
+    const currentLevel = depotFacilityLevel(branch, facility)
+    const cost = depotFacilityUpgradeCost(facility, currentLevel)
+    if (!state.company || !branch || currentLevel >= DEPOT_FACILITY_MAX_LEVEL || state.company.cash < cost) return state
+    return {
+      company: { ...state.company, cash: state.company.cash - cost },
+      branches: state.branches.map((candidate) => candidate.id === branch.id ? {
+        ...candidate,
+        depot: { parking: 0, workshop: 0, energy: 0, lounge: 0, ...candidate.depot, [facility]: currentLevel + 1 },
+      } : candidate),
+      financialTransactions: addTransactions(state.financialTransactions, transaction('expansion', `${branch.name}: ${facility} level ${currentLevel + 1}`, -cost)),
+      updatedAt: new Date().toISOString(),
+    }
+  }),
   pauseGame: () => set((state) => state.company && !state.pausedAt
     ? { pausedAt: new Date().toISOString() }
     : state),
@@ -269,7 +284,11 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     const operatingPaymentDue = new Date(state.nextOperatingPaymentAt ?? 0).getTime() <= now
     if (operatingPaymentDue) {
       const leaseCost = vehicles.reduce((sum, vehicle) => sum + (vehicle.leaseMonthlyCost ?? vehicle.leaseWeeklyCost ?? 0), 0)
-      const payrollCost = drivers.reduce((sum, driver) => sum + driver.salary, 0)
+      const payrollCost = drivers.reduce((sum, driver) => {
+        const vehicle = vehicles.find((candidate) => candidate.driverId === driver.id)
+        const branch = state.branches.find((candidate) => candidate.cityId === vehicle?.cityId)
+        return sum + Math.round(driver.salary * (1 - depotFacilityLevel(branch, 'lounge') * .05))
+      }, 0)
       company = { ...company, cash: company.cash - leaseCost - payrollCost }
       if (leaseCost) financialTransactions = addTransactions(financialTransactions, transaction('leases', 'Fleet lease payments', -leaseCost))
       if (payrollCost) financialTransactions = addTransactions(financialTransactions, transaction('payroll', 'Driver payroll', -payrollCost))
@@ -347,7 +366,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   openBranch: (cityId) => set((state) => {
     const city = getCity(cityId); const cost = state.specialization === 'mobility' ? 13_500 : 15_000
     if (!city || !state.company || state.company.level < 2 || state.company.cash < cost || !(state.countryLicenses ?? ['IE']).includes(city.countryCode) || state.branches.some((branch) => branch.cityId === cityId)) return state
-    return { company: { ...state.company, cash: state.company.cash - cost }, branches: [...state.branches, { id: crypto.randomUUID(), cityId, name: `${city.name} Branch`, openedAt: new Date().toISOString() }], activeCityId: cityId, financialTransactions: addTransactions(state.financialTransactions, transaction('expansion', `Opened ${city.name} branch`, -cost)), updatedAt: new Date().toISOString(), activeSection: 'map' }
+    return { company: { ...state.company, cash: state.company.cash - cost }, branches: [...state.branches, { id: crypto.randomUUID(), cityId, name: `${city.name} Branch`, openedAt: new Date().toISOString(), depot: { parking: 0, workshop: 0, energy: 0, lounge: 0 } }], activeCityId: cityId, financialTransactions: addTransactions(state.financialTransactions, transaction('expansion', `Opened ${city.name} branch`, -cost)), updatedAt: new Date().toISOString(), activeSection: 'map' }
   }),
   switchCity: (cityId) => set((state) => state.branches.some((branch) => branch.cityId === cityId) ? { activeCityId: cityId, activeSection: 'map' } : state),
   openAgency: () => set((state) => {
@@ -445,7 +464,8 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     const vehicle = state.vehicles.find((item) => item.id === vehicleId && item.status === 'available')
     const plans = { quick: { cost: 350, condition: 15 }, full: { cost: 1_200, condition: 45 }, preventative: { cost: 2_400, condition: 100 } }
     const plan = plans[service]
-    const cost = vehicle ? maintenanceCost(vehicle, plan.cost) : plan.cost
+    const workshopLevel = depotFacilityLevel(state.branches.find((branch) => branch.cityId === vehicle?.cityId), 'workshop')
+    const cost = vehicle ? Math.round(maintenanceCost(vehicle, plan.cost) * (1 - workshopLevel * .1)) : plan.cost
     if (!state.company || !vehicle || state.company.cash < cost || (vehicle.condition >= 100 && (vehicle.odometerKm ?? 0) < (vehicle.lastServiceAtKm ?? 0) + 10_000)) return state
     return { company: { ...state.company, cash: state.company.cash - cost }, vehicles: state.vehicles.map((item) => item.id === vehicleId ? { ...item, condition: Math.min(100, item.condition + plan.condition), lifetimeExpenses: (item.lifetimeExpenses ?? 0) + cost, lastServiceAtKm: service === 'preventative' ? item.odometerKm ?? 0 : item.lastServiceAtKm } : item), financialTransactions: addTransactions(state.financialTransactions, transaction('maintenance', `${vehicle.name} ${service} service`, -cost, vehicle.id)), updatedAt: new Date().toISOString() }
   }),
@@ -460,7 +480,8 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     const vehicle = state.vehicles.find((item) => item.id === vehicleId && item.status === 'available')
     const strategy = vehicle?.refuelStrategy ?? 'fast'
     const rate = strategy === 'economy' ? .8 : strategy === 'overnight' ? .55 : 1.2
-    const cost = vehicle ? Math.round((100 - vehicle.fuel) * rate) : 0
+    const energyLevel = depotFacilityLevel(state.branches.find((branch) => branch.cityId === vehicle?.cityId), 'energy')
+    const cost = vehicle ? Math.round((100 - vehicle.fuel) * rate * (1 - energyLevel * .1)) : 0
     if (!state.company || !vehicle || state.company.cash < cost || vehicle.fuel >= 100) return state
     return { company: { ...state.company, cash: state.company.cash - cost }, vehicles: state.vehicles.map((item) => item.id === vehicleId ? { ...item, fuel: 100, lifetimeExpenses: (item.lifetimeExpenses ?? 0) + cost } : item), financialTransactions: addTransactions(state.financialTransactions, transaction('energy', `${vehicle.name} refuel / charge`, -cost, vehicle.id)), updatedAt: new Date().toISOString() }
   }),

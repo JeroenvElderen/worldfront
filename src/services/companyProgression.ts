@@ -1,12 +1,26 @@
+import type { Branch, DepotFacility } from '../models/game'
+
 export const BASE_JOB_DISTANCE_KM = 20
 export const JOB_DISTANCE_PER_LEVEL_KM = 20
 export const REPUTATION_PER_LEVEL = 50
 export const LEASING_UNLOCK_LEVEL = 5
 export const FLEET_SLOTS_PER_LEVEL = 2
 export const GARAGE_UPGRADE_SLOTS = 3
+export const DEPOT_FACILITY_MAX_LEVEL = 3
+export const DEPOT_PARKING_SLOTS = 2
 
-export const fleetSlotCapacity = (companyLevel: number, garageLevel = 0) =>
-  Math.max(1, Math.floor(companyLevel)) * FLEET_SLOTS_PER_LEVEL + Math.max(0, Math.floor(garageLevel)) * GARAGE_UPGRADE_SLOTS
+export const depotFacilityDetails: Record<DepotFacility, { label: string; icon: string; description: string; baseCost: number }> = {
+  parking: { label: 'Parking yard', icon: '🅿️', description: '+2 fleet slots per level', baseCost: 6_000 },
+  workshop: { label: 'Workshop', icon: '🔧', description: '10% cheaper servicing per level', baseCost: 8_000 },
+  energy: { label: 'Energy hub', icon: '⚡', description: '10% cheaper fuel and charging per level', baseCost: 7_000 },
+  lounge: { label: 'Driver lounge', icon: '☕', description: '5% lower local payroll per level', baseCost: 5_000 },
+}
+
+export const depotFacilityLevel = (branch: Branch | undefined, facility: DepotFacility) => branch?.depot?.[facility] ?? 0
+export const depotFacilityUpgradeCost = (facility: DepotFacility, level: number) => depotFacilityDetails[facility].baseCost * (Math.max(0, level) + 1)
+
+export const fleetSlotCapacity = (companyLevel: number, garageLevel = 0, branches: Branch[] = []) =>
+  Math.max(1, Math.floor(companyLevel)) * FLEET_SLOTS_PER_LEVEL + Math.max(0, Math.floor(garageLevel)) * GARAGE_UPGRADE_SLOTS + branches.reduce((slots, branch) => slots + depotFacilityLevel(branch, 'parking') * DEPOT_PARKING_SLOTS, 0)
 
 export const garageUpgradeCost = (garageLevel = 0) => 10_000 * (Math.max(0, Math.floor(garageLevel)) + 1)
 

@@ -21,7 +21,9 @@ export interface Vehicle { id: string; name: string; type: 'taxi' | 'coach' | 'v
 export interface Driver { id: string; name: string; rating: number; salary: number; status: 'available' | 'driving' | 'off-duty'; fatigue: number; home: Coordinates; shift: 'day' | 'night'; trait?: DriverTrait; missedShiftUntil?: string }
 export interface Passenger { id: string; name: string; partySize: number }
 export interface TaxiJob { id: string; cityId: string; pickup: Coordinates; destination: Coordinates; pickupLabel: string; destinationLabel: string; passengerIds: string[]; fare: number; distanceKm: number; durationMinutes: number; category?: JobCategory; requiredUpgrade?: VehicleUpgrade; status: 'offered' | 'accepted' | 'complete'; offeredAt?: string; assignedVehicleId?: string; acceptedAt?: string; pickupTimeMultiplier?: number; satisfaction?: number; customerRating?: number; tip?: number; reputationEarned?: number }
-export interface Branch { id: string; cityId: string; name: string; openedAt: string; managerName?: string }
+export type DepotFacility = 'parking' | 'workshop' | 'energy' | 'lounge'
+export interface DepotFacilities { parking: number; workshop: number; energy: number; lounge: number }
+export interface Branch { id: string; cityId: string; name: string; openedAt: string; managerName?: string; isHeadquarters?: boolean; depot?: DepotFacilities }
 export interface TravelAgency { id: string; name: string; cityId: string; level: number }
 export interface Tour { id: string; agencyId: string; name: string; stops: Coordinates[]; price: number; vehicleId?: string }
 export interface CoachRoute { id: string; fromCityId: string; toCityId: string; name: string; ticketPrice: number; vehicleId?: string }

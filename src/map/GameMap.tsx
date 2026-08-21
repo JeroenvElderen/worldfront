@@ -144,12 +144,16 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     instance.on('error', (event) => {
       if (map.current !== instance || usingFallbackStyle) return
       const message = event.error?.message?.toLowerCase() ?? ''
-      // Authentication/style/tile failures must not leave a permanently black
-      // canvas. OpenStreetMap raster tiles keep the game usable, while the
-      // browser restores a lost WebGL context on this same map instance.
+      // Only replace the whole style when the style itself cannot load. A
+      // transient tile, image, or Directions error must not clear a working
+      // map (which is especially noticeable while a job is being accepted).
       if (message.includes('webgl') || message.includes('context lost')) {
         return
       }
+      const styleCannotLoad = message.includes('unauthorized') ||
+        message.includes('access token') ||
+        message.includes('style') && (message.includes('404') || message.includes('not found') || message.includes('failed to load'))
+      if (!styleCannotLoad) return
       usingFallbackStyle = true
       instance.setStyle(fallbackStyle)
     })
@@ -360,6 +364,13 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
   useEffect(() => {
     const instance = map.current
     if (!instance?.isStyleLoaded()) return
+    // Closing the calls sheet changes the map viewport on mobile. Resize before
+    // adding the accepted route so Mapbox never presents a stale/black frame.
+    window.requestAnimationFrame(() => {
+      if (map.current !== instance) return
+      instance.resize()
+      instance.triggerRepaint()
+    })
     const selected = getCity(cityId)
 
     // Fleet purchases no longer require a map reconstruction. Add any new

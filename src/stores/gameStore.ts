@@ -33,6 +33,16 @@ const transaction = (category: TransactionCategory, description: string, amount:
 })
 const addTransactions = (existing: FinancialTransaction[] | undefined, ...entries: FinancialTransaction[]) =>
   [...(existing ?? []), ...entries].slice(-500)
+const availableStaffedTaxiCount = (state: Pick<GameState, 'vehicles' | 'drivers'>) => state.vehicles.filter((vehicle) =>
+  vehicle.type === 'taxi' &&
+  vehicle.status === 'available' &&
+  vehicle.driverId &&
+  state.drivers.some((driver) => driver.id === vehicle.driverId && driver.status === 'available'),
+).length
+const fitOffersToAvailableTaxis = (jobs: GameSave['jobs'], taxiCount: number) => {
+  let offersKept = 0
+  return jobs.filter((job) => job.status !== 'offered' || offersKept++ < taxiCount)
+}
 const newVehicleLifecycle = (price: number, purchasedAt = new Date().toISOString()) => ({
   purchasePrice: price, purchasedAt, odometerKm: 0, lifetimeRevenue: 0, lifetimeExpenses: 0, batteryHealth: 100, lastServiceAtKm: 0,
 })
@@ -81,7 +91,12 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
       const taxiPositions = taxis.filter((vehicle) => vehicle.status === 'available').map((vehicle) => vehicle.position ?? city.coordinates)
       const maxDistanceKm = maxJobDistanceForFleet(level, taxis.length)
       const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, state.activeEvent?.fareMultiplier ?? 1)
-      set((latest) => ({ jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...generated.jobs], passengers: [...latest.passengers, ...generated.passengers], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }))
+      set((latest) => {
+        const openSlots = Math.max(0, availableStaffedTaxiCount(latest) - latest.jobs.filter((job) => job.status === 'offered').length)
+        const acceptedJobs = generated.jobs.slice(0, openSlots)
+        const acceptedPassengerIds = new Set(acceptedJobs.flatMap((job) => job.passengerIds))
+        return { jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...acceptedJobs], passengers: [...latest.passengers, ...generated.passengers.filter((passenger) => acceptedPassengerIds.has(passenger.id))], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures.slice(0, openSlots)].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }
+      })
     } catch (error) {
       set({ jobsLoading: false, jobsError: error instanceof Error ? error.message : 'Could not generate requests.' })
     }
@@ -100,7 +115,12 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
       const taxiPositions = taxis.filter((vehicle) => vehicle.status === 'available').map((vehicle) => vehicle.position ?? city.coordinates)
       const maxDistanceKm = maxJobDistanceForFleet(level, taxis.length)
       const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, state.activeEvent?.fareMultiplier ?? 1)
-      set((latest) => ({ jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...generated.jobs], passengers: [...latest.passengers, ...generated.passengers], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }))
+      set((latest) => {
+        const openSlots = Math.max(0, availableStaffedTaxiCount(latest) - latest.jobs.filter((job) => job.status === 'offered').length)
+        const acceptedJobs = generated.jobs.slice(0, openSlots)
+        const acceptedPassengerIds = new Set(acceptedJobs.flatMap((job) => job.passengerIds))
+        return { jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...acceptedJobs], passengers: [...latest.passengers, ...generated.passengers.filter((passenger) => acceptedPassengerIds.has(passenger.id))], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures.slice(0, openSlots)].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }
+      })
     } catch (error) {
       set({ jobsLoading: false, jobsError: error instanceof Error ? error.message : 'Could not generate a request.' })
     }
@@ -116,7 +136,9 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     const driverId = result.vehicles.find((vehicle) => vehicle.id === assignedVehicleId)?.driverId
     const driver = state.drivers.find((candidate) => candidate.id === driverId)
     if (driver?.trait === 'unreliable' && Math.random() < .12) return { drivers: state.drivers.map((candidate) => candidate.id === driverId ? { ...candidate, status: 'off-duty' as const, missedShiftUntil: new Date(Date.now() + 60_000).toISOString() } : candidate), updatedAt: new Date().toISOString() }
-    return { ...result, jobs: result.jobs.map((job) => job.id === jobId ? { ...job, pickupTimeMultiplier: pickupSpeedMultiplier(driver), durationMinutes: driver?.trait === 'careful' ? job.durationMinutes * 1.05 : job.durationMinutes, fare: (result.vehicles.find((vehicle) => vehicle.id === assignedVehicleId)?.upgrades ?? []).includes('meter-pro') ? Math.round(job.fare * 1.08 * 100) / 100 : job.fare } : job), drivers: state.drivers.map((candidate) => candidate.id === driverId ? { ...candidate, status: 'driving' as const } : candidate), updatedAt: new Date().toISOString(), activeSection: 'map' }
+    const drivers = state.drivers.map((candidate) => candidate.id === driverId ? { ...candidate, status: 'driving' as const } : candidate)
+    const jobs = result.jobs.map((job) => job.id === jobId ? { ...job, pickupTimeMultiplier: pickupSpeedMultiplier(driver), durationMinutes: driver?.trait === 'careful' ? job.durationMinutes * 1.05 : job.durationMinutes, fare: (result.vehicles.find((vehicle) => vehicle.id === assignedVehicleId)?.upgrades ?? []).includes('meter-pro') ? Math.round(job.fare * 1.08 * 100) / 100 : job.fare } : job)
+    return { ...result, jobs: fitOffersToAvailableTaxis(jobs, availableStaffedTaxiCount({ vehicles: result.vehicles, drivers })), drivers, focusedJobId: jobId, updatedAt: new Date().toISOString(), activeSection: 'map' }
   }),
   declineJob: (jobId) => set((state) => ({ jobs: state.jobs.filter((job) => job.id !== jobId), focusedJobId: state.focusedJobId === jobId ? null : state.focusedJobId, updatedAt: new Date().toISOString() })),
   completeJob: (jobId) => set((state) => {

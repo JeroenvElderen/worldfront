@@ -62,6 +62,11 @@ const vehicleColor = {
 
 const VEHICLE_MARKER_RADIUS = 4
 const VEHICLE_MARKER_STROKE_WIDTH = 1.5
+// A fleet index is not a stable identity: buying or selling another vehicle can
+// change which vehicle an existing indexed source represents. Key map sources by
+// the persisted vehicle id so dispatch always animates the vehicle assigned to
+// the job, including taxis added after the map was created.
+const vehicleSourceId = (vehicleId: string) => `vehicle-${vehicleId}`
 const missionColor = (jobId: string) => {
   const hash = [...jobId].reduce((value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0, 0)
   return `hsl(${hash % 360}, 100%, 60%)`
@@ -138,13 +143,13 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
       instance.addLayer({ id: 'base-halo', type: 'circle', source: 'company-base', paint: { 'circle-radius': 22, 'circle-color': '#22d3a7', 'circle-opacity': 0.22, 'circle-stroke-width': 1, 'circle-stroke-color': '#5eead4' } })
       instance.addLayer({ id: 'base', type: 'circle', source: 'company-base', paint: { 'circle-radius': 9, 'circle-color': '#0f766e', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } })
 
-      for (const [index, vehicle] of vehicles.entries()) {
+      for (const vehicle of vehicles) {
         const job = jobs.find((candidate) => candidate.status === 'accepted' && (candidate.assignedVehicleId === vehicle.id || (!candidate.assignedVehicleId && vehicle.status === 'on-job')))
         const start = vehicle.position ?? selected?.coordinates
         if (!start) continue
         if (vehicle.rentalJourney) {
           const rental = vehicle.rentalJourney
-          const sourceId = `rental-${vehicle.id}`
+          const sourceId = vehicleSourceId(vehicle.id)
           let roadCoordinates: number[][] = rental.waypoints
           if (token) {
             try {
@@ -172,7 +177,7 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
         }
         if (vehicle.postalRoute) {
           const postal = vehicle.postalRoute
-          const sourceId = `taxi-${index}`
+          const sourceId = vehicleSourceId(vehicle.id)
           let roadCoordinates: number[][] = postal.stops.map((stop) => stop.coordinates)
           if (token) {
             try {
@@ -231,7 +236,7 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
         // that runner retain ownership instead of replacing its moving marker
         // when these load-time requests eventually finish.
         if (job && liveJobIds.current.has(job.id)) continue
-        const sourceId = `taxi-${index}`
+        const sourceId = vehicleSourceId(vehicle.id)
         if (!instance.getSource(sourceId)) {
           instance.addSource(sourceId, { type: 'geojson', data: point(start) })
           instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': vehicle.type === 'post' ? vehicleColor.postal : job ? vehicleColor.pickingUp : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available, 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
@@ -359,8 +364,8 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
 
     // Fleet purchases no longer require a map reconstruction. Add any new
     // vehicle source and layer directly to the live style.
-    vehicles.forEach((vehicle, index) => {
-      const sourceId = vehicle.rentalJourney ? `rental-${vehicle.id}` : `taxi-${index}`
+    vehicles.forEach((vehicle) => {
+      const sourceId = vehicleSourceId(vehicle.id)
       if (instance.getSource(sourceId)) return
       const position = vehicle.position ?? selected?.coordinates
       if (!position) return
@@ -423,12 +428,11 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
     // Start newly accepted journeys on the live map and replace the immediate
     // fallback with road geometry as soon as Directions responds.
     for (const job of jobs.filter((candidate) => candidate.status === 'accepted')) {
-      const vehicleIndex = vehicles.findIndex((vehicle) => vehicle.id === job.assignedVehicleId)
-      if (vehicleIndex < 0) continue
-      const vehicle = vehicles[vehicleIndex]
+      const vehicle = vehicles.find((candidate) => candidate.id === job.assignedVehicleId)
+      if (!vehicle) continue
       const start = vehicle.position ?? getCity(cityId, customCities)?.coordinates
       if (!start) continue
-      const taxiSourceId = `taxi-${vehicleIndex}`
+      const taxiSourceId = vehicleSourceId(vehicle.id)
       if (instance.getLayer(taxiSourceId)) instance.setPaintProperty(taxiSourceId, 'circle-color', vehicleColor.pickingUp)
       const passengerSourceId = `pickup-${job.id}`
       if (instance.getLayer(passengerSourceId) && instance.getLayer(taxiSourceId)) {
@@ -495,16 +499,17 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
 
     // Leave the completed taxi dot at its destination without rebuilding the map.
     for (const job of jobs.filter((candidate) => candidate.status === 'complete')) {
-      const vehicleIndex = vehicles.findIndex((vehicle) => vehicle.id === job.assignedVehicleId)
-      if (vehicleIndex < 0) continue
-      const taxiSource = instance.getSource(`taxi-${vehicleIndex}`) as mapboxgl.GeoJSONSource | undefined
+      const vehicle = vehicles.find((candidate) => candidate.id === job.assignedVehicleId)
+      if (!vehicle) continue
+      const sourceId = vehicleSourceId(vehicle.id)
+      const taxiSource = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined
       const timer = liveJobTimers.current.get(job.id)
       if (timer !== undefined) window.cancelAnimationFrame(timer)
       liveJobTimers.current.delete(job.id)
       liveJobRunners.current.delete(job.id)
       liveJobIds.current.delete(job.id)
       taxiSource?.setData(point(jobDestination(job)))
-      if (instance.getLayer(`taxi-${vehicleIndex}`)) instance.setPaintProperty(`taxi-${vehicleIndex}`, 'circle-color', vehicleColor.available)
+      if (instance.getLayer(sourceId)) instance.setPaintProperty(sourceId, 'circle-color', vehicleColor.available)
     }
   }, [cityId, customCities, jobs, vehicles, mapRevision, onOpenJob])
 

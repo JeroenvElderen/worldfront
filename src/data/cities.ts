@@ -35,4 +35,4 @@ export const irelandOverview = {
   center: [-8.1, 53.25] as [number, number],
   zoom: 5.7,
 }
-export const getCity = (id: string | null) => cities.find((city) => city.id === id)
+export const getCity = (id: string | null, customCities: City[] = []) => [...customCities, ...cities].find((city) => city.id === id)

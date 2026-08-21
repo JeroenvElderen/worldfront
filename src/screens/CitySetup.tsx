@@ -1,18 +1,68 @@
-import { useState } from 'react'
-import { cities } from '../data/cities'
+import { useEffect, useRef, useState } from 'react'
+import mapboxgl from 'mapbox-gl'
+import 'mapbox-gl/dist/mapbox-gl.css'
+import { mapboxAccessToken } from '../config/mapbox'
+import type { City, Coordinates } from '../models/game'
 
-export function CitySetup({ onStart }: { onStart: (cityId: string) => void }) {
-  const startingCities = cities.filter((city) => city.countryCode === 'IE')
-  const [selected, setSelected] = useState(startingCities[0].id)
+const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'osm', type: 'raster', source: 'osm' }] }
+type ReversePlace = { name: string; region: string; regionCode: string; country: string; countryCode: string }
+const slug = (value: string) => value.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+
+async function reversePlace([longitude, latitude]: Coordinates): Promise<ReversePlace> {
+  if (mapboxAccessToken) {
+    const response = await fetch(`https://api.mapbox.com/search/geocode/v6/reverse?longitude=${longitude}&latitude=${latitude}&types=place,locality,region,country&access_token=${mapboxAccessToken}`)
+    if (!response.ok) throw new Error('We could not identify that place. Try another point.')
+    const data = await response.json() as { features?: Array<{ properties?: { feature_type?: string; name?: string; short_code?: string; context?: { place?: { name?: string }; region?: { name?: string; region_code?: string }; country?: { name?: string; country_code?: string } } } }> }
+    const feature = data.features?.find((item) => ['place', 'locality'].includes(item.properties?.feature_type ?? '')) ?? data.features?.[0]
+    const context = feature?.properties?.context
+    const name = feature?.properties?.name ?? context?.place?.name
+    const countryCode = context?.country?.country_code?.toUpperCase()
+    if (!name || !countryCode) throw new Error('Select a town or city on land.')
+    return { name, region: context?.region?.name ?? name, regionCode: context?.region?.region_code ?? context?.region?.name ?? name, country: context?.country?.name ?? countryCode, countryCode }
+  }
+  const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`, { headers: { 'Accept-Language': 'en' } })
+  if (!response.ok) throw new Error('We could not identify that place. Try another point.')
+  const data = await response.json() as { address?: Record<string, string> }
+  const address = data.address ?? {}
+  const name = address.city ?? address.town ?? address.village ?? address.municipality
+  if (!name || !address.country_code) throw new Error('Select a town or city on land.')
+  const region = address.state ?? address.county ?? name
+  return { name, region, regionCode: region, country: address.country ?? address.country_code.toUpperCase(), countryCode: address.country_code.toUpperCase() }
+}
+
+function SelectionMap({ onSelect }: { onSelect: (city: City | null) => void }) {
+  const container = useRef<HTMLDivElement>(null)
+  const [status, setStatus] = useState('Tap anywhere to choose your headquarters')
+  useEffect(() => {
+    if (!container.current) return
+    if (mapboxAccessToken) mapboxgl.accessToken = mapboxAccessToken
+    const map = new mapboxgl.Map({ container: container.current, style: mapboxAccessToken ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle, center: [0, 25], zoom: 1.7, attributionControl: false })
+    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right')
+    let marker: mapboxgl.Marker | undefined
+    map.on('click', async ({ lngLat }) => {
+      const coordinates: Coordinates = [lngLat.lng, lngLat.lat]
+      marker?.remove(); marker = new mapboxgl.Marker({ color: '#43ddb5' }).setLngLat(lngLat).addTo(map)
+      setStatus('Finding this place…')
+      try {
+        const place = await reversePlace(coordinates)
+        const city: City = { id: `custom-${slug(place.countryCode)}-${slug(place.regionCode)}-${slug(place.name)}-${Math.abs(Math.round(lngLat.lng * 1000))}`, name: place.name, countryCode: place.countryCode, countryName: place.country, regionCode: place.regionCode, regionName: place.region, coordinates, mapZoom: 12 }
+        onSelect(city); setStatus(`${place.name} · ${place.region}, ${place.country}`)
+      } catch (error) { onSelect(null); setStatus((error as Error).message) }
+    })
+    return () => { marker?.remove(); map.remove() }
+  }, [onSelect])
+  return <div className="place-picker"><div ref={container} className="place-picker-map"/><div className="place-picker-status">⌖ {status}</div></div>
+}
+
+export function CitySetup({ onStart }: { onStart: (city: City) => void }) {
+  const [selected, setSelected] = useState<City | null>(null)
   return <div className="setup-backdrop"><main className="setup-sheet game-panel">
-    <div className="setup-emblem">TE</div><small className="eyebrow">YOUR JOURNEY STARTS HERE</small>
-    <h1>Build your<br/><em>Travel Empire</em></h1>
-    <p>Choose a home city. We’ll set up your first vehicle and take you straight to the command map.</p>
-    <div className="city-grid" role="radiogroup" aria-label="Starting city">{startingCities.map((city) =>
-      <button role="radio" aria-checked={selected === city.id} className={selected === city.id ? 'selected' : ''} key={city.id} onClick={() => setSelected(city.id)}>
-        <span>{city.name}</span><small>Ireland</small><b>✓</b>
-      </button>)}</div>
+    <small className="eyebrow">CHOOSE ANY PLACE IN THE WORLD</small>
+    <h1>Where will your<br/><em>empire begin?</em></h1>
+    <p>Tap a town or city on the map. Your first regional operating license is included, so you can open more branches there.</p>
+    <SelectionMap onSelect={setSelected}/>
+    <div className="license-preview"><span>📜</span><div><small>INCLUDED OPERATING LICENSE</small><strong>{selected ? `${selected.regionName}, ${selected.countryName}` : 'Select a place to continue'}</strong></div><b>{selected ? 'Included' : '—'}</b></div>
     <div className="starter"><span>🚕</span><div><small>YOUR STARTER VEHICLE</small><strong>Compact Taxi</strong></div><b>Included</b></div>
-    <button className="start-button" onClick={() => onStart(selected)}>Start your company <span>→</span></button>
+    <button className="start-button" disabled={!selected} onClick={() => selected && onStart(selected)}>Start in {selected?.name ?? 'your city'} <span>→</span></button>
   </main></div>
 }

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { BottomNav } from './components/game/BottomNav'
 import { SectionSheet } from './components/game/SectionSheet'
@@ -9,9 +9,18 @@ import { GameMap } from './map/GameMap'
 import { CitySetup } from './screens/CitySetup'
 import { useGameStore } from './stores/gameStore'
 import { getJobJourney, jobOfferExpiresAt } from './services/jobEngine'
+import { fleetSlotCapacity, maxJobDistanceForFleet } from './services/companyProgression'
+import { hasResearch } from './services/research'
+import { getTaxiModel } from './data/taxis'
 
 export default function App() {
   const game = useGameStore()
+  const [placingStation, setPlacingStation] = useState(false)
+  const taxiCount = game.vehicles.filter((vehicle) => vehicle.type === 'taxi').length
+  const serviceRadiusKm = maxJobDistanceForFleet(game.company?.level ?? 1, taxiCount) * (hasResearch(game.completedResearch ?? [], 'predictive-demand') ? 1.25 : 1)
+  const stationPackageCost = Math.round(15_000 * (game.specialization === 'mobility' ? .9 : 1) * (hasResearch(game.completedResearch ?? [], 'prefab-depots') ? .8 : 1)) + getTaxiModel('toyota-corolla').price
+  const researchFleetSlots = (hasResearch(game.completedResearch ?? [], 'autonomous-operations') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'global-network') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'regional-hubs') ? game.branches.length : 0)
+  const stationFleetFull = game.vehicles.length >= fleetSlotCapacity(game.company?.level ?? 1, game.garageLevel ?? 0, game.branches) + researchFleetSlots
 
   const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, acceptJob, hasHydrated } = game
 
@@ -273,15 +282,22 @@ export default function App() {
       <GameMap
         cityId={game.activeCityId ?? game.startingCityId}
         customCities={game.customCities ?? []}
+        branches={game.branches ?? []}
+        serviceRadiusKm={serviceRadiusKm}
         vehicles={game.vehicles}
         jobs={game.jobs}
         focusedJobId={game.focusedJobId}
+        placingStation={placingStation}
+        onBuildStation={(coordinates) => { game.buildStation(coordinates); setPlacingStation(false) }}
         onOpenJob={game.openJob}
       />
 
       {game.company ? (
         <>
           <TopHud company={game.company} />
+
+          {game.activeSection === 'map' && !placingStation && <button className="station-add-button" disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => setPlacingStation(true)} aria-label="Build next station">＋</button>}
+          {placingStation && <aside className="depot-placement-banner"><span>⌖</span><div><b>Place Station {game.branches.length + 1}</b><small>Tap the map to build a station with one taxi for {new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(stationPackageCost)}.</small></div><button onClick={() => setPlacingStation(false)}>Cancel</button></aside>}
 
           {game.activeEvent && (
             <aside className="event-banner">
@@ -337,6 +353,7 @@ export default function App() {
                 transportRoutes={game.transportRoutes ?? []}
                 contracts={game.contracts ?? []}
                 specialization={game.specialization}
+                completedResearch={game.completedResearch ?? []}
                 automation={game.automation}
                 cash={game.company.cash}
                 onClose={() =>
@@ -351,9 +368,10 @@ export default function App() {
                 onBuyRentalCar={game.buyRentalCar}
                 onStartRental={game.startRental}
                 onBuyCountryLicense={game.buyCountryLicense}
-                onOpenBranch={game.openBranch}
+                onBuildStation={() => { game.setSection('map'); setPlacingStation(true) }}
+                onSwitchStation={game.switchStation}
+                onUnlockResearch={game.unlockResearch}
                 onUpgradeDepotFacility={game.upgradeDepotFacility}
-                onSwitchCity={game.switchCity}
                 onOpenAgency={game.openAgency}
                 onCreateTour={game.createTour}
                 onDispatchTour={game.dispatchTour}

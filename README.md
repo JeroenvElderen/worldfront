@@ -113,9 +113,21 @@ Vehicle lifecycle management now tracks odometer mileage, age-based depreciation
 
 Early-company management includes four rotating driver candidates with gameplay traits, daily and weekly goals, categorized passenger requests with vehicle requirements, satisfaction-based tips and reputation, vehicle wear and three maintenance plans, functional upgrades, and per-vehicle refueling strategies. Newly purchased vehicles are delivered without a driver and must be staffed from the Company screen; the starter taxi includes a careful driver so a new game remains immediately playable.
 
-Every branch includes a depot builder, with three levels each for parking,
-workshops, energy facilities, and driver lounges. These upgrades expand fleet
-capacity and reduce local servicing, energy, and payroll costs; the founding
-branch is identified as the company headquarters.
+Every station includes a facility builder, with three levels each for parking,
+workshops, energy facilities, and driver lounges. These upgrades expand local
+fleet capacity and reduce servicing, energy, and payroll costs.
+
+The company operates under one name while its network grows like MissionChief:
+the first station starts with one taxi, and the map’s plus button purchases and
+places each additional station together with another taxi. Every station creates
+a visible service area, can be selected from Company, and can be upgraded
+independently.
+
+The live map uses a pitched 3D view with terrain and extruded buildings where
+Mapbox data is available. The Company screen also includes a four-discipline
+technology tree. Company levels grant innovation points for permanent operations,
+engineering, clean mobility, and infrastructure research, including fare,
+service-radius, fleet-capacity, maintenance, energy, resale, and station-network
+improvements.
 
 Fleet operations now track energy and driver fatigue. A taxi that runs low automatically drives to a fuel or charging station; a tired driver takes the taxi home to rest, with both recovery journeys shown on the map. Players can select day or night shifts in Fleet. The Company screen offers interest-bearing loans, while the dealership supports vehicle leasing and owned vehicles can be sold at a condition-adjusted value. The HUD shows an accelerated calendar and clock, advancing one game minute per real second. Recurring driver, lease, and loan payments are collected at the start of each game month. Timed city events create temporary fare and energy-use modifiers and are announced above the map.

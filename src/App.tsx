@@ -120,6 +120,9 @@ export default function App() {
         ),
       )
       .concat(
+        (state.transportAssets ?? []).flatMap((asset) => asset.journey ? [new Date(asset.journey.arrivesAt).getTime()] : []),
+      )
+      .concat(
         state.activeEvent
           ? [
               new Date(
@@ -160,6 +163,7 @@ export default function App() {
     company,
     game.jobs,
     game.vehicles,
+    game.transportAssets,
     game.activeEvent,
     game.nextEventAt,
     game.nextOperatingPaymentAt,
@@ -325,6 +329,9 @@ export default function App() {
                 agencies={game.agencies ?? []}
                 tours={game.tours ?? []}
                 coachRoutes={game.coachRoutes ?? []}
+                countryLicenses={game.countryLicenses ?? ['IE']}
+                transportAssets={game.transportAssets ?? []}
+                transportRoutes={game.transportRoutes ?? []}
                 contracts={game.contracts ?? []}
                 specialization={game.specialization}
                 automation={game.automation}
@@ -339,6 +346,7 @@ export default function App() {
                 onStartPostalRoute={game.startPostalRoute}
                 onBuyRentalCar={game.buyRentalCar}
                 onStartRental={game.startRental}
+                onBuyCountryLicense={game.buyCountryLicense}
                 onOpenBranch={game.openBranch}
                 onSwitchCity={game.switchCity}
                 onOpenAgency={game.openAgency}
@@ -348,6 +356,9 @@ export default function App() {
                 onBuyCoach={game.buyCoach}
                 onCreateCoachRoute={game.createCoachRoute}
                 onDispatchCoach={game.dispatchCoach}
+                onBuyTransportAsset={game.buyTransportAsset}
+                onCreateTransportRoute={game.createTransportRoute}
+                onDispatchTransport={game.dispatchTransport}
                 onSetAutomation={game.setAutomation}
                 onAcceptContract={game.acceptContract}
                 onChooseSpecialization={game.chooseSpecialization}

@@ -9,7 +9,7 @@ export type VehicleUpgrade = 'eco-tires' | 'premium-seats' | 'range-pack' | 'met
 export type RefuelStrategy = 'automatic' | 'fast' | 'economy' | 'overnight'
 export type JobCategory = 'standard' | 'airport' | 'family' | 'executive' | 'accessible' | 'late-night' | 'long-distance' | 'courier' | 'pet-friendly'
 export type GoalMetric = 'fares' | 'earnings' | 'safe-jobs' | 'postal-rounds' | 'airport-jobs' | 'rating'
-export type TransactionCategory = 'fares' | 'tips' | 'postal' | 'rentals' | 'tours' | 'coach' | 'contracts' | 'expansion' | 'goals' | 'vehicles' | 'maintenance' | 'energy' | 'upgrades' | 'payroll' | 'leases' | 'loans'
+export type TransactionCategory = 'fares' | 'tips' | 'postal' | 'rentals' | 'tours' | 'coach' | 'rail' | 'ferry' | 'airline' | 'contracts' | 'expansion' | 'goals' | 'vehicles' | 'maintenance' | 'energy' | 'upgrades' | 'payroll' | 'leases' | 'loans'
 export type Specialization = 'mobility' | 'tourism' | 'logistics' | 'sustainability'
 
 export interface City { id: string; name: string; countryCode: string; coordinates: Coordinates; mapZoom: number }
@@ -25,6 +25,9 @@ export interface Branch { id: string; cityId: string; name: string; openedAt: st
 export interface TravelAgency { id: string; name: string; cityId: string; level: number }
 export interface Tour { id: string; agencyId: string; name: string; stops: Coordinates[]; price: number; vehicleId?: string }
 export interface CoachRoute { id: string; fromCityId: string; toCityId: string; name: string; ticketPrice: number; vehicleId?: string }
+export type TransportMode = 'train' | 'ferry' | 'airliner'
+export interface TransportAsset { id: string; mode: TransportMode; name: string; model: string; capacity: number; speedKmh: number; value: number; condition: number; status: 'available' | 'on-route'; cityId: string; lifetimeRevenue: number; journey?: { routeId: string; startedAt: string; arrivesAt: string; reward: number; distanceKm: number; destinationCityId: string } }
+export interface TransportRoute { id: string; mode: TransportMode; fromCityId: string; toCityId: string; name: string; ticketPrice: number; assetId?: string }
 export interface AutomationPolicy { enabled: boolean; minFare: number; maxPickupKm: number; autoServiceBelow: number }
 export interface BusinessContract { id: string; name: string; description: string; category: JobCategory | 'postal' | 'tour'; target: number; progress: number; reward: number; expiresAt: string; accepted: boolean; completed: boolean }
 export interface Loan { id: string; principal: number; balance: number; paymentAmount: number; nextPaymentAt: string }
@@ -32,4 +35,4 @@ export interface DynamicEvent { id: string; name: string; description: string; f
 export interface CompanyGoal { id: string; cadence: 'daily' | 'weekly'; metric: GoalMetric; label: string; target: number; progress: number; cashReward: number; reputationReward: number; expiresAt: string; completed: boolean; claimed: boolean }
 export interface DriverCandidate extends Driver { expiresAt: string }
 export interface FinancialTransaction { id: string; occurredAt: string; category: TransactionCategory; description: string; amount: number; vehicleId?: string }
-export interface GameSave { id: string; version: number; updatedAt: string; pausedAt: string | null; company: Company | null; startingCityId: string | null; activeCityId: string | null; branches: Branch[]; vehicles: Vehicle[]; drivers: Driver[]; driverCandidates: DriverCandidate[]; jobs: TaxiJob[]; agencies: TravelAgency[]; tours: Tour[]; coachRoutes: CoachRoute[]; contracts: BusinessContract[]; specialization: Specialization | null; specializationPoints: number; automation: AutomationPolicy; passengers: Passenger[]; goals: CompanyGoal[]; jobRequestHistory: string[]; loans: Loan[]; financialTransactions: FinancialTransaction[]; activeEvent: DynamicEvent | null; nextEventAt: string; nextOperatingPaymentAt: string }
+export interface GameSave { id: string; version: number; updatedAt: string; pausedAt: string | null; company: Company | null; startingCityId: string | null; activeCityId: string | null; branches: Branch[]; countryLicenses: string[]; vehicles: Vehicle[]; transportAssets: TransportAsset[]; transportRoutes: TransportRoute[]; drivers: Driver[]; driverCandidates: DriverCandidate[]; jobs: TaxiJob[]; agencies: TravelAgency[]; tours: Tour[]; coachRoutes: CoachRoute[]; contracts: BusinessContract[]; specialization: Specialization | null; specializationPoints: number; automation: AutomationPolicy; passengers: Passenger[]; goals: CompanyGoal[]; jobRequestHistory: string[]; loans: Loan[]; financialTransactions: FinancialTransaction[]; activeEvent: DynamicEvent | null; nextEventAt: string; nextOperatingPaymentAt: string }

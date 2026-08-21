@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { cities } from '../data/cities'
 
 export function CitySetup({ onStart }: { onStart: (cityId: string) => void }) {
-  const [selected, setSelected] = useState(cities[0].id)
+  const startingCities = cities.filter((city) => city.countryCode === 'IE')
+  const [selected, setSelected] = useState(startingCities[0].id)
   return <div className="setup-backdrop"><main className="setup-sheet game-panel">
     <div className="setup-emblem">TE</div><small className="eyebrow">WELCOME, FOUNDER</small>
     <h1>Build your<br/><em>Travel Empire</em></h1>
     <p>Choose where your first taxi company will open its doors.</p>
-    <div className="city-grid" role="radiogroup" aria-label="Starting city">{cities.map((city) =>
+    <div className="city-grid" role="radiogroup" aria-label="Starting city">{startingCities.map((city) =>
       <button role="radio" aria-checked={selected === city.id} className={selected === city.id ? 'selected' : ''} key={city.id} onClick={() => setSelected(city.id)}>
         <span>{city.name}</span><small>Ireland</small><b>✓</b>
       </button>)}</div>

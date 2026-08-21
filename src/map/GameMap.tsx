@@ -94,17 +94,12 @@ const JOB_MARKER_SIZE = 0.65
 function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
-  const viewport = useRef<{ center: Coordinates; zoom: number } | null>(null)
   const pickupJobIds = useRef(new Set<string>())
   const pickupHandlers = useRef(new Map<string, { enter: () => void; leave: () => void; click: (event: mapboxgl.MapMouseEvent) => void }>())
   const liveJobIds = useRef(new Set<string>())
   const liveJobTimers = useRef(new Map<string, number>())
   const liveJobRunners = useRef(new Map<string, () => void>())
   const [mapRevision, setMapRevision] = useState(0)
-  const [mapRecoveryRevision, setMapRecoveryRevision] = useState(0)
-  // Job changes are applied to the existing WebGL map by the synchronization
-  // effects below. In particular, accepting a call must never recreate the map.
-  const fleetConfigurationKey = vehicles.map((vehicle) => `${vehicle.id}:${vehicle.modelId}:${(vehicle.exteriorAccessories ?? []).join(',')}:${vehicle.serviceTrip?.startedAt ?? ''}:${vehicle.postalRoute?.startedAt ?? ''}:${vehicle.rentalJourney?.startedAt ?? ''}`).join('|')
 
   useEffect(() => {
     if (!container.current) return
@@ -117,17 +112,11 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     const animationTimers = new Set<number>()
     const animationRunners = new Set<() => void>()
     let usingFallbackStyle = !token
-    let recoveryRequested = false
-    const requestRecovery = () => {
-      if (recoveryRequested) return
-      recoveryRequested = true
-      setMapRecoveryRevision((revision) => revision + 1)
-    }
     const instance = new mapboxgl.Map({
       container: container.current,
       style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle,
-      center: viewport.current?.center ?? selected?.coordinates ?? irelandOverview.center,
-      zoom: viewport.current?.zoom ?? selected?.mapZoom ?? irelandOverview.zoom,
+      center: selected?.coordinates ?? irelandOverview.center,
+      zoom: selected?.mapZoom ?? irelandOverview.zoom,
       attributionControl: false,
       pitchWithRotate: false,
       // Avoid periodic network and render work when the already-cached map is
@@ -148,17 +137,17 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     const canvas = instance.getCanvas()
     const handleContextLost = (event: Event) => {
       event.preventDefault()
-      requestRecovery()
     }
+    const handleContextRestored = () => { instance.resize(); instance.triggerRepaint() }
     canvas.addEventListener('webglcontextlost', handleContextLost)
+    canvas.addEventListener('webglcontextrestored', handleContextRestored)
     instance.on('error', (event) => {
       if (map.current !== instance || usingFallbackStyle) return
       const message = event.error?.message?.toLowerCase() ?? ''
       // Authentication/style/tile failures must not leave a permanently black
-      // canvas. OpenStreetMap raster tiles keep the game usable, while a lost
-      // WebGL context is handled by rebuilding the entire map.
+      // canvas. OpenStreetMap raster tiles keep the game usable, while the
+      // browser restores a lost WebGL context on this same map instance.
       if (message.includes('webgl') || message.includes('context lost')) {
-        requestRecovery()
         return
       }
       usingFallbackStyle = true
@@ -332,8 +321,6 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
     window.addEventListener('pageshow', handleVisibilityChange)
     window.addEventListener('online', handleVisibilityChange)
     return () => {
-      const center = instance.getCenter()
-      viewport.current = { center: [center.lng, center.lat], zoom: instance.getZoom() }
       abortController.abort()
       animationTimers.forEach(window.clearTimeout)
       currentLiveJobTimers.forEach(window.clearTimeout)
@@ -344,16 +331,55 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       window.removeEventListener('pageshow', handleVisibilityChange)
       window.removeEventListener('online', handleVisibilityChange)
       canvas.removeEventListener('webglcontextlost', handleContextLost)
+      canvas.removeEventListener('webglcontextrestored', handleContextRestored)
       map.current = null
       instance.remove()
     }
-    // Jobs are synchronized separately so accepting or completing one does not recreate the map.
+    // Construct Mapbox exactly once. Cities, jobs, and fleet state are synchronized
+    // into this instance below instead of tearing down the WebGL map and reloading tiles.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cityId, fleetConfigurationKey, mapRecoveryRevision])
+  }, [])
+
+  useEffect(() => {
+    const instance = map.current
+    const selected = getCity(cityId)
+    if (!instance || !selected) return
+
+    instance.easeTo({ center: selected.coordinates, zoom: selected.mapZoom, duration: 650 })
+    const updateBase = () => {
+      const source = instance.getSource('company-base') as mapboxgl.GeoJSONSource | undefined
+      source?.setData(featureCollection([point(selected.coordinates)]))
+    }
+    if (instance.isStyleLoaded()) updateBase()
+    else instance.once('load', updateBase)
+    return () => { instance.off('load', updateBase) }
+  }, [cityId, mapRevision])
 
   useEffect(() => {
     const instance = map.current
     if (!instance?.isStyleLoaded()) return
+    const selected = getCity(cityId)
+
+    // Fleet purchases no longer require a map reconstruction. Add any new
+    // vehicle source and layer directly to the live style.
+    vehicles.forEach((vehicle, index) => {
+      const sourceId = vehicle.rentalJourney ? `rental-${vehicle.id}` : `taxi-${index}`
+      if (instance.getSource(sourceId)) return
+      const position = vehicle.position ?? selected?.coordinates
+      if (!position) return
+      instance.addSource(sourceId, { type: 'geojson', data: point(position) })
+      instance.addLayer({
+        id: sourceId,
+        type: 'circle',
+        source: sourceId,
+        paint: {
+          'circle-radius': VEHICLE_MARKER_RADIUS,
+          'circle-color': vehicle.type === 'post' ? vehicleColor.postal : vehicle.type === 'rental' ? vehicleColor.rental : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available,
+          'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH,
+          'circle-stroke-color': '#ffffff',
+        },
+      })
+    })
     const visibleJobs = jobs.filter((job) => job.status === 'offered' || job.status === 'accepted')
     const visibleIds = new Set(visibleJobs.map((job) => job.id))
 

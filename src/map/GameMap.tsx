@@ -5,7 +5,7 @@ import { featureCollection, lineString, point } from '@turf/helpers'
 import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, irelandOverview } from '../data/cities'
 import type { Coordinates, TaxiJob, Vehicle } from '../models/game'
-import { getJobJourney } from '../services/jobEngine'
+import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
 
@@ -204,8 +204,8 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
           }
           animationRunners.add(animatePostal); animatePostal(); continue
         }
-        let pickupRoute: RouteDetails = { coordinates: job ? [start, job.pickup] : [start], speedLimits: [] }
-        let passengerRoute: RouteDetails = { coordinates: job ? [job.pickup, job.destination] : [start], speedLimits: [] }
+        let pickupRoute: RouteDetails = { coordinates: job ? [start, jobPickup(job)] : [start], speedLimits: [] }
+        let passengerRoute: RouteDetails = { coordinates: job ? [jobPickup(job), jobDestination(job)] : [start], speedLimits: [] }
         if (job && token) {
           try {
             const fetchRoute = async (from: Coordinates, to: Coordinates) => {
@@ -215,8 +215,8 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
               const route = result.routes?.reduce((fastest, candidate) => candidate.duration < fastest.duration ? candidate : fastest)
               return route && { coordinates: route.geometry.coordinates, speedLimits: route.legs.flatMap((leg) => leg.annotation?.maxspeed ?? []) }
             }
-            pickupRoute = await fetchRoute(start, job.pickup) ?? pickupRoute
-            passengerRoute = await fetchRoute(job.pickup, job.destination) ?? passengerRoute
+            pickupRoute = await fetchRoute(start, jobPickup(job)) ?? pickupRoute
+            passengerRoute = await fetchRoute(jobPickup(job), jobDestination(job)) ?? passengerRoute
           } catch (error) { if ((error as Error).name === 'AbortError') return }
         }
         const sourceId = `taxi-${index}`
@@ -429,8 +429,8 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
 
       liveJobIds.current.add(job.id)
       const journey = getJobJourney(job, vehicle)
-      let pickupRoute: number[][] = [start, job.pickup]
-      let passengerRoute: number[][] = [job.pickup, job.destination]
+      let pickupRoute: number[][] = [start, jobPickup(job)]
+      let passengerRoute: number[][] = [jobPickup(job), jobDestination(job)]
       if (token) {
         const fetchRoute = async (from: Coordinates, to: Coordinates) => {
           const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?continue_straight=true&geometries=geojson&overview=full&access_token=${token}`)
@@ -438,7 +438,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
           const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] } }> }
           return result.routes?.[0]?.geometry.coordinates
         }
-        void Promise.all([fetchRoute(start, job.pickup), fetchRoute(job.pickup, job.destination)])
+        void Promise.all([fetchRoute(start, jobPickup(job)), fetchRoute(jobPickup(job), jobDestination(job))])
           .then(([toPickup, toDestination]) => {
             if (!liveJobIds.current.has(job.id) || map.current !== instance) return
             pickupRoute = toPickup ?? pickupRoute
@@ -488,7 +488,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
       liveJobTimers.current.delete(job.id)
       liveJobRunners.current.delete(job.id)
       liveJobIds.current.delete(job.id)
-      taxiSource?.setData(point(job.destination))
+      taxiSource?.setData(point(jobDestination(job)))
       if (instance.getLayer(`taxi-${vehicleIndex}`)) instance.setPaintProperty(`taxi-${vehicleIndex}`, 'circle-color', vehicleColor.available)
     }
   }, [cityId, jobs, vehicles, mapRevision, onOpenJob])
@@ -584,12 +584,12 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
 
     const loadRoute = async () => {
       if (!token) {
-        drawRoute([start, job.pickup, job.destination])
+        drawRoute([start, jobPickup(job), jobDestination(job)])
         return
       }
 
       try {
-        const waypoints = [start, job.pickup, job.destination]
+        const waypoints = [start, jobPickup(job), jobDestination(job)]
           .map((coordinate) => coordinate.join(','))
           .join(';')
 
@@ -608,11 +608,11 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
 
         drawRoute(
           result.routes?.[0]?.geometry.coordinates ??
-            [start, job.pickup, job.destination],
+            [start, jobPickup(job), jobDestination(job)],
         )
       } catch (error) {
         if ((error as Error).name !== 'AbortError') {
-          drawRoute([start, job.pickup, job.destination])
+          drawRoute([start, jobPickup(job), jobDestination(job)])
         }
       }
     }

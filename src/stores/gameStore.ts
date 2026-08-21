@@ -8,7 +8,7 @@ import type { Company, DepotFacility, Driver, ExteriorAccessory, FinancialTransa
 import { indexedDbStorage } from '../services/saveDatabase'
 import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import { generateJobOffers } from '../services/jobOfferService'
-import { acceptJobState, completeArrivedJobsState, completeJobState, distanceKmBetween, getJobJourney, jobOfferExpiresAt, MAX_JOB_OFFERS } from '../services/jobEngine'
+import { acceptJobState, completeArrivedJobsState, completeJobState, distanceKmBetween, getJobJourney, jobDestination, jobOfferExpiresAt, jobPickup, MAX_JOB_OFFERS } from '../services/jobEngine'
 import { createDynamicEvent, energyUseForJob, fatigueUseForJob, startRecoveryTrip } from '../services/operationsEngine'
 import { nextMonthlyPaymentAt } from '../services/gameTime'
 import { createPostalRoute } from '../services/postalEngine'
@@ -196,7 +196,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
         // this same tick instead of leaving the taxi unavailable after launch.
         const completedAt = getJobJourney(job, previousVehicle).arrivesAt
         const outcome = calculateJobOutcome(job, previousVehicle, driver)
-        const emptyDistanceKm = previousVehicle.position ? distanceKmBetween(previousVehicle.position, job.pickup) : 0
+        const emptyDistanceKm = previousVehicle.position ? distanceKmBetween(previousVehicle.position, jobPickup(job)) : 0
         const journeyDistanceKm = emptyDistanceKm + job.distanceKm
         // completeArrivedJobsState already applied the one-star (0.2) floor.
         const reputation = addReputation(company.reputation, outcome.reputationEarned - 0.2)
@@ -208,7 +208,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
         )
         result.jobs = result.jobs.map((candidate) => candidate.id === jobId ? { ...candidate, satisfaction: outcome.satisfaction, customerRating: outcome.customerRating, tip: outcome.tip, reputationEarned: outcome.reputationEarned } : candidate)
         const batteryWear = previousVehicle.powertrain === 'electric' ? journeyDistanceKm / 30_000 : 0
-        const depleted = { ...previousVehicle, position: job.destination, status: 'available' as const, odometerKm: (previousVehicle.odometerKm ?? 0) + journeyDistanceKm, lifetimeRevenue: (previousVehicle.lifetimeRevenue ?? 0) + job.fare + outcome.tip, batteryHealth: Math.max(60, (previousVehicle.batteryHealth ?? 100) - batteryWear), condition: Math.max(0, previousVehicle.condition - outcome.wear), fuel: Math.max(0, previousVehicle.fuel - energyUseForJob(job, previousVehicle, state.activeEvent, driver)) }
+        const depleted = { ...previousVehicle, position: jobDestination(job), status: 'available' as const, odometerKm: (previousVehicle.odometerKm ?? 0) + journeyDistanceKm, lifetimeRevenue: (previousVehicle.lifetimeRevenue ?? 0) + job.fare + outcome.tip, batteryHealth: Math.max(60, (previousVehicle.batteryHealth ?? 100) - batteryWear), condition: Math.max(0, previousVehicle.condition - outcome.wear), fuel: Math.max(0, previousVehicle.fuel - energyUseForJob(job, previousVehicle, state.activeEvent, driver)) }
         const tiredDriver = driver && { ...driver, fatigue: Math.min(100, driver.fatigue + fatigueUseForJob(job)) }
         const needsAutomaticRecovery = previousVehicle.refuelStrategy === 'automatic' || (tiredDriver?.fatigue ?? 0) >= 80
         vehicles = vehicles.map((vehicle) => vehicle.id !== previousVehicle.id ? vehicle : needsAutomaticRecovery ? startRecoveryTrip(depleted, tiredDriver, getCity(vehicle.cityId)?.coordinates ?? job.destination, completedAt) : depleted)

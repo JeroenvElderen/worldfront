@@ -10,6 +10,10 @@ export const SIMULATED_MINUTE_MS = 60_000 * REAL_TIME_TRIP_SCALE
 export const jobOfferExpiresAt = (job: TaxiJob) =>
   new Date(job.offeredAt ?? 0).getTime() + JOB_OFFER_DURATION_MS
 
+/** Road-accessible stops returned by Directions; old saves fall back to the POI. */
+export const jobPickup = (job: TaxiJob) => job.pickupRoad ?? job.pickup
+export const jobDestination = (job: TaxiJob) => job.destinationRoad ?? job.destination
+
 const distanceSquared = (from: [number, number], to: [number, number]) => {
   const longitudeScale = Math.cos(((from[1] + to[1]) / 2) * Math.PI / 180)
   return ((from[0] - to[0]) * longitudeScale) ** 2 + (from[1] - to[1]) ** 2
@@ -29,7 +33,7 @@ export const taxiFareForDistance = (distanceKm: number) =>
 export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {
   const acceptedAt = job.acceptedAt ? new Date(job.acceptedAt).getTime() : Date.now()
   const start = vehicle.position ?? job.pickup
-  const pickupDistanceKm = distanceKmBetween(start, job.pickup)
+  const pickupDistanceKm = distanceKmBetween(start, jobPickup(job))
   // Use the job's average journey speed for the empty drive to the passenger too.
   const pickupMinutes = job.distanceKm > 0
     ? pickupDistanceKm * job.durationMinutes / job.distanceKm
@@ -54,7 +58,7 @@ export function acceptJobState(
   const job = jobs.find((candidate) => candidate.id === jobId && candidate.status === 'offered')
   const vehicle = (job && vehicles
     .filter((candidate) => candidate.type === 'taxi' && candidate.status === 'available' && candidate.position && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
-    .sort((left, right) => distanceSquared(left.position!, job.pickup) - distanceSquared(right.position!, job.pickup))[0])
+    .sort((left, right) => distanceSquared(left.position!, jobPickup(job)) - distanceSquared(right.position!, jobPickup(job)))[0])
     ?? vehicles.find((candidate) => candidate.type === 'taxi' && candidate.status === 'available' && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
   if (!vehicle || !job) return null
 
@@ -81,7 +85,7 @@ export function completeJobState(
     ?? vehicles.find((candidate) => candidate.status === 'on-job')
   if (!vehicle || now < getJobJourney(job, vehicle).arrivesAt) return null
 
-  const paidDistanceKm = distanceKmBetween(job.pickup, job.destination)
+  const paidDistanceKm = distanceKmBetween(jobPickup(job), jobDestination(job))
   // The offered fare can include a live-event surge, so preserve it at settlement.
   const meteredFare = job.fare || taxiFareForDistance(paidDistanceKm)
   // Manual settlement has no calculated feedback, so award the one-star floor.
@@ -92,7 +96,7 @@ export function completeJobState(
     jobs: jobs.map((candidate) => candidate.id === jobId ? { ...candidate, status: 'complete' as const } : candidate),
     vehicles: vehicles.map((candidate) =>
       candidate.id === job.assignedVehicleId || (!job.assignedVehicleId && candidate.status === 'on-job')
-        ? { ...candidate, status: 'available' as const, position: job.destination }
+        ? { ...candidate, status: 'available' as const, position: jobDestination(job) }
         : candidate),
   }
 }

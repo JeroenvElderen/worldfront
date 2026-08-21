@@ -35,6 +35,25 @@ const placeCache = new Map<string, PlaceCacheEntry>()
 const isCoordinates = (value: unknown): value is Coordinates =>
   Array.isArray(value) && value.length >= 2 && value.slice(0, 2).every((part) => typeof part === 'number' && Number.isFinite(part))
 
+/** Resolve POIs to safe curbside positions while retaining their marker coordinates. */
+async function roadStops(from: Coordinates, to: Coordinates, signal?: AbortSignal) {
+  try {
+    const coordinates = `${from.join(',')};${to.join(',')}`
+    const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?access_token=${mapboxToken}`, { signal })
+    if (!response.ok) return { pickupRoad: from, destinationRoad: to }
+    const result = await response.json() as { waypoints?: Array<{ location?: unknown }> }
+    const pickup = result.waypoints?.[0]?.location
+    const destination = result.waypoints?.[1]?.location
+    return {
+      pickupRoad: isCoordinates(pickup) ? [pickup[0], pickup[1]] as Coordinates : from,
+      destinationRoad: isCoordinates(destination) ? [destination[0], destination[1]] as Coordinates : to,
+    }
+  } catch (error) {
+    if ((error as Error).name === 'AbortError') throw error
+    return { pickupRoad: from, destinationRoad: to }
+  }
+}
+
 type BoundingBox = [west: number, south: number, east: number, north: number]
 
 const boundingBoxAround = ([longitude, latitude]: Coordinates, radiusKm: number): BoundingBox => {
@@ -173,12 +192,14 @@ export async function generateJobOffers(
     partySize: 1 + Math.floor(Math.random() * 4),
   }))
   const offeredAt = new Date().toISOString()
+  const stops = await Promise.all(routes.map((route) => roadStops(route.pickup.coordinates, route.destination.coordinates, signal)))
   const jobs = routes.map((route, index): TaxiJob => {
     const category = categoryForRoute(route.pickup.name, route.destination.name, route.distanceKm, passengers[index].partySize)
     const categoryInfo = categoryDetails[category]
     return ({
     id: crypto.randomUUID(), cityId: city.id,
     pickup: route.pickup.coordinates, destination: route.destination.coordinates,
+    pickupRoad: stops[index].pickupRoad, destinationRoad: stops[index].destinationRoad,
     pickupLabel: route.pickup.name, destinationLabel: route.destination.name,
     passengerIds: [passengers[index].id], fare: Math.round(taxiFareForDistance(route.distanceKm) * fareMultiplier * categoryInfo.fare * 100) / 100,
     distanceKm: route.distanceKm, durationMinutes: Math.max(5, Math.round(route.distanceKm * 3.2)), category, requiredUpgrade: categoryInfo.requiredUpgrade, status: 'offered', offeredAt,

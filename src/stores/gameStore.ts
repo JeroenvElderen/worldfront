@@ -511,7 +511,13 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     void jobsError
     return save
   },
-  onRehydrateStorage: () => (state) => state?.setHasHydrated(true),
+  onRehydrateStorage: () => (state) => {
+    // Continue to setup/the map even when the device's persistence backend is
+    // unavailable. The storage adapter already attempts its local backup; a
+    // storage failure must never turn the splash screen into a dead end.
+    if (state) state.setHasHydrated(true)
+    else useGameStore.setState({ hasHydrated: true })
+  },
 }))
 
 export type { Section }

@@ -30,9 +30,6 @@ const addTransactions = (existing: FinancialTransaction[] | undefined, ...entrie
 const newVehicleLifecycle = (price: number, purchasedAt = new Date().toISOString()) => ({
   purchasePrice: price, purchasedAt, odometerKm: 0, lifetimeRevenue: 0, lifetimeExpenses: 0, batteryHealth: 100, lastServiceAtKm: 0,
 })
-const shiftDate = (value: string, milliseconds: number) =>
-  new Date(new Date(value).getTime() + milliseconds).toISOString()
-
 export const useGameStore = create<GameState & GameActions>()(persist((set) => ({
   ...blankSave, activeSection: 'map', focusedJobId: null, hasHydrated: false, jobsLoading: false, jobsError: null,
   setHasHydrated: (hasHydrated) => set({ hasHydrated }),
@@ -54,31 +51,10 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
     : state),
   resumeGame: () => set((state) => {
     if (!state.pausedAt) return state
-
-    const pausedFor = Math.max(0, Date.now() - new Date(state.pausedAt).getTime())
-    const shift = (value: string | undefined) => value ? shiftDate(value, pausedFor) : value
-
-    return {
-      pausedAt: null,
-      company: state.company ? { ...state.company, foundedAt: shiftDate(state.company.foundedAt, pausedFor) } : null,
-      jobs: state.jobs.map((job) => ({ ...job, offeredAt: shift(job.offeredAt), acceptedAt: shift(job.acceptedAt) })),
-      vehicles: state.vehicles.map((vehicle) => ({
-        ...vehicle,
-        purchasedAt: shift(vehicle.purchasedAt),
-        postalRoute: vehicle.postalRoute ? { ...vehicle.postalRoute, startedAt: shiftDate(vehicle.postalRoute.startedAt, pausedFor), arrivesAt: shiftDate(vehicle.postalRoute.arrivesAt, pausedFor) } : undefined,
-        rentalJourney: vehicle.rentalJourney ? { ...vehicle.rentalJourney, startedAt: shiftDate(vehicle.rentalJourney.startedAt, pausedFor), arrivesAt: shiftDate(vehicle.rentalJourney.arrivesAt, pausedFor) } : undefined,
-        serviceTrip: vehicle.serviceTrip ? { ...vehicle.serviceTrip, startedAt: shiftDate(vehicle.serviceTrip.startedAt, pausedFor), arrivesAt: shiftDate(vehicle.serviceTrip.arrivesAt, pausedFor) } : undefined,
-      })),
-      drivers: state.drivers.map((driver) => ({ ...driver, missedShiftUntil: shift(driver.missedShiftUntil) })),
-      driverCandidates: state.driverCandidates.map((candidate) => ({ ...candidate, expiresAt: shiftDate(candidate.expiresAt, pausedFor) })),
-      goals: state.goals.map((goal) => ({ ...goal, expiresAt: shiftDate(goal.expiresAt, pausedFor) })),
-      loans: state.loans.map((loan) => ({ ...loan, nextPaymentAt: shiftDate(loan.nextPaymentAt, pausedFor) })),
-      financialTransactions: state.financialTransactions.map((entry) => ({ ...entry, occurredAt: shiftDate(entry.occurredAt, pausedFor) })),
-      activeEvent: state.activeEvent ? { ...state.activeEvent, expiresAt: shiftDate(state.activeEvent.expiresAt, pausedFor) } : null,
-      nextEventAt: shiftDate(state.nextEventAt, pausedFor),
-      nextOperatingPaymentAt: shiftDate(state.nextOperatingPaymentAt, pausedFor),
-      updatedAt: new Date().toISOString(),
-    }
+    // Keep absolute deadlines unchanged. tickJobs runs immediately after this
+    // action and deterministically catches up everything that finished while
+    // the WebView was suspended or force-closed.
+    return { pausedAt: null, updatedAt: new Date().toISOString() }
   }),
   refreshJobs: async () => {
     const state = useGameStore.getState()
@@ -140,10 +116,24 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   tickJobs: () => set((state) => {
     if (!state.company) return state
     const now = Date.now()
-    const jobs = state.jobs.filter((job) => job.status !== 'offered' || jobOfferExpiresAt(job) > now)
-    const result = completeArrivedJobsState(state.company, jobs, state.vehicles, now)
+    const activeVehicleIds = new Set(state.jobs.filter((job) => job.status === 'accepted' && job.assignedVehicleId).map((job) => job.assignedVehicleId!))
+    const knownVehicleIds = new Set(state.vehicles.map((vehicle) => vehicle.id))
+    // Repair interrupted/corrupt lifecycle transitions before settling time.
+    // An orphaned job is offered again; a vehicle with active work is always
+    // restored to the matching moving status.
+    const jobs = state.jobs
+      .map((job) => job.status === 'accepted' && (!job.assignedVehicleId || !knownVehicleIds.has(job.assignedVehicleId))
+        ? { ...job, status: 'offered' as const, assignedVehicleId: undefined, acceptedAt: undefined, offeredAt: new Date(now).toISOString() }
+        : job)
+      .filter((job) => job.status !== 'offered' || jobOfferExpiresAt(job) > now)
+    const reconciledVehicles = state.vehicles.map((vehicle) => {
+      if (vehicle.serviceTrip) return { ...vehicle, status: 'maintenance' as const }
+      if (vehicle.postalRoute || vehicle.rentalJourney || activeVehicleIds.has(vehicle.id)) return { ...vehicle, status: 'on-job' as const }
+      return vehicle.status === 'on-job' ? { ...vehicle, status: 'available' as const } : vehicle
+    })
+    const result = completeArrivedJobsState(state.company, jobs, reconciledVehicles, now)
     let company = result?.company ?? state.company
-    let vehicles = result?.vehicles ?? state.vehicles
+    let vehicles = result?.vehicles ?? reconciledVehicles
     let drivers = state.drivers
     let financialTransactions = state.financialTransactions ?? []
     if (result) {

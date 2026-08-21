@@ -54,6 +54,18 @@ roams real roads around the city without displaying a route line. Each rental
 returns to the branch after a short trip and adds revenue, mileage, energy use,
 condition wear, and electric-battery wear to the existing fleet lifecycle.
 
+## Build an empire
+
+Company progression now opens five connected management systems. At level 2,
+players can establish branches across Ireland and switch the live command map
+between cities. Level 3 unlocks local travel agencies, player-created sightseeing
+tours, and automatic tour dispatch. Dedicated 32-seat hybrid tour buses can be
+purchased directly from the Travel screen, while 48-seat coaches serve scheduled
+intercity routes. An operations manager can automatically accept taxi work
+above a configurable minimum fare. Rotating airport, postal, and tourism contracts
+offer milestone rewards, and each company can choose a permanent mobility,
+tourism, logistics, or sustainability specialization.
+
 ## Android
 
 The native project is generated from the Capacitor configuration after dependencies are installed:
@@ -83,7 +95,7 @@ pnpm build
 
 ## Current milestone
 
-The game includes the first-time city flow, local autosave, starter company, fleet purchasing, map base marker, HUD, and navigable game sections. When a taxi becomes available, a locally generated taxi call is requested immediately, with at most one open call per available taxi; there is no periodic polling timer. Each available taxi can take its own metered fare, calculated from the passenger's actual journey distance. Completed jobs earn reputation, with every 50 reputation advancing the company one level. Level 1 journeys start at 6 km and are capped at 10 km with one vehicle, 15 km with two, and 20 km with three or more; after level 1, every level unlocks another 20 km of job range without an artificial distance cap, eventually opening the whole country. Every taxi remains visible on the map; when dispatched it drives from its current position to the pickup before continuing to the destination at eight times real-world speed, so the trip takes an eighth of its estimated real-world time. With a Mapbox token these routes use `driving-traffic`, so they follow drivable roads and current traffic-aware restrictions rather than drawing straight lines. Travel agencies and multiple save-slot UI are reserved for future milestones. The IndexedDB save schema uses a named `autosave` key so additional slots can be introduced without replacing the persistence layer.
+The game includes the first-time city flow, local autosave, starter company, fleet purchasing, map base marker, HUD, and navigable game sections. When a taxi becomes available, a locally generated taxi call is requested immediately, with at most one open call per available taxi; there is no periodic polling timer. Each available taxi can take its own metered fare, calculated from the passenger's actual journey distance. Completed jobs earn reputation, with every 50 reputation advancing the company one level. Level 1 journeys start at 6 km and are capped at 10 km with one vehicle, 15 km with two, and 20 km with three or more; after level 1, every level unlocks another 20 km of job range without an artificial distance cap, eventually opening the whole country. Every taxi remains visible on the map; when dispatched it drives from its current position to the pickup before continuing to the destination at eight times real-world speed, so the trip takes an eighth of its estimated real-world time. With a Mapbox token these routes use `driving-traffic`, so they follow drivable roads and current traffic-aware restrictions rather than drawing straight lines. Multiple save-slot UI is reserved for a future milestone. The IndexedDB save schema uses a named `autosave` key so additional slots can be introduced without replacing the persistence layer.
 
 Vehicle lifecycle management now tracks odometer mileage, age-based depreciation, lifetime revenue and expenses, escalating high-mileage service costs, major-service intervals, manufacturer warranty status, and electric-battery health. The Fleet screen estimates market value, net return, and replacement recommendations for every vehicle. A dedicated Financials tab records income and expenses in an on-device ledger, with cash flow, operating profit, category breakdowns, fleet value, debt, net worth, and recent transactions.
 

@@ -13,7 +13,7 @@ import { getJobJourney, jobOfferExpiresAt } from './services/jobEngine'
 export default function App() {
   const game = useGameStore()
 
-  const { company, addRandomJob, pauseGame, resumeGame, tickJobs } = game
+  const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, acceptJob, hasHydrated } = game
 
   const availableVehicleCount = game.vehicles.filter(
     (vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available' && vehicle.driverId,
@@ -112,6 +112,8 @@ export default function App() {
                   vehicle.serviceTrip.arrivesAt,
                 ).getTime(),
               ]
+            : vehicle.scheduledJourney
+            ? [new Date(vehicle.scheduledJourney.arrivesAt).getTime()]
             : vehicle.rentalJourney
             ? [new Date(vehicle.rentalJourney.arrivesAt).getTime()]
             : [],
@@ -247,6 +249,13 @@ export default function App() {
     }
   }, [company, game.hasHydrated, tickJobs])
 
+  /** Let a hired branch manager dispatch qualifying calls for larger fleets. */
+  useEffect(() => {
+    if (!automation?.enabled || !company || !hasHydrated) return
+    const offer = jobs.find((job) => job.status === 'offered' && job.fare >= automation.minFare)
+    if (offer) acceptJob(offer.id)
+  }, [company, automation, hasHydrated, jobs, acceptJob])
+
   if (!game.hasHydrated) {
     return (
       <div className="loading">
@@ -258,7 +267,7 @@ export default function App() {
   return (
     <div className="game-shell">
       <GameMap
-        cityId={game.startingCityId}
+        cityId={game.activeCityId ?? game.startingCityId}
         vehicles={game.vehicles}
         jobs={game.jobs}
         focusedJobId={game.focusedJobId}
@@ -310,6 +319,15 @@ export default function App() {
                 goals={game.goals}
                 jobs={game.jobs}
                 loans={game.loans}
+                company={game.company}
+                activeCityId={game.activeCityId ?? game.startingCityId!}
+                branches={game.branches ?? []}
+                agencies={game.agencies ?? []}
+                tours={game.tours ?? []}
+                coachRoutes={game.coachRoutes ?? []}
+                contracts={game.contracts ?? []}
+                specialization={game.specialization}
+                automation={game.automation}
                 cash={game.company.cash}
                 onClose={() =>
                   game.setSection('map')
@@ -321,6 +339,18 @@ export default function App() {
                 onStartPostalRoute={game.startPostalRoute}
                 onBuyRentalCar={game.buyRentalCar}
                 onStartRental={game.startRental}
+                onOpenBranch={game.openBranch}
+                onSwitchCity={game.switchCity}
+                onOpenAgency={game.openAgency}
+                onCreateTour={game.createTour}
+                onDispatchTour={game.dispatchTour}
+                onBuyTourBus={game.buyTourBus}
+                onBuyCoach={game.buyCoach}
+                onCreateCoachRoute={game.createCoachRoute}
+                onDispatchCoach={game.dispatchCoach}
+                onSetAutomation={game.setAutomation}
+                onAcceptContract={game.acceptContract}
+                onChooseSpecialization={game.chooseSpecialization}
                 onTakeLoan={game.takeLoan}
                 onSellVehicle={game.sellVehicle}
                 onSetDriverShift={

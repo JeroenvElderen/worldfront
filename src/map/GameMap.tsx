@@ -62,6 +62,10 @@ const vehicleColor = {
 
 const VEHICLE_MARKER_RADIUS = 4
 const VEHICLE_MARKER_STROKE_WIDTH = 1.5
+// Android WebViews can throttle requestAnimationFrame when Mapbox has no
+// camera animation in progress. Drive live taxi updates from a short timer so
+// an accepted taxi keeps moving even while the map itself is otherwise idle.
+const LIVE_JOURNEY_UPDATE_INTERVAL_MS = 100
 // A fleet index is not a stable identity: buying or selling another vehicle can
 // change which vehicle an existing indexed source represents. Key map sources by
 // the persisted vehicle id so dispatch always animates the vehicle assigned to
@@ -110,7 +114,7 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
     pickupJobIds.current.clear()
     pickupHandlers.current.clear()
     currentLiveJobIds.clear()
-    currentLiveJobTimers.forEach(window.cancelAnimationFrame)
+    currentLiveJobTimers.forEach(window.clearTimeout)
     currentLiveJobTimers.clear()
     currentLiveJobRunners.clear()
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
@@ -300,7 +304,7 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
       if (document.visibilityState === 'hidden') {
         animationTimers.forEach(window.cancelAnimationFrame)
         animationTimers.clear()
-        currentLiveJobTimers.forEach(window.cancelAnimationFrame)
+        currentLiveJobTimers.forEach(window.clearTimeout)
         currentLiveJobTimers.clear()
         instance.stop()
         return
@@ -317,7 +321,7 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
     return () => {
       abortController.abort()
       animationTimers.forEach(window.cancelAnimationFrame)
-      currentLiveJobTimers.forEach(window.cancelAnimationFrame)
+      currentLiveJobTimers.forEach(window.clearTimeout)
       currentLiveJobTimers.clear()
       currentLiveJobRunners.clear()
       currentLiveJobIds.clear()
@@ -469,7 +473,7 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
         if (map.current !== instance || !instance.getSource(taxiSourceId)) return
         const timer = liveJobTimers.current.get(job.id)
         if (timer !== undefined) {
-          window.cancelAnimationFrame(timer)
+          window.clearTimeout(timer)
           liveJobTimers.current.delete(job.id)
         }
         const now = Date.now()
@@ -484,8 +488,11 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
         const passengerSource = instance.getSource(passengerSourceId) as mapboxgl.GeoJSONSource | undefined
         // The halo waits at pickup, then rides with the passenger's vehicle.
         passengerSource?.setData(point(pickingUp ? job.pickup : currentPosition, { title: job.pickupLabel }))
+        // setData normally schedules a render, but explicitly waking Mapbox is
+        // necessary on some idle Android WebViews.
+        instance.triggerRepaint()
         if (now < journey.arrivesAt && document.visibilityState !== 'hidden') {
-          liveJobTimers.current.set(job.id, window.requestAnimationFrame(animate))
+          liveJobTimers.current.set(job.id, window.setTimeout(animate, LIVE_JOURNEY_UPDATE_INTERVAL_MS))
         } else if (now >= journey.arrivesAt) {
           liveJobRunners.current.delete(job.id)
         }
@@ -504,7 +511,7 @@ function GameMapView({ cityId, customCities, vehicles, jobs, focusedJobId, onOpe
       const sourceId = vehicleSourceId(vehicle.id)
       const taxiSource = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined
       const timer = liveJobTimers.current.get(job.id)
-      if (timer !== undefined) window.cancelAnimationFrame(timer)
+      if (timer !== undefined) window.clearTimeout(timer)
       liveJobTimers.current.delete(job.id)
       liveJobRunners.current.delete(job.id)
       liveJobIds.current.delete(job.id)

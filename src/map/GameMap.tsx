@@ -7,6 +7,7 @@ import { getCity, irelandOverview } from '../data/cities'
 import type { Coordinates, TaxiJob, Vehicle } from '../models/game'
 import { getJobJourney } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
+import { rentalJourneyProgress } from '../services/rentalEngine'
 
 interface GameMapProps { cityId: string | null; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; onOpenJob: (jobId: string) => void }
 const token = mapboxAccessToken
@@ -83,6 +84,7 @@ const vehicleColor = {
   carryingPassenger: '#ef4444',
   maintenance: '#64748b',
   postal: '#ec4899',
+  rental: '#8b5cf6',
 } as const
 
 function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMapProps) {
@@ -96,7 +98,7 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
   const [mapRevision, setMapRevision] = useState(0)
   // Job changes are applied to the existing WebGL map by the synchronization
   // effects below. In particular, accepting a call must never recreate the map.
-  const fleetConfigurationKey = vehicles.map((vehicle) => `${vehicle.id}:${vehicle.modelId}:${(vehicle.exteriorAccessories ?? []).join(',')}:${vehicle.serviceTrip?.startedAt ?? ''}:${vehicle.postalRoute?.startedAt ?? ''}`).join('|')
+  const fleetConfigurationKey = vehicles.map((vehicle) => `${vehicle.id}:${vehicle.modelId}:${(vehicle.exteriorAccessories ?? []).join(',')}:${vehicle.serviceTrip?.startedAt ?? ''}:${vehicle.postalRoute?.startedAt ?? ''}:${vehicle.rentalJourney?.startedAt ?? ''}`).join('|')
 
   useEffect(() => {
     if (!container.current) return
@@ -141,6 +143,31 @@ function GameMapView({ cityId, vehicles, jobs, focusedJobId, onOpenJob }: GameMa
         const job = jobs.find((candidate) => candidate.status === 'accepted' && (candidate.assignedVehicleId === vehicle.id || (!candidate.assignedVehicleId && vehicle.status === 'on-job')))
         const start = vehicle.position ?? selected?.coordinates
         if (!start) continue
+        if (vehicle.rentalJourney) {
+          const rental = vehicle.rentalJourney
+          const sourceId = `rental-${vehicle.id}`
+          let roadCoordinates: number[][] = rental.waypoints
+          if (token) {
+            try {
+              const waypoints = rental.waypoints.map((coordinate) => coordinate.join(',')).join(';')
+              const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${waypoints}?geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
+              if (response.ok) {
+                const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] } }> }
+                roadCoordinates = result.routes?.[0]?.geometry.coordinates ?? roadCoordinates
+              }
+            } catch (error) { if ((error as Error).name === 'AbortError') return }
+          }
+          instance.addSource(sourceId, { type: 'geojson', data: point(routePosition(roadCoordinates, rentalJourneyProgress(rental))) })
+          instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': 7, 'circle-color': vehicleColor.rental, 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
+          let rentalTimer: number | undefined
+          const animateRental = () => {
+            if (rentalTimer !== undefined) animationTimers.delete(rentalTimer)
+            const progress = rentalJourneyProgress(rental)
+            ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(roadCoordinates, progress)))
+            if (progress < 1 && document.visibilityState !== 'hidden') { rentalTimer = window.setTimeout(animateRental, JOURNEY_UPDATE_INTERVAL_MS); animationTimers.add(rentalTimer) }
+          }
+          animationRunners.add(animateRental); animateRental(); continue
+        }
         if (vehicle.postalRoute) {
           const postal = vehicle.postalRoute
           const sourceId = `taxi-${index}`

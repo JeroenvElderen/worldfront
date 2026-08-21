@@ -111,6 +111,8 @@ export default function App() {
                   vehicle.serviceTrip.arrivesAt,
                 ).getTime(),
               ]
+            : vehicle.rentalJourney
+            ? [new Date(vehicle.rentalJourney.arrivesAt).getTime()]
             : [],
         ),
       )
@@ -290,6 +292,8 @@ export default function App() {
                 onLeaseTaxi={game.leaseTaxi}
                 onBuyPostVehicle={game.buyPostVehicle}
                 onStartPostalRoute={game.startPostalRoute}
+                onBuyRentalCar={game.buyRentalCar}
+                onStartRental={game.startRental}
                 onTakeLoan={game.takeLoan}
                 onSellVehicle={game.sellVehicle}
                 onSetDriverShift={

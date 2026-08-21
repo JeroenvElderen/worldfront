@@ -46,6 +46,14 @@ larger rewards and energy costs. Finishing a round earns cash and reputation,
 and the van can then be dispatched again; unlike taxis, postal vehicles do not
 wait for individual customer job offers.
 
+## Car rentals
+
+The Travel screen includes a self-drive rental branch. Rental cars need no hired
+driver: buy a car, rent it to a customer, and its purple marker automatically
+roams real roads around the city without displaying a route line. Each rental
+returns to the branch after a short trip and adds revenue, mileage, energy use,
+condition wear, and electric-battery wear to the existing fleet lifecycle.
+
 ## Android
 
 The native project is generated from the Capacitor configuration after dependencies are installed:

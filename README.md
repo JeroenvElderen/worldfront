@@ -131,3 +131,12 @@ service-radius, fleet-capacity, maintenance, energy, resale, and station-network
 improvements.
 
 Fleet operations now track energy and driver fatigue. A taxi that runs low automatically drives to a fuel or charging station; a tired driver takes the taxi home to rest, with both recovery journeys shown on the map. Players can select day or night shifts in Fleet. The Company screen offers interest-bearing loans, while the dealership supports vehicle leasing and owned vehicles can be sold at a condition-adjusted value. The HUD shows an accelerated calendar and clock, advancing one game minute per real second. Recurring driver, lease, and loan payments are collected at the start of each game month. Timed city events create temporary fare and energy-use modifiers and are announced above the map.
+
+The company Market center adds AI competitors with configurable aggression,
+market share, partnerships, and acquisitions. Live rain, snow, storms, heat and
+transport disruptions alter demand and operations, while poorly maintained
+vehicles can require paid roadside recovery. Drivers now build careers through
+experience, morale, trip records and specialist certifications; passengers build
+loyalty across repeat journeys. Players can also choose a brand color, fare
+position and timed marketing campaign, and configure departure time and frequency
+for coach, rail, ferry and airline routes.

@@ -311,6 +311,13 @@ export default function App() {
               </span>
             </aside>
           )}
+          {game.worldCondition && game.worldCondition.weather !== 'clear' && (
+            <aside className="weather-chip" title={game.worldCondition.description}>
+              <span>{game.worldCondition.weather === 'rain' ? '🌧️' : game.worldCondition.weather === 'snow' ? '🌨️' : game.worldCondition.weather === 'storm' ? '⛈️' : '🌡️'}</span>
+              <b>{game.worldCondition.temperatureC}° · {game.worldCondition.weather}</b>
+              {game.worldCondition.disruption !== 'none' && <small>{game.worldCondition.disruption.replace('-', ' ')}</small>}
+            </aside>
+          )}
 
           {game.activeSection === 'jobs' && (
             <TaxiCallPopup
@@ -400,6 +407,19 @@ export default function App() {
                 onToggleAccessory={
                   game.toggleExteriorAccessory
                 }
+                competitors={game.competitors ?? []}
+                difficulty={game.difficulty}
+                worldCondition={game.worldCondition}
+                incidents={game.incidents ?? []}
+                brandStrategy={game.brandStrategy}
+                onSetDifficulty={game.setDifficulty}
+                onSetBrandStrategy={game.setBrandStrategy}
+                onLaunchMarketing={game.launchMarketing}
+                onPartnerCompetitor={game.partnerCompetitor}
+                onAcquireCompetitor={game.acquireCompetitor}
+                onTrainDriver={game.trainDriver}
+                onResolveIncident={game.resolveIncident}
+                onSetRouteTimetable={game.setRouteTimetable}
               />
             )}
 

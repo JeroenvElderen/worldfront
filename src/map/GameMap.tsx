@@ -502,14 +502,15 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
 
       liveJobIds.current.add(job.id)
       const journey = getJobJourney(job, vehicle)
-      let pickupRoute: number[][] = [start, jobPickup(job)]
-      let passengerRoute: number[][] = [jobPickup(job), jobDestination(job)]
+      let pickupRoute: RouteDetails = { coordinates: [start, jobPickup(job)], speedLimits: [] }
+      let passengerRoute: RouteDetails = { coordinates: [jobPickup(job), jobDestination(job)], speedLimits: [] }
       if (token) {
         const fetchRoute = async (from: Coordinates, to: Coordinates) => {
-          const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?continue_straight=true&geometries=geojson&overview=full&access_token=${token}`)
+          const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?annotations=maxspeed&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`)
           if (!response.ok) throw new Error(`Directions request failed: ${response.status}`)
-          const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] } }> }
-          return result.routes?.[0]?.geometry.coordinates
+          const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] }; legs: Array<{ annotation?: { maxspeed?: RouteSpeedLimit[] } }> }> }
+          const route = result.routes?.[0]
+          return route && { coordinates: route.geometry.coordinates, speedLimits: route.legs.flatMap((leg) => leg.annotation?.maxspeed ?? []) }
         }
         void Promise.all([fetchRoute(start, jobPickup(job)), fetchRoute(jobPickup(job), jobDestination(job))])
           .then(([toPickup, toDestination]) => {
@@ -532,8 +533,10 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
         const from = pickingUp ? journey.departsAt : journey.pickupAt
         const to = pickingUp ? journey.pickupAt : journey.arrivesAt
         const route = pickingUp ? pickupRoute : passengerRoute
-        const progress = Math.max(0, Math.min(1, (now - from) / (to - from)))
-        const currentPosition = routePosition(route, progress)
+        const elapsed = Math.max(0, Math.min(1, (now - from) / (to - from)))
+        const fallbackSpeedKmh = job.durationMinutes > 0 ? job.distanceKm / (job.durationMinutes / 60) : 30
+        const progress = routeMotion(route, elapsed, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130).progress
+        const currentPosition = routePosition(route.coordinates, progress)
         ;(instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(point(currentPosition))
         instance.setPaintProperty(taxiSourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
         const passengerSource = instance.getSource(passengerSourceId) as mapboxgl.GeoJSONSource | undefined

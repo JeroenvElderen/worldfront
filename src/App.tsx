@@ -13,6 +13,7 @@ import { getJobJourney, jobOfferExpiresAt } from './services/jobEngine'
 import { fleetSlotCapacity, maxJobDistanceForFleet } from './services/companyProgression'
 import { hasResearch } from './services/research'
 import { getTaxiModel } from './data/taxis'
+import { jobOfferCapacity } from './services/earlyGameEngine'
 
 export default function App() {
   const game = useGameStore()
@@ -25,9 +26,7 @@ export default function App() {
 
   const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, acceptJob, hasHydrated } = game
 
-  const availableVehicleCount = game.vehicles.filter(
-    (vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available' && vehicle.driverId,
-  ).length
+  const availableOfferCapacity = jobOfferCapacity(game.vehicles, game.drivers)
 
   const offeredJobCount = game.jobs.filter(
     (job) => job.status === 'offered',
@@ -44,16 +43,14 @@ export default function App() {
 
       const state = useGameStore.getState()
 
-      const available = state.vehicles.filter(
-        (vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available' && vehicle.driverId,
-      ).length
+      const availableOffers = jobOfferCapacity(state.vehicles, state.drivers)
 
       const offered = state.jobs.filter(
         (job) => job.status === 'offered',
       ).length
 
-      // Keep at most one open offer per available taxi.
-      if (available > offered) {
+      // Smart roof signs attract an additional request for their taxi.
+      if (availableOffers > offered) {
         void addRandomJob()
       }
     }
@@ -73,7 +70,7 @@ export default function App() {
     }
   }, [
     company,
-    availableVehicleCount,
+    availableOfferCapacity,
     offeredJobCount,
     addRandomJob,
     game.hasHydrated,
@@ -364,6 +361,7 @@ export default function App() {
                 onReset={game.resetGame}
                 onBuyTaxi={game.buyTaxi}
                 onLeaseTaxi={game.leaseTaxi}
+                onFinanceTaxi={game.financeTaxi}
                 onUpgradeGarage={game.upgradeGarage}
                 onBuyPostVehicle={game.buyPostVehicle}
                 onStartPostalRoute={game.startPostalRoute}

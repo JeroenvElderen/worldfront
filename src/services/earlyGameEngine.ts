@@ -13,11 +13,18 @@ export const driverTraitDetails: Record<DriverTrait, { label: string; descriptio
 export const upgradeDetails: Record<VehicleUpgrade, { label: string; description: string; price: number }> = {
   'eco-tires': { label: 'Eco tires', description: '10% less energy use.', price: 900 },
   'premium-seats': { label: 'Premium seats', description: 'Improves passenger satisfaction.', price: 1_400 },
-  'range-pack': { label: 'Range pack', description: 'Reduces displayed energy use by 15%.', price: 2_200 },
+  'range-pack': { label: 'Range pack', description: 'Uses 15% less fuel or electricity.', price: 2_200 },
   'meter-pro': { label: 'Meter Pro', description: 'Adds 8% to taxi fares.', price: 1_800 },
-  'roof-sign': { label: 'Smart roof sign', description: 'Improves job visibility.', price: 700 },
+  'roof-sign': { label: 'Smart roof sign', description: 'Keeps one extra passenger request visible while this taxi is available.', price: 700 },
   'parcel-shelving': { label: 'Parcel shelving', description: 'Adds 15% to postal rewards.', price: 1_200 },
-  'dash-camera': { label: 'Dash camera', description: 'Reduces wear from incidents.', price: 650 },
+  'dash-camera': { label: 'Dash camera', description: 'Reduces vehicle wear by 10%.', price: 650 },
+}
+
+/** Prevent upgrades from being sold to vehicle types that cannot benefit from them. */
+export function upgradeAppliesToVehicle(upgrade: VehicleUpgrade, vehicle: Vehicle) {
+  if (upgrade === 'meter-pro' || upgrade === 'roof-sign' || upgrade === 'premium-seats') return vehicle.type === 'taxi'
+  if (upgrade === 'parcel-shelving') return vehicle.type === 'post'
+  return true
 }
 
 const names = ['Jamie Byrne', 'Róisín Kelly', 'Dara Murphy', 'Sam O’Connor', 'Aisha Khan', 'Luca Rossi', 'Éabha Walsh', 'Theo Martin']
@@ -68,6 +75,15 @@ export function categoryForRoute(pickup: string, destination: string, distanceKm
 export function vehicleCanTakeJob(vehicle: Vehicle, job: TaxiJob, partySize: number) {
   if (vehicle.capacity < partySize) return false
   return !job.requiredUpgrade || (vehicle.upgrades ?? []).includes(job.requiredUpgrade)
+}
+
+/** Available taxis normally surface one request; an equipped roof sign attracts one more. */
+export function jobOfferCapacity(vehicles: Vehicle[], drivers: Driver[]) {
+  return vehicles.reduce((capacity, vehicle) => {
+    const staffedAndAvailable = vehicle.type === 'taxi' && vehicle.status === 'available' && vehicle.driverId && drivers.some((driver) => driver.id === vehicle.driverId && driver.status === 'available')
+    if (!staffedAndAvailable) return capacity
+    return capacity + ((vehicle.upgrades ?? []).includes('roof-sign') ? 2 : 1)
+  }, 0)
 }
 
 export function calculateJobOutcome(job: TaxiJob, vehicle: Vehicle, driver?: Driver) {

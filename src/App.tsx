@@ -5,6 +5,7 @@ import { SectionSheet } from './components/game/SectionSheet'
 import { TopHud } from './components/game/TopHud'
 import { TaxiCallPopup } from './components/game/TaxiCallPopup'
 import { FinancialDashboard } from './components/game/FinancialDashboard'
+import { HotelDashboard } from './components/game/HotelDashboard'
 import { GameMap } from './map/GameMap'
 import { CitySetup } from './screens/CitySetup'
 import { useGameStore } from './stores/gameStore'
@@ -331,6 +332,7 @@ export default function App() {
 
           {game.activeSection !== 'map' &&
             game.activeSection !== 'jobs' &&
+            game.activeSection !== 'hotels' &&
             game.activeSection !== 'finance' && (
               <SectionSheet
                 section={game.activeSection}
@@ -409,6 +411,20 @@ export default function App() {
               debt={game.loans.reduce((sum, loan) => sum + loan.balance, 0)}
               transactions={game.financialTransactions ?? []}
               vehicles={game.vehicles}
+              onClose={() => game.setSection('map')}
+            />
+          )}
+
+          {game.activeSection === 'hotels' && (
+            <HotelDashboard
+              company={game.company}
+              activeCityId={game.activeCityId ?? game.startingCityId!}
+              customCities={game.customCities ?? []}
+              hotels={game.hotels ?? []}
+              economies={game.cityEconomies ?? []}
+              onBuy={game.buyHotel}
+              onUpgrade={game.upgradeHotel}
+              onCollect={game.collectHotelRevenue}
               onClose={() => game.setSection('map')}
             />
           )}

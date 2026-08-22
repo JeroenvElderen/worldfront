@@ -3,7 +3,9 @@ import type { Branch, DepotFacility } from '../models/game'
 export const BASE_JOB_DISTANCE_KM = 20
 export const JOB_DISTANCE_PER_LEVEL_KM = 20
 export const REPUTATION_PER_LEVEL = 50
-export const LEASING_UNLOCK_LEVEL = 5
+// Leasing is an early-game financing option: new companies should be able to
+// expand their starter fleet without first saving the full purchase price.
+export const LEASING_UNLOCK_LEVEL = 1
 export const FLEET_SLOTS_PER_LEVEL = 2
 export const GARAGE_UPGRADE_SLOTS = 3
 export const DEPOT_FACILITY_MAX_LEVEL = 3

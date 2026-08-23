@@ -411,7 +411,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   }),
   buyTaxi: (modelId) => set((state) => {
     const model = getTaxiModel(modelId)
-    if (!state.company || !state.startingCityId || state.company.cash < model.price || !hasFleetSlot(state)) return state
+    if (!state.company || !state.startingCityId || state.company.cash < model.price || !hasFleetSlot(state) || (model.exclusive && !hasResearch(state.completedResearch ?? [], 'exclusive-fleet'))) return state
     const city = getCity(state.activeCityId ?? state.startingCityId, state.customCities)
     if (!city) return state
     const modelNumber = state.vehicles.filter((vehicle) => vehicle.modelId === model.id).length + 1
@@ -420,7 +420,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   }),
   leaseTaxi: (modelId) => set((state) => {
     const model = getTaxiModel(modelId); const city = getCity(state.activeCityId ?? state.startingCityId, state.customCities)
-    if (!state.company || !city || state.company.level < LEASING_UNLOCK_LEVEL || state.company.cash < Math.round(model.price * 0.1) || !hasFleetSlot(state)) return state
+    if (!state.company || !city || state.company.level < LEASING_UNLOCK_LEVEL || state.company.cash < Math.round(model.price * 0.1) || !hasFleetSlot(state) || (model.exclusive && !hasResearch(state.completedResearch ?? [], 'exclusive-fleet'))) return state
     const taxi: Vehicle = { id: crypto.randomUUID(), name: `${model.brand} ${model.name} Lease`, type: 'taxi', modelId, powertrain: model.powertrain, exteriorAccessories: [], upgrades: [], refuelStrategy: 'automatic', value: model.price, ...newVehicleLifecycle(model.price), condition: 100, fuel: 100, capacity: model.capacity, topSpeedKmh: model.topSpeedKmh, status: 'available', cityId: city.id, position: city.coordinates, ownership: 'leased', leaseMonthlyCost: Math.round(model.price * 0.025), leasePaymentsRemaining: 36 }
     const deposit = Math.round(model.price * 0.1)
     return { company: { ...state.company, cash: state.company.cash - deposit }, vehicles: [...state.vehicles, taxi], financialTransactions: addTransactions(state.financialTransactions, transaction('vehicles', `Lease deposit: ${taxi.name}`, -deposit, taxi.id)), updatedAt: new Date().toISOString() }
@@ -428,7 +428,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set) => (
   financeTaxi: (modelId) => set((state) => {
     const model = getTaxiModel(modelId); const city = getCity(state.activeCityId ?? state.startingCityId, state.customCities)
     const deposit = Math.round(model.price * 0.1)
-    if (!state.company || !city || state.company.level < LEASING_UNLOCK_LEVEL || state.company.cash < deposit || !hasFleetSlot(state)) return state
+    if (!state.company || !city || state.company.level < LEASING_UNLOCK_LEVEL || state.company.cash < deposit || !hasFleetSlot(state) || (model.exclusive && !hasResearch(state.completedResearch ?? [], 'exclusive-fleet'))) return state
     const financeBalance = Math.round(model.price * 0.9 * 1.08)
     const taxi: Vehicle = { id: crypto.randomUUID(), name: `${model.brand} ${model.name} HP`, type: 'taxi', modelId, powertrain: model.powertrain, exteriorAccessories: [], upgrades: [], refuelStrategy: 'automatic', value: model.price, ...newVehicleLifecycle(model.price), condition: 100, fuel: 100, capacity: model.capacity, topSpeedKmh: model.topSpeedKmh, status: 'available', cityId: city.id, position: city.coordinates, ownership: 'financed', financeBalance, financeMonthlyCost: Math.ceil(financeBalance / 48), financePaymentsRemaining: 48 }
     return { company: { ...state.company, cash: state.company.cash - deposit }, vehicles: [...state.vehicles, taxi], financialTransactions: addTransactions(state.financialTransactions, transaction('vehicles', `Hire purchase deposit: ${taxi.name}`, -deposit, taxi.id)), updatedAt: new Date().toISOString() }

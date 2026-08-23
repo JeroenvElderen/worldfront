@@ -12,6 +12,7 @@ export interface TaxiModel {
   powertrain: TaxiPowertrain
   marker: string
   color: string
+  exclusive?: boolean
 }
 
 export const taxiModels: TaxiModel[] = [
@@ -25,6 +26,9 @@ export const taxiModels: TaxiModel[] = [
   { id: 'audi-a6-avant', brand: 'Audi', name: 'A6 Avant', price: 42_000, capacity: 4, topSpeedKmh: 250, logoUrl: 'https://cdn.simpleicons.org/audi/eaf7f4', description: 'Executive estate with luggage room', powertrain: 'diesel', marker: 'A', color: '#64748b' },
   { id: 'bmw-i5', brand: 'BMW', name: 'i5', price: 48_000, capacity: 4, topSpeedKmh: 193, logoUrl: 'https://cdn.simpleicons.org/bmw/eaf7f4', description: 'Electric executive saloon', powertrain: 'electric', marker: 'B', color: '#2563eb' },
   { id: 'mercedes-v-class', brand: 'Mercedes-Benz', name: 'V-Class', price: 52_000, capacity: 7, topSpeedKmh: 190, logoUrl: 'https://cdn.simpleicons.org/mercedes/eaf7f4', description: 'Premium airport people carrier', powertrain: 'diesel', marker: 'M', color: '#475569' },
+  { id: 'audi-rs6', brand: 'Audi', name: 'RS6 Avant', price: 145_000, capacity: 4, topSpeedKmh: 400, logoUrl: 'https://cdn.simpleicons.org/audi/eaf7f4', description: 'Research-exclusive super estate · 2× trip speed', powertrain: 'hybrid', marker: 'R', color: '#fbbf24', exclusive: true },
+  { id: 'bmw-m5', brand: 'BMW', name: 'M5 Touring', price: 155_000, capacity: 4, topSpeedKmh: 386, logoUrl: 'https://cdn.simpleicons.org/bmw/eaf7f4', description: 'Research-exclusive performance touring · 2× trip speed', powertrain: 'hybrid', marker: 'M', color: '#60a5fa', exclusive: true },
+  { id: 'mercedes-amg-gt', brand: 'Mercedes-AMG', name: 'GT 63 S', price: 175_000, capacity: 4, topSpeedKmh: 480, logoUrl: 'https://cdn.simpleicons.org/mercedes/eaf7f4', description: 'Research-exclusive flagship · 2× trip speed', powertrain: 'hybrid', marker: 'G', color: '#e5e7eb', exclusive: true },
 ]
 
 // Keep models from older saves identifiable without continuing to offer them in the dealership.
@@ -34,3 +38,4 @@ const legacyTaxiModels: TaxiModel[] = [
 ]
 
 export const getTaxiModel = (id: string) => [...taxiModels, ...legacyTaxiModels].find((taxi) => taxi.id === id || taxi.powertrain === id) ?? taxiModels[0]
+export const isExclusiveTaxi = (modelId?: string) => Boolean(modelId && getTaxiModel(modelId).exclusive)

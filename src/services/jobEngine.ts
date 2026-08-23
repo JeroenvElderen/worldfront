@@ -1,5 +1,6 @@
 import type { Company, TaxiJob, Vehicle } from '../models/game'
 import { addReputation, levelForReputation } from './companyProgression'
+import { isExclusiveTaxi } from '../data/taxis'
 
 export const MAX_JOB_OFFERS = 6
 export const JOB_OFFER_DURATION_MS = 5 * 60_000
@@ -33,6 +34,7 @@ export const taxiFareForDistance = (distanceKm: number) =>
 
 /** Stable journey timings keep a trip in the same place across map reloads. */
 export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {
+  const speedMultiplier = isExclusiveTaxi(vehicle.modelId) ? 2 : 1
   const acceptedAt = job.acceptedAt ? new Date(job.acceptedAt).getTime() : Date.now()
   const departsAt = acceptedAt + JOB_DISPATCH_DELAY_MS
   const start = vehicle.position ?? job.pickup
@@ -41,8 +43,8 @@ export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {
   const pickupMinutes = job.distanceKm > 0
     ? pickupDistanceKm * job.durationMinutes / job.distanceKm
     : 0
-  const pickupDurationMs = Math.max(2_000, pickupMinutes * SIMULATED_MINUTE_MS * (job.pickupTimeMultiplier ?? 1))
-  const passengerDurationMs = Math.max(5_000, job.durationMinutes * SIMULATED_MINUTE_MS)
+  const pickupDurationMs = Math.max(2_000, pickupMinutes * SIMULATED_MINUTE_MS * (job.pickupTimeMultiplier ?? 1) / speedMultiplier)
+  const passengerDurationMs = Math.max(5_000, job.durationMinutes * SIMULATED_MINUTE_MS / speedMultiplier)
   return {
     acceptedAt,
     departsAt,

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Capacitor } from '@capacitor/core'
 import { BottomNav } from './components/game/BottomNav'
 import { SectionSheet } from './components/game/SectionSheet'
 import { TopHud } from './components/game/TopHud'
@@ -24,7 +23,7 @@ export default function App() {
   const researchFleetSlots = (hasResearch(game.completedResearch ?? [], 'autonomous-operations') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'global-network') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'regional-hubs') ? game.branches.length : 0)
   const stationFleetFull = game.vehicles.length >= fleetSlotCapacity(game.company?.level ?? 1, game.garageLevel ?? 0, game.branches) + researchFleetSlots
 
-  const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, acceptJob, hasHydrated } = game
+  const { company, addRandomJob, resumeGame, tickJobs, automation, jobs, acceptJob, hasHydrated } = game
 
   const availableOfferCapacity = jobOfferCapacity(game.vehicles, game.drivers)
 
@@ -180,20 +179,22 @@ export default function App() {
     tickJobs,
   ])
 
-  /** Pause native mobile games while the app is in the background. */
+  /**
+   * Settle wall-clock deadlines whenever the app returns to the foreground.
+   *
+   * Mobile operating systems suspend WebView timers in the background, so the
+   * simulation cannot depend on an interval continuing to fire. Game journeys
+   * use absolute timestamps instead: on resume, one tick catches up everything
+   * that elapsed while the app was suspended or closed.
+   */
   useEffect(() => {
     if (!company || !game.hasHydrated) return
 
     const handleVisibilityChange = () => {
-      if (Capacitor.isNativePlatform() && document.visibilityState === 'hidden') {
-        pauseGame()
-        return
-      }
-
       if (document.visibilityState === 'hidden') return
 
-      // Clear the persisted pause marker, then settle every deadline that
-      // elapsed while the native WebView was suspended.
+      // Clear pause markers left by older saves, then settle every deadline
+      // that elapsed while the native WebView was suspended.
       resumeGame()
       tickJobs()
     }
@@ -233,7 +234,7 @@ export default function App() {
         handleVisibilityChange,
       )
     }
-  }, [company, game.hasHydrated, pauseGame, resumeGame, tickJobs])
+  }, [company, game.hasHydrated, resumeGame, tickJobs])
 
   /**
    * A small foreground watchdog makes lifecycle recovery self-healing. Mobile

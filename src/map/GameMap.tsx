@@ -25,6 +25,14 @@ const routePosition = (coordinates: number[][], progress: number): Coordinates =
   return [start[0] + (end[0] - start[0]) * amount, start[1] + (end[1] - start[1]) * amount]
 }
 
+const remainingRouteCoordinates = (coordinates: number[][], progress: number): number[][] => {
+  const lengths = coordinates.slice(1).map((coordinate, index) => Math.hypot(coordinate[0] - coordinates[index][0], coordinate[1] - coordinates[index][1]))
+  let target = Math.max(0, Math.min(1, progress)) * lengths.reduce((sum, length) => sum + length, 0)
+  let segment = 0
+  while (segment < lengths.length - 1 && target > lengths[segment]) target -= lengths[segment++]
+  return [routePosition(coordinates, progress), ...coordinates.slice(segment + 1)]
+}
+
 // Keep moving markers synchronized with the browser's paint cycle. Calculating
 // their position from the current time (rather than accumulating frame deltas)
 // also lets a journey resume at the exact right point after a background pause.
@@ -75,6 +83,34 @@ const vehicleSourceId = (vehicleId: string) => `vehicle-${vehicleId}`
 const missionColor = (jobId: string) => {
   const hash = [...jobId].reduce((value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0, 0)
   return `hsl(${hash % 360}, 100%, 60%)`
+}
+const jobRouteSourceId = (jobId: string) => `job-route-${jobId}`
+
+const updateJobRoute = (instance: mapboxgl.Map, jobId: string, coordinates: number[][], progress: number, beforeLayerId: string) => {
+  const sourceId = jobRouteSourceId(jobId)
+  const data = lineString(remainingRouteCoordinates(coordinates, progress))
+  const source = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined
+  if (source) {
+    source.setData(data)
+    return
+  }
+  instance.addSource(sourceId, { type: 'geojson', data })
+  instance.addLayer({
+    id: sourceId,
+    type: 'line',
+    source: sourceId,
+    paint: {
+      'line-color': missionColor(jobId),
+      'line-width': 3,
+      'line-opacity': .78,
+    },
+  }, instance.getLayer(beforeLayerId) ? beforeLayerId : undefined)
+}
+
+const removeJobRoute = (instance: mapboxgl.Map, jobId: string) => {
+  const sourceId = jobRouteSourceId(jobId)
+  if (instance.getLayer(sourceId)) instance.removeLayer(sourceId)
+  if (instance.getSource(sourceId)) instance.removeSource(sourceId)
 }
 
 function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles, jobs, focusedJobId, placingStation, onBuildStation, onOpenJob }: GameMapProps) {
@@ -313,6 +349,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
           const motion = routeMotion(activeRoute, elapsed, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
           const progress = motion.progress
           const currentPosition = routePosition(activeRoute.coordinates, progress)
+          updateJobRoute(instance, job.id, activeRoute.coordinates, progress, sourceId)
           ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(currentPosition))
           instance.setPaintProperty(sourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
           if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
@@ -537,6 +574,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
         const fallbackSpeedKmh = job.durationMinutes > 0 ? job.distanceKm / (job.durationMinutes / 60) : 30
         const progress = routeMotion(route, elapsed, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130).progress
         const currentPosition = routePosition(route.coordinates, progress)
+        updateJobRoute(instance, job.id, route.coordinates, progress, taxiSourceId)
         ;(instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(point(currentPosition))
         instance.setPaintProperty(taxiSourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
         const passengerSource = instance.getSource(passengerSourceId) as mapboxgl.GeoJSONSource | undefined
@@ -569,6 +607,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
       liveJobTimers.current.delete(job.id)
       liveJobRunners.current.delete(job.id)
       liveJobIds.current.delete(job.id)
+      removeJobRoute(instance, job.id)
       taxiSource?.setData(point(jobDestination(job)))
       if (instance.getLayer(sourceId)) instance.setPaintProperty(sourceId, 'circle-color', vehicleColor.available)
     }

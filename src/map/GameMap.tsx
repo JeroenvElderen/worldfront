@@ -574,10 +574,10 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
       if (pickupJobIds.current.has(job.id)) {
         continue
       }
-      instance.addSource(sourceId, { type: 'geojson', data: point(job.pickup, { title: job.pickupLabel }) })
+      instance.addSource(sourceId, { type: 'geojson', data: point(jobPickup(job), { title: job.pickupLabel }) })
       instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': color, 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
       const destinationId = `destination-${job.id}`
-      instance.addSource(destinationId, { type: 'geojson', data: point(job.destination, { title: job.destinationLabel }) })
+      instance.addSource(destinationId, { type: 'geojson', data: point(jobDestination(job), { title: job.destinationLabel }) })
       instance.addLayer({ id: destinationId, type: 'circle', source: destinationId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': color, 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
       const handlers = {
         enter: () => { instance.getCanvas().style.cursor = 'pointer' },
@@ -653,7 +653,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
         instance.setPaintProperty(taxiSourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
         const passengerSource = instance.getSource(passengerSourceId) as mapboxgl.GeoJSONSource | undefined
         // The halo waits at pickup, then rides with the passenger's vehicle.
-        passengerSource?.setData(point(pickingUp ? job.pickup : currentPosition, { title: job.pickupLabel }))
+        passengerSource?.setData(point(pickingUp ? jobPickup(job) : currentPosition, { title: job.pickupLabel }))
         // setData normally schedules a render, but explicitly waking Mapbox is
         // necessary on some idle Android WebViews.
         instance.triggerRepaint()
@@ -732,8 +732,9 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
     const availableVehicle = vehicles
       .filter((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available' && vehicle.position)
       .sort((left, right) => {
-        const leftDistance = Math.hypot(left.position![0] - job.pickup[0], left.position![1] - job.pickup[1])
-        const rightDistance = Math.hypot(right.position![0] - job.pickup[0], right.position![1] - job.pickup[1])
+        const pickup = jobPickup(job)
+        const leftDistance = Math.hypot(left.position![0] - pickup[0], left.position![1] - pickup[1])
+        const rightDistance = Math.hypot(right.position![0] - pickup[0], right.position![1] - pickup[1])
         return leftDistance - rightDistance
       })[0]
 

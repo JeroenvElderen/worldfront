@@ -428,10 +428,16 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
   useEffect(() => {
     const instance = map.current
     if (!instance) return
+    // Dispatch and idle roaming share the vehicle GeoJSON source. Once a job
+    // owns a taxi, exclude it here even if this effect briefly sees the
+    // pre-dispatch vehicle status/idleRoam state during React updates.
+    const assignedVehicleIds = new Set(jobs
+      .filter((job) => job.status === 'accepted' && job.assignedVehicleId)
+      .map((job) => job.assignedVehicleId!))
     if (token) {
       for (const vehicle of vehicles) {
         const roam = vehicle.idleRoam
-        if (!roam || vehicle.status !== 'available') continue
+        if (!roam || vehicle.status !== 'available' || assignedVehicleIds.has(vehicle.id)) continue
         const routeKey = `${vehicle.id}:${roam.startedAt}`
         if (requestedIdleRoutes.current.has(routeKey)) continue
         requestedIdleRoutes.current.add(routeKey)
@@ -448,7 +454,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
     const updateRoamingVehicles = () => {
       let updated = false
       for (const vehicle of vehicles) {
-        if (!vehicle.idleRoam || vehicle.status !== 'available') continue
+        if (!vehicle.idleRoam || vehicle.status !== 'available' || assignedVehicleIds.has(vehicle.id)) continue
         const source = instance.getSource(vehicleSourceId(vehicle.id)) as mapboxgl.GeoJSONSource | undefined
         if (!source) continue
         source.setData(point(idleRoamPosition(vehicle.idleRoam)))
@@ -461,7 +467,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
     updateRoamingVehicles()
     const interval = window.setInterval(updateRoamingVehicles, 500)
     return () => window.clearInterval(interval)
-  }, [vehicles, mapRevision, onIdleRoamRoute])
+  }, [vehicles, jobs, mapRevision, onIdleRoamRoute])
 
   useEffect(() => {
     const instance = map.current

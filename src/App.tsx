@@ -1,494 +1,134 @@
-import { useEffect, useState } from 'react'
-import { BottomNav } from './components/game/BottomNav'
-import { SectionSheet } from './components/game/SectionSheet'
-import { TopHud } from './components/game/TopHud'
-import { TaxiCallPopup } from './components/game/TaxiCallPopup'
-import { FinancialDashboard } from './components/game/FinancialDashboard'
-import { HotelDashboard } from './components/game/HotelDashboard'
-import { GameMap } from './map/GameMap'
-import { CitySetup } from './screens/CitySetup'
-import { useGameStore } from './stores/gameStore'
-import { getJobJourney, jobOfferExpiresAt } from './services/jobEngine'
-import { fleetSlotCapacity, maxJobDistanceForFleet } from './services/companyProgression'
-import { hasResearch } from './services/research'
-import { getTaxiModel } from './data/taxis'
-import { jobOfferCapacity } from './services/earlyGameEngine'
-import { getCity } from './data/cities'
-import type { DemandHotspot } from './models/game'
-import { getDemandHotspots } from './services/jobOfferService'
+import { useEffect, useMemo, useState } from 'react'
+import { DispatchMap } from './DispatchMap'
+
+type Tab = 'dispatch' | 'fleet' | 'reports'
+type Ride = {
+  id: number
+  rider: string
+  initials: string
+  pickup: string
+  destination: string
+  distance: string
+  eta: string
+  fare: number
+  tone: string
+  pickupCoords: [number, number]
+  destinationCoords: [number, number]
+}
+
+const rides: Ride[] = [
+  { id: 1, rider: 'Maya Chen', initials: 'MC', pickup: 'Temple Bar', destination: 'Dublin Airport', distance: '12.4 km', eta: '4 min away', fare: 32.40, tone: 'violet', pickupCoords: [-6.2675, 53.3455], destinationCoords: [-6.2499, 53.4264] },
+  { id: 2, rider: 'Liam Byrne', initials: 'LB', pickup: 'Grand Canal Dock', destination: 'Heuston Station', distance: '5.8 km', eta: '7 min away', fare: 18.20, tone: 'blue', pickupCoords: [-6.2382, 53.3397], destinationCoords: [-6.2927, 53.3464] },
+  { id: 3, rider: 'Sofia Rossi', initials: 'SR', pickup: 'St Stephen’s Green', destination: 'Clontarf', distance: '7.1 km', eta: '9 min away', fare: 21.60, tone: 'orange', pickupCoords: [-6.2591, 53.3382], destinationCoords: [-6.1952, 53.3648] },
+]
+
+const fleet = [
+  { id: 'TX-104', driver: 'Nora Kelly', car: 'Toyota Corolla', status: 'Available', shift: '6h 24m', color: '#22c55e' },
+  { id: 'TX-208', driver: 'Aidan Murphy', car: 'Hyundai Ioniq', status: 'On trip', shift: '4h 51m', color: '#7c5cff' },
+  { id: 'TX-316', driver: 'Ella Walsh', car: 'Skoda Octavia', status: 'Break', shift: '3h 08m', color: '#f59e0b' },
+]
+
+function Icon({ name }: { name: string }) {
+  const paths: Record<string, string> = {
+    dispatch: 'M4 6h16M4 12h10M4 18h7M18 15l3 3-3 3',
+    fleet: 'M5 17h14l-1.5-5h-11L5 17Zm2-5 2-5h6l2 5M7 17v2m10-2v2',
+    reports: 'M5 20V10m7 10V4m7 16v-7',
+    pin: 'M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Zm0-8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
+    clock: 'M12 7v5l3 2m6-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+    bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12h4',
+    search: 'm20 20-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z',
+    plus: 'M12 5v14M5 12h14',
+    arrow: 'M5 12h14m-5-5 5 5-5 5',
+  }
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name]} /></svg>
+}
 
 export default function App() {
-  const game = useGameStore()
-  const [placingStation, setPlacingStation] = useState(false)
-  const [demandHotspots, setDemandHotspots] = useState<DemandHotspot[]>([])
-  const [showDemand, setShowDemand] = useState(true)
-  const taxiCount = game.vehicles.filter((vehicle) => vehicle.type === 'taxi').length
-  const serviceRadiusKm = maxJobDistanceForFleet(game.company?.level ?? 1, taxiCount) * (hasResearch(game.completedResearch ?? [], 'predictive-demand') ? 1.25 : 1)
-  const stationPackageCost = Math.round(15_000 * (game.specialization === 'mobility' ? .9 : 1) * (hasResearch(game.completedResearch ?? [], 'prefab-depots') ? .8 : 1)) + getTaxiModel('toyota-corolla').price
-  const researchFleetSlots = (hasResearch(game.completedResearch ?? [], 'autonomous-operations') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'global-network') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'regional-hubs') ? game.branches.length : 0)
-  const stationFleetFull = game.vehicles.length >= fleetSlotCapacity(game.company?.level ?? 1, game.garageLevel ?? 0, game.branches) + researchFleetSlots
+  const [tab, setTab] = useState<Tab>('dispatch')
+  const [pending, setPending] = useState(rides)
+  const [selected, setSelected] = useState<Ride | null>(rides[0])
+  const [active, setActive] = useState<Ride | null>(null)
+  const [progress, setProgress] = useState(0)
+  const [revenue, setRevenue] = useState(284.60)
 
-  const { company, addRandomJob, resumeGame, tickJobs, automation, jobs, acceptJob, hasHydrated } = game
-
-  const availableOfferCapacity = jobOfferCapacity(game.vehicles, game.drivers)
-
-  const offeredJobCount = game.jobs.filter(
-    (job) => job.status === 'offered',
-  ).length
-
-  /** Refresh demand once per accelerated game hour and whenever the active city changes. */
   useEffect(() => {
-    const foundedAt = company?.foundedAt
-    if (!foundedAt || !game.hasHydrated) return
-    const city = getCity(game.activeCityId ?? game.startingCityId, game.customCities)
-    if (!city) return
-    const controller = new AbortController()
-    const refresh = () => {
-      void getDemandHotspots(city, serviceRadiusKm, foundedAt, controller.signal)
-        .then(setDemandHotspots)
-        .catch((error: unknown) => { if ((error as Error).name !== 'AbortError') setDemandHotspots([]) })
-    }
-    refresh()
-    const interval = window.setInterval(refresh, 60_000)
-    return () => { controller.abort(); window.clearInterval(interval) }
-  }, [company?.foundedAt, game.activeCityId, game.startingCityId, game.customCities, game.hasHydrated, serviceRadiusKm])
-
-  /**
-   * Generate job offers when taxis are available.
-   */
-  useEffect(() => {
-    if (!company || !game.hasHydrated) return
-
-    const requestOfferForAvailableTaxi = () => {
-      if (document.visibilityState === 'hidden') return
-
-      const state = useGameStore.getState()
-
-      const availableOffers = jobOfferCapacity(state.vehicles, state.drivers)
-
-      const offered = state.jobs.filter(
-        (job) => job.status === 'offered',
-      ).length
-
-      // Smart roof signs attract an additional request for their taxi.
-      if (availableOffers > offered) {
-        void addRandomJob()
+    if (!active) return
+    const timer = window.setInterval(() => setProgress((value) => {
+      if (value >= 100) {
+        window.clearInterval(timer)
+        setRevenue((cash) => cash + active.fare)
+        setActive(null)
+        return 0
       }
-    }
+      return value + 1
+    }), 900)
+    return () => window.clearInterval(timer)
+  }, [active])
 
-    requestOfferForAvailableTaxi()
+  const available = active ? 0 : 1
+  const title = tab === 'dispatch' ? 'Live dispatch' : tab === 'fleet' ? 'Your fleet' : 'Today’s performance'
+  const subtitle = tab === 'dispatch' ? 'Dublin Central · Monday, 14:32' : tab === 'fleet' ? '3 vehicles · 2 drivers on shift' : 'Live business overview'
+  const mapRides = useMemo(() => active ? [active] : pending, [active, pending])
 
-    document.addEventListener(
-      'visibilitychange',
-      requestOfferForAvailableTaxi,
-    )
-
-    return () => {
-      document.removeEventListener(
-        'visibilitychange',
-        requestOfferForAvailableTaxi,
-      )
-    }
-  }, [
-    company,
-    availableOfferCapacity,
-    offeredJobCount,
-    addRandomJob,
-    game.hasHydrated,
-  ])
-
-  /**
-   * Schedule tickJobs for the next game event.
-   *
-   * IMPORTANT:
-   * Do not call tickJobs() directly at the beginning of this effect.
-   * tickJobs modifies jobs/vehicles/etc, which are dependencies of this
-   * effect and caused the Maximum update depth exceeded loop.
-   */
-  useEffect(() => {
-    if (!company || !game.hasHydrated) return
-
-    const state = useGameStore.getState()
-
-    const nextJobEvent = state.jobs
-      .filter(
-        (job) =>
-          job.status === 'accepted' ||
-          job.status === 'offered',
-      )
-      .map((job) => {
-        if (job.status === 'offered') {
-          return jobOfferExpiresAt(job)
-        }
-
-        const vehicle = state.vehicles.find(
-          (candidate) =>
-            candidate.id === job.assignedVehicleId,
-        )
-
-        return vehicle
-          ? getJobJourney(job, vehicle).arrivesAt
-          : Number.POSITIVE_INFINITY
-      })
-      .concat(
-        state.vehicles.flatMap((vehicle) =>
-          vehicle.postalRoute
-            ? [new Date(vehicle.postalRoute.arrivesAt).getTime()]
-            : vehicle.serviceTrip
-            ? [
-                new Date(
-                  vehicle.serviceTrip.arrivesAt,
-                ).getTime(),
-              ]
-            : vehicle.scheduledJourney
-            ? [new Date(vehicle.scheduledJourney.arrivesAt).getTime()]
-            : vehicle.rentalJourney
-            ? [new Date(vehicle.rentalJourney.arrivesAt).getTime()]
-            : vehicle.idleRoam
-            ? [new Date(vehicle.idleRoam.arrivesAt).getTime()]
-            : [],
-        ),
-      )
-      .concat(
-        (state.transportAssets ?? []).flatMap((asset) => asset.journey ? [new Date(asset.journey.arrivesAt).getTime()] : []),
-      )
-      .concat(
-        state.activeEvent
-          ? [
-              new Date(
-                state.activeEvent.expiresAt,
-              ).getTime(),
-            ]
-          : [new Date(state.nextEventAt).getTime()],
-      )
-      .concat([
-        new Date(
-          state.nextOperatingPaymentAt,
-        ).getTime(),
-
-        ...(state.loans ?? []).map((loan) =>
-          new Date(loan.nextPaymentAt).getTime(),
-        ),
-        ...state.drivers.flatMap((driver) => driver.missedShiftUntil ? [new Date(driver.missedShiftUntil).getTime()] : []),
-      ])
-      .reduce(
-        (soonest, event) =>
-          Math.min(soonest, event),
-        Number.POSITIVE_INFINITY,
-      )
-
-    if (!Number.isFinite(nextJobEvent)) return
-
-    const delay =
-      Math.max(0, nextJobEvent - Date.now()) + 50
-
-    const timeout = window.setTimeout(() => {
-      tickJobs()
-    }, delay)
-
-    return () => {
-      window.clearTimeout(timeout)
-    }
-  }, [
-    company,
-    game.jobs,
-    game.vehicles,
-    game.transportAssets,
-    game.activeEvent,
-    game.nextEventAt,
-    game.nextOperatingPaymentAt,
-    game.loans,
-    game.drivers,
-    game.hasHydrated,
-    tickJobs,
-  ])
-
-  /**
-   * Settle wall-clock deadlines whenever the app returns to the foreground.
-   *
-   * Mobile operating systems suspend WebView timers in the background, so the
-   * simulation cannot depend on an interval continuing to fire. Game journeys
-   * use absolute timestamps instead: on resume, one tick catches up everything
-   * that elapsed while the app was suspended or closed.
-   */
-  useEffect(() => {
-    if (!company || !game.hasHydrated) return
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') return
-
-      // Clear pause markers left by older saves, then settle every deadline
-      // that elapsed while the native WebView was suspended.
-      resumeGame()
-      tickJobs()
-    }
-
-    // A force-closed WebView starts visible. Resume a persisted pause as soon
-    // as its save hydrates rather than waiting for a lifecycle event.
-    handleVisibilityChange()
-
-    document.addEventListener(
-      'visibilitychange',
-      handleVisibilityChange,
-    )
-
-    window.addEventListener(
-      'pageshow',
-      handleVisibilityChange,
-    )
-
-    window.addEventListener(
-      'focus',
-      handleVisibilityChange,
-    )
-
-    return () => {
-      document.removeEventListener(
-        'visibilitychange',
-        handleVisibilityChange,
-      )
-
-      window.removeEventListener(
-        'pageshow',
-        handleVisibilityChange,
-      )
-
-      window.removeEventListener(
-        'focus',
-        handleVisibilityChange,
-      )
-    }
-  }, [company, game.hasHydrated, resumeGame, tickJobs])
-
-  /**
-   * A small foreground watchdog makes lifecycle recovery self-healing. Mobile
-   * WebViews can occasionally miss a timer or visibility event while Android
-   * restores the activity; re-running these idempotent actions repairs overdue
-   * journeys and replenishes offers without requiring a restart.
-   */
-  useEffect(() => {
-    if (!company || !game.hasHydrated) return
-
-    const recover = () => {
-      if (document.visibilityState === 'hidden') return
-      tickJobs()
-      void useGameStore.getState().addRandomJob()
-    }
-
-    recover()
-    const interval = window.setInterval(recover, 15_000)
-    window.addEventListener('online', recover)
-
-    return () => {
-      window.clearInterval(interval)
-      window.removeEventListener('online', recover)
-    }
-  }, [company, game.hasHydrated, tickJobs])
-
-  /** Let a hired branch manager dispatch qualifying calls for larger fleets. */
-  useEffect(() => {
-    if (!automation?.enabled || !company || !hasHydrated) return
-    const offer = jobs.find((job) => job.status === 'offered' && job.fare >= automation.minFare)
-    if (offer) acceptJob(offer.id)
-  }, [company, automation, hasHydrated, jobs, acceptJob])
-
-  if (!game.hasHydrated) {
-    return (
-      <div className="loading">
-        TRAVEL EMPIRE
-      </div>
-    )
+  const acceptRide = (ride: Ride) => {
+    if (active) return
+    setActive(ride)
+    setProgress(4)
+    setPending((list) => list.filter((item) => item.id !== ride.id))
+    setSelected(ride)
   }
 
   return (
-    <div className="game-shell">
-      <GameMap
-        cityId={game.activeCityId ?? game.startingCityId}
-        customCities={game.customCities ?? []}
-        branches={game.branches ?? []}
-        serviceRadiusKm={serviceRadiusKm}
-        vehicles={game.vehicles}
-        jobs={game.jobs}
-        demandHotspots={showDemand ? demandHotspots : []}
-        focusedJobId={game.focusedJobId}
-        placingStation={placingStation}
-        onBuildStation={(coordinates) => { game.buildStation(coordinates); setPlacingStation(false) }}
-        onOpenJob={game.openJob}
-        onIdleRoamRoute={game.setIdleRoamRoute}
-      />
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="logo"><span>TF</span><div><strong>TaxiFlow</strong><small>DISPATCH</small></div></div>
+        <nav>
+          {(['dispatch', 'fleet', 'reports'] as Tab[]).map((item) => (
+            <button className={tab === item ? 'active' : ''} onClick={() => setTab(item)} key={item}>
+              <Icon name={item} /><span>{item}</span>{item === 'dispatch' && pending.length > 0 && <b>{pending.length}</b>}
+            </button>
+          ))}
+        </nav>
+        <div className="shift-card"><span className="status-dot" /><div><small>DISPATCH STATUS</small><strong>Shift is live</strong></div><button aria-label="Shift settings">•••</button></div>
+        <div className="operator"><span>JD</span><div><strong>Jamie Doyle</strong><small>Dispatcher</small></div><button>⌄</button></div>
+      </aside>
 
-      {game.company ? (
-        <>
-          <TopHud company={game.company} />
+      <main>
+        <header className="topbar">
+          <div><h1>{title}</h1><p>{subtitle}</p></div>
+          <div className="header-actions"><button aria-label="Search"><Icon name="search" /></button><button aria-label="Notifications" className="notification"><Icon name="bell" /><i /></button><button className="new-ride" onClick={() => setTab('dispatch')}><Icon name="plus" /> New booking</button></div>
+        </header>
 
-          {game.activeSection === 'map' && <button className={`demand-toggle ${showDemand ? 'active' : ''}`} onClick={() => setShowDemand((visible) => !visible)} aria-pressed={showDemand}>
-            <span>◉</span><b>DEMAND</b><small>{showDemand ? `${demandHotspots.filter((hotspot) => hotspot.level === 'surging' || hotspot.level === 'busy').length} hotspots` : 'hidden'}</small>
-          </button>}
+        <section className="metric-row">
+          <article><small>AVAILABLE DRIVERS</small><strong>{available}<span> / 3</span></strong><em className={available ? 'good' : 'busy'}>{available ? 'Ready now' : 'All assigned'}</em></article>
+          <article><small>ACTIVE TRIPS</small><strong>{active ? 1 : 0}</strong><em>{active ? 'En route' : 'No active rides'}</em></article>
+          <article><small>PENDING REQUESTS</small><strong>{pending.length}</strong><em className={pending.length ? 'warm' : 'good'}>{pending.length ? 'Needs attention' : 'All clear'}</em></article>
+          <article><small>TODAY’S REVENUE</small><strong>€{revenue.toFixed(2)}</strong><em className="good">↗ 12.5%</em></article>
+        </section>
 
-          {game.activeSection === 'map' && !placingStation && <button className="station-add-button" disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => setPlacingStation(true)} aria-label="Build next station">＋</button>}
-          {placingStation && <aside className="depot-placement-banner"><span>⌖</span><div><b>Place Station {game.branches.length + 1}</b><small>Tap the map to build a station with one taxi for {new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(stationPackageCost)}.</small></div><button onClick={() => setPlacingStation(false)}>Cancel</button></aside>}
+        {tab === 'dispatch' && <div className="workspace">
+          <section className="map-panel">
+            <DispatchMap rides={mapRides} selected={selected} active={active} progress={progress} onSelect={(ride) => setSelected(mapRides.find((item) => item.id === ride.id) ?? null)} />
+            <div className="map-legend"><span><i className="driver-dot" />Available driver</span><span><i className="pickup-dot" />Pickup</span></div>
+            {active && <div className="trip-progress"><div><small>TRIP IN PROGRESS</small><strong>{active.pickup} → {active.destination}</strong></div><b>{progress}%</b><span><i style={{ width: `${progress}%` }} /></span></div>}
+          </section>
+          <aside className="request-panel">
+            <div className="panel-heading"><div><h2>Ride requests</h2><p>{pending.length} waiting for dispatch</p></div><button>⋯</button></div>
+            <div className="request-list">
+              {pending.length === 0 && <div className="empty"><span>✓</span><h3>You’re all caught up</h3><p>New requests will appear here.</p></div>}
+              {pending.map((ride, index) => <article className={`ride-card ${selected?.id === ride.id ? 'selected' : ''}`} onClick={() => setSelected(ride)} key={ride.id}>
+                <header><span className={`avatar ${ride.tone}`}>{ride.initials}</span><div><strong>{ride.rider}</strong><small>Passenger · {index ? 'Just now' : '2 min ago'}</small></div><b>€{ride.fare.toFixed(2)}</b></header>
+                <div className="route"><i><span /><span /></i><div><small>PICKUP</small><strong>{ride.pickup}</strong><small>DESTINATION</small><strong>{ride.destination}</strong></div></div>
+                <footer><span><Icon name="clock" /> {ride.eta}</span><span>{ride.distance}</span><button disabled={Boolean(active)} onClick={(event) => { event.stopPropagation(); acceptRide(ride) }}>Assign <Icon name="arrow" /></button></footer>
+              </article>)}
+            </div>
+          </aside>
+        </div>}
 
-          {game.activeEvent && (
-            <aside className="event-banner">
-              <b>
-                ⚡ {game.activeEvent.name}
-              </b>
+        {tab === 'fleet' && <section className="content-panel"><div className="section-title"><div><h2>Drivers & vehicles</h2><p>See who is ready, working, or taking a break.</p></div><button><Icon name="plus" /> Add vehicle</button></div><div className="fleet-grid">{fleet.map((vehicle) => <article key={vehicle.id}><div className="car-visual">TAXI<span>{vehicle.id}</span></div><header><div><strong>{vehicle.id}</strong><small>{vehicle.car}</small></div><em><i style={{ background: vehicle.color }} />{vehicle.status}</em></header><div className="driver-line"><span>{vehicle.driver.split(' ').map(x => x[0]).join('')}</span><div><small>DRIVER</small><strong>{vehicle.driver}</strong></div><div><small>SHIFT TIME</small><strong>{vehicle.shift}</strong></div></div><button>View vehicle <Icon name="arrow" /></button></article>)}</div></section>}
 
-              <span>
-                {game.activeEvent.description}
-                {' · '}
-                Fares ×
-                {game.activeEvent.fareMultiplier.toFixed(2)}
-              </span>
-            </aside>
-          )}
-          {game.worldCondition && game.worldCondition.weather !== 'clear' && (
-            <aside className="weather-chip" title={game.worldCondition.description}>
-              <span>{game.worldCondition.weather === 'rain' ? '🌧️' : game.worldCondition.weather === 'snow' ? '🌨️' : game.worldCondition.weather === 'storm' ? '⛈️' : '🌡️'}</span>
-              <b>{game.worldCondition.temperatureC}° · {game.worldCondition.weather}</b>
-              {game.worldCondition.disruption !== 'none' && <small>{game.worldCondition.disruption.replace('-', ' ')}</small>}
-            </aside>
-          )}
-
-          {game.activeSection === 'jobs' && (
-            <TaxiCallPopup
-              focusedJobId={game.focusedJobId}
-              vehicles={game.vehicles}
-              jobs={game.jobs}
-              passengers={game.passengers}
-              onAccept={game.acceptJob}
-              onDecline={game.declineJob}
-              onViewMap={game.showJobOnMap}
-              onClose={() =>
-                game.setSection('map')
-              }
-            />
-          )}
-
-          {game.activeSection !== 'map' &&
-            game.activeSection !== 'jobs' &&
-            game.activeSection !== 'hotels' &&
-            game.activeSection !== 'finance' && (
-              <SectionSheet
-                section={game.activeSection}
-                vehicles={game.vehicles}
-                garageLevel={game.garageLevel ?? 0}
-                drivers={game.drivers}
-                driverCandidates={game.driverCandidates}
-                goals={game.goals}
-                jobs={game.jobs}
-                loans={game.loans}
-                company={game.company}
-                activeCityId={game.activeCityId ?? game.startingCityId!}
-                branches={game.branches ?? []}
-                customCities={game.customCities ?? []}
-                agencies={game.agencies ?? []}
-                tours={game.tours ?? []}
-                coachRoutes={game.coachRoutes ?? []}
-                countryLicenses={game.countryLicenses ?? ['IE']}
-                transportAssets={game.transportAssets ?? []}
-                transportRoutes={game.transportRoutes ?? []}
-                contracts={game.contracts ?? []}
-                specialization={game.specialization}
-                completedResearch={game.completedResearch ?? []}
-                automation={game.automation}
-                cash={game.company.cash}
-                onClose={() =>
-                  game.setSection('map')
-                }
-                onReset={game.resetGame}
-                onBuyTaxi={game.buyTaxi}
-                onLeaseTaxi={game.leaseTaxi}
-                onFinanceTaxi={game.financeTaxi}
-                onUpgradeGarage={game.upgradeGarage}
-                onBuyPostVehicle={game.buyPostVehicle}
-                onStartPostalRoute={game.startPostalRoute}
-                onBuyRentalCar={game.buyRentalCar}
-                onStartRental={game.startRental}
-                onBuyCountryLicense={game.buyCountryLicense}
-                onBuildStation={() => { game.setSection('map'); setPlacingStation(true) }}
-                onSwitchStation={game.switchStation}
-                onUnlockResearch={game.unlockResearch}
-                onUpgradeDepotFacility={game.upgradeDepotFacility}
-                onOpenAgency={game.openAgency}
-                onCreateTour={game.createTour}
-                onDispatchTour={game.dispatchTour}
-                onBuyTourBus={game.buyTourBus}
-                onBuyCoach={game.buyCoach}
-                onCreateCoachRoute={game.createCoachRoute}
-                onDispatchCoach={game.dispatchCoach}
-                onBuyTransportAsset={game.buyTransportAsset}
-                onCreateTransportRoute={game.createTransportRoute}
-                onDispatchTransport={game.dispatchTransport}
-                onSetAutomation={game.setAutomation}
-                onAcceptContract={game.acceptContract}
-                onChooseSpecialization={game.chooseSpecialization}
-                onTakeLoan={game.takeLoan}
-                onSellVehicle={game.sellVehicle}
-                onSetDriverShift={
-                  game.setDriverShift
-                }
-                onHireDriver={game.hireDriver}
-                onRefreshCandidates={game.refreshDriverCandidates}
-                onServiceVehicle={game.serviceVehicle}
-                onInstallUpgrade={game.installUpgrade}
-                onSetRefuelStrategy={game.setRefuelStrategy}
-                onRefuelVehicle={game.refuelVehicle}
-                onClaimGoal={game.claimGoal}
-                onToggleAccessory={
-                  game.toggleExteriorAccessory
-                }
-                competitors={game.competitors ?? []}
-                difficulty={game.difficulty}
-                worldCondition={game.worldCondition}
-                incidents={game.incidents ?? []}
-                brandStrategy={game.brandStrategy}
-                onSetDifficulty={game.setDifficulty}
-                onSetBrandStrategy={game.setBrandStrategy}
-                onLaunchMarketing={game.launchMarketing}
-                onPartnerCompetitor={game.partnerCompetitor}
-                onAcquireCompetitor={game.acquireCompetitor}
-                onTrainDriver={game.trainDriver}
-                onResolveIncident={game.resolveIncident}
-                onSetRouteTimetable={game.setRouteTimetable}
-              />
-            )}
-
-          {game.activeSection === 'finance' && (
-            <FinancialDashboard
-              cash={game.company.cash}
-              debt={game.loans.reduce((sum, loan) => sum + loan.balance, 0)}
-              transactions={game.financialTransactions ?? []}
-              vehicles={game.vehicles}
-              onClose={() => game.setSection('map')}
-            />
-          )}
-
-          {game.activeSection === 'hotels' && (
-            <HotelDashboard
-              company={game.company}
-              activeCityId={game.activeCityId ?? game.startingCityId!}
-              customCities={game.customCities ?? []}
-              hotels={game.hotels ?? []}
-              economies={game.cityEconomies ?? []}
-              onBuy={game.buyHotel}
-              onUpgrade={game.upgradeHotel}
-              onCollect={game.collectHotelRevenue}
-              onClose={() => game.setSection('map')}
-            />
-          )}
-
-          <BottomNav
-            active={game.activeSection}
-            onChange={game.setSection}
-            availableJobCount={offeredJobCount}
-          />
-        </>
-      ) : (
-        <CitySetup
-          onStart={game.initializeCompany}
-        />
-      )}
+        {tab === 'reports' && <section className="content-panel"><div className="section-title"><div><h2>Performance snapshot</h2><p>Your taxi business at a glance.</p></div><button>Export report</button></div><div className="report-grid"><article><small>COMPLETED TRIPS</small><strong>18</strong><div className="bars">{[45,62,38,76,58,88,70,94,78,100,82,92].map((h,i)=><i key={i} style={{height:`${h}%`}} />)}</div></article><article><small>AVERAGE FARE</small><strong>€15.81</strong><p>Up €1.42 from yesterday</p></article><article><small>DRIVER UTILISATION</small><strong>78%</strong><div className="donut"><span>78%</span></div></article></div></section>}
+      </main>
     </div>
   )
 }

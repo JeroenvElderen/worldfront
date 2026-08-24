@@ -144,6 +144,8 @@ export default function App() {
             ? [new Date(vehicle.scheduledJourney.arrivesAt).getTime()]
             : vehicle.rentalJourney
             ? [new Date(vehicle.rentalJourney.arrivesAt).getTime()]
+            : vehicle.idleRoam
+            ? [new Date(vehicle.idleRoam.arrivesAt).getTime()]
             : [],
         ),
       )

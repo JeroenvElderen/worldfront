@@ -1,91 +1,23 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { DispatchMap, type Coordinate, type Job, type TripPhase } from './DispatchMap'
 
 type Tab = 'map' | 'jobs' | 'fleet' | 'company'
-
-const POIS = [
-  { name: 'Temple Bar', coordinate: [-6.2675, 53.3455] as Coordinate },
-  { name: 'Heuston Station', coordinate: [-6.2927, 53.3464] as Coordinate },
-  { name: 'Trinity College', coordinate: [-6.2546, 53.3438] as Coordinate },
-  { name: 'Croke Park', coordinate: [-6.2501, 53.3607] as Coordinate },
-  { name: 'Dublin Airport', coordinate: [-6.2499, 53.4264] as Coordinate },
-  { name: 'Phoenix Park', coordinate: [-6.3298, 53.3568] as Coordinate },
-  { name: 'Grand Canal Dock', coordinate: [-6.2382, 53.3398] as Coordinate },
+const places = [
+  ['Dame Street','Dublin 2','Dublin Airport T1','Dublin','24.50','12.4','24'],
+  ['Grafton Street','Dublin 2','Ballsbridge','Dublin 4','13.80','5.6','14'],
+  ["St. Stephen's Green",'Dublin 2','Tallaght','Dublin 24','28.10','15.8','28'],
+  ['IFSC','Dublin 1','Blanchardstown Centre','Dublin 15','31.40','18.3','31'],
 ]
+const jobs: Job[] = places.map((p,i)=>({id:String(i),passenger:'Standard',pickupName:p[0],dropoffName:p[2],pickup:[-6.27+i*.01,53.35+i*.006] as Coordinate,dropoff:[-6.24-i*.01,53.39-i*.008] as Coordinate,fare:Number(p[4]),eta:Number(p[6])}))
+const paths: Record<string,string>={wallet:'M4 7h16v12H4zM7 4h10v3m0 6h3',star:'m12 3 3 6 6 1-4.5 4 1 7-5.5-3-5.5 3 1-7L3 10l6-1 3-6Z',menu:'M5 7h14M5 12h14M5 17h14',map:'m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Zm6-3v15m6-12v15',jobs:'M8 5V3h8v2M5 5h14v16H5zM9 10h6m-6 5h6',fleet:'M5 16h14l-2-6H7l-2 6Zm2 0v3m10-3v3',company:'M4 21V8l8-4 8 4v13M8 11h2m4 0h2m-8 4h2m4 0h2',target:'M12 3v4m0 10v4M3 12h4m10 0h4m-5 0a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',layers:'m4 9 8-5 8 5-8 5-8-5Zm0 5 8 5 8-5'}
+function Icon({name}:{name:string}){return <svg viewBox="0 0 24 24"><path d={paths[name]}/></svg>}
 
-const drivers = [
-  { id: 'd1', name: 'Maya Chen', car: 'Toyota Prius · 14-D-2041' },
-  { id: 'd2', name: 'Jon Bell', car: 'Škoda Octavia · 231-D-88' },
-  { id: 'd3', name: 'Aisha Khan', car: 'Kia Niro · 221-D-390' },
-]
+function Header(){return <header className="dashboard"><div className="stat"><span className="stat-icon"><Icon name="wallet"/></span><span><strong>€12,450</strong><small>Balance</small></span></div><div className="stat level"><b className="level-badge">4</b><span className="level-copy"><strong>Level 4</strong><i><b/></i><small>780 / 1200 XP</small></span></div><div className="stat rating"><Icon name="star"/><span><strong>4.6</strong><small>Rating</small></span><Icon name="menu"/></div></header>}
+function Nav({tab,setTab}:{tab:Tab,setTab:(t:Tab)=>void}){return <nav className="bottom-nav">{(['map','jobs','fleet','company'] as Tab[]).map(t=><button className={tab===t?'active':''} onClick={()=>setTab(t)} key={t}><Icon name={t}/><span>{t[0].toUpperCase()+t.slice(1)}</span></button>)}</nav>}
 
-function makeJob(index: number): Job {
-  const pickupIndex = Math.floor(Math.random() * POIS.length)
-  let dropoffIndex = Math.floor(Math.random() * POIS.length)
-  if (dropoffIndex === pickupIndex) dropoffIndex = (dropoffIndex + 1) % POIS.length
-  const from = POIS[pickupIndex]
-  const to = POIS[dropoffIndex]
-  return { id: `job-${Date.now()}-${index}`, passenger: ['Sofia M.', 'Noah W.', 'Emily R.', 'Daniel K.', 'Leah T.'][index % 5], pickupName: from.name, dropoffName: to.name, pickup: from.coordinate, dropoff: to.coordinate, fare: 14 + Math.floor(Math.random() * 25), eta: 3 + Math.floor(Math.random() * 9) }
-}
+function Jobs(){return <section className="page"><div className="title-row"><div><h1>Jobs</h1><p>Choose a job to assign to a taxi</p></div><button className="pill">⌯ &nbsp; Filter</button></div><div className="tabs"><b>Available <i>5</i></b><span>Accepted <i>2</i></span><span>Completed <i>18</i></span></div><div className="job-cards">{places.map((p)=><article className="job-card" key={p[0]}><div className="route"><i/><div><label>PICKUP</label><strong>{p[0]}</strong><small>{p[1]}</small></div><i/><div><label>DESTINATION</label><strong>{p[2]}</strong><small>{p[3]}</small></div><footer>♧ {p[5]} km  ◷ {p[6]} min</footer></div><div className="fare"><span>Standard ♟ 1-4</span><strong>€{p[4]}</strong><small>Estimated fare</small><button>Accept</button></div></article>)}</div></section>}
+const fleet=[['TAXI-001','Toyota Corolla Hybrid','85%','45,120 km','John Murphy','4.8','In Service'],['TAXI-002','Skoda Octavia','72%','38,760 km','Aoife Walsh','4.7','In Service'],['TAXI-003','Hyundai Ioniq Hybrid','48%','62,310 km','Service Due','in 1 day','Maintenance'],['TAXI-004','Kia Niro EV','90%','22,150 km',"Liam O’Connor",'4.9','In Service'],['TAXI-005','Volkswagen Passat','15%','67,890 km','Not Assigned','','Out of Service'],['TAXI-006','Mercedes Vito','68%','31,540 km','Cian Byrne','4.6','In Service']]
+function Fleet(){return <section className="page"><div className="title-row"><div><h1>Fleet</h1><p>Manage your vehicles and drivers</p></div><button className="pill">⌕ ⌯ Filter</button></div><div className="metrics">{[['12','Total Vehicles'],['8','In Service'],['2','Maintenance'],['2','Out of Service']].map(x=><div><b>{x[0]}</b><span>{x[1]}</span></div>)}</div><div className="fleet-list"><header>YOUR VEHICLES <span>12 Vehicles</span></header>{fleet.map((v)=><article><i className={v[6].replaceAll(' ','').toLowerCase()}/><div className="car">🚘</div><div><strong>{v[0]} <em>{v[6]}</em></strong><p>{v[1]}</p><small>▱ {v[2]} | ◉ {v[3]}</small></div><div className="driver"><b>{v[4]}</b><span>{v[5]&&`⭐ ${v[5]}`}</span></div><b>›</b></article>)}<button className="add">＋ Add Vehicle</button></div></section>}
+function Company(){return <section className="page"><div className="title-row"><div><h1>Company</h1><p>Overview and management</p></div></div><article className="profile"><span className="stat-icon"><Icon name="company"/></span><div><h2>Travel Empire Ltd.</h2><p>Your taxi company</p><small>⌖ Dublin, Ireland ▣ Founded May 2024</small></div><button className="pill">Edit Profile</button></article><article className="overview"><h2>Company Overview <small>This Week⌄</small></h2><div>{[['128','Total Rides','↑ 12%'],['€3,245','Revenue','↑ 8%'],['24','Active Drivers','↑ 4%'],['4.6','Company Rating','↑ 0.2']].map(x=><span><b>{x[0]}</b><small>{x[1]}</small><em>{x[2]}</em></span>)}</div></article><article className="finance"><h2>Finance <small>This Month⌄</small></h2><p>Revenue</p><b>€12,450</b><em>↑ 15% <small>vs last month</small></em><div className="chart">╱╱╱╲╱╱╱╲╱╱╱╲╱╱●</div></article><article className="management"><h2>Company Management</h2><div>{['👥 Drivers','🚘 Vehicles','🏢 Stations','💼 Services','🏷 Pricing','⚙ Settings'].map(x=><button>{x}<small>Manage {x.split(' ')[1].toLowerCase()}</small></button>)}</div></article></section>}
 
-const icons: Record<string, string> = {
-  wallet: 'M3 7h15a2 2 0 0 1 2 2v10H5a2 2 0 0 1-2-2V7Zm0 2V5a2 2 0 0 1 2-2h12v4m-2 5h5',
-  star: 'm12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2-4.5-4.4 6.2-.9L12 3Z',
-  menu: 'M4 7h16M4 12h16M4 17h16', map: 'm3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Zm6-3v15m6-12v15',
-  jobs: 'M8 5V3h8v2m-11 0h14v16H5V5Zm4 5h6m-6 5h6', fleet: 'M5 16h14l-2-6H7l-2 6Zm2 0v3m10-3v3M9 10l1.5-4h3L15 10',
-  company: 'M4 21V8l8-4 8 4v13M8 11h2m4 0h2m-8 4h2m4 0h2m-6 6v-3h4v3', target: 'M12 3v3m0 12v3M3 12h3m12 0h3m-5 0a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
-  layers: 'm4 9 8-5 8 5-8 5-8-5Zm0 5 8 5 8-5', locate: 'm4 5 16-2-7 18-2-8-7-8Z', close: 'M6 6l12 12M18 6 6 18'
-}
-
-function Icon({ name }: { name: keyof typeof icons }) { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={icons[name]} /></svg> }
-
-export default function App() {
-  const [jobs, setJobs] = useState<Job[]>(() => Array.from({ length: 3 }, (_, i) => makeJob(i)))
-  const [selected, setSelected] = useState<Job | null>(null)
-  const [assignedDriver, setAssignedDriver] = useState('')
-  const [activeJob, setActiveJob] = useState<Job | null>(null)
-  const [phase, setPhase] = useState<TripPhase>('idle')
-  const [station, setStation] = useState<Coordinate>([-6.2763, 53.3498])
-  const [placingStation, setPlacingStation] = useState(false)
-  const [openTab, setOpenTab] = useState<Tab>('map')
-  const activeDriver = useMemo(() => drivers.find((driver) => driver.id === assignedDriver), [assignedDriver])
-
-  const assign = () => {
-    if (!selected || !assignedDriver) return
-    setActiveJob(selected); setJobs((current) => current.filter((job) => job.id !== selected.id)); setSelected(null); setPhase('to-pickup')
-  }
-  const finishDriver = (next: 'staying' | 'roaming') => { setPhase(next); window.setTimeout(() => { setActiveJob(null); setAssignedDriver(''); setPhase('idle'); setOpenTab('map') }, 1600) }
-  const showPanel = openTab !== 'map' || Boolean(activeJob)
-
-  return <main className="app">
-    <DispatchMap jobs={jobs} selectedJob={selected} activeJob={activeJob} phase={phase} station={station} placingStation={placingStation}
-      onSelectJob={(job) => { setSelected(job); setOpenTab('jobs') }} onStationPlaced={(coordinate) => { setStation(coordinate); setPlacingStation(false) }}
-      onPhaseChange={setPhase} onTripComplete={() => setPhase('dropped-off')} />
-
-    <header className="dashboard" aria-label="Company status">
-      <div className="stat balance"><span className="stat-icon"><Icon name="wallet" /></span><span><strong>€12,450</strong><small>Balance</small></span></div>
-      <div className="stat level"><span className="level-badge">4</span><span className="level-copy"><strong>Level 4</strong><i><b /></i><small>780 / 1200 XP</small></span></div>
-      <div className="stat rating"><Icon name="star" /><span><strong>4.6</strong><small>Rating</small></span><button aria-label="Open menu"><Icon name="menu" /></button></div>
-    </header>
-
-    <div className="map-tools" aria-label="Map controls">
-      <button className={placingStation ? 'active' : ''} onClick={() => setPlacingStation((value) => !value)} aria-label="Move station"><Icon name="target" /></button>
-      <button aria-label="Map layers"><Icon name="layers" /></button>
-      <button onClick={() => setPlacingStation(false)} aria-label="Find my location"><Icon name="locate" /></button>
-    </div>
-
-    {!showPanel && <button className="jobs-fab" onClick={() => setOpenTab('jobs')}><Icon name="jobs" /><b>Jobs</b><span>{jobs.length}</span></button>}
-
-    {showPanel && <aside className="dispatch-panel">
-      <div className="panel-heading"><div><p>{openTab === 'fleet' ? 'YOUR TEAM' : openTab === 'company' ? 'BUSINESS' : 'DISPATCH CENTER'}</p><h1>{activeJob ? 'Active ride' : openTab === 'fleet' ? 'Fleet' : openTab === 'company' ? 'Company' : 'Available jobs'}</h1></div><button className="panel-close" onClick={() => setOpenTab('map')} aria-label="Close panel"><Icon name="close" /></button></div>
-      {openTab === 'fleet' && !activeJob ? <div className="simple-list">{drivers.map((driver) => <div className="driver-chip" key={driver.id}><span>{driver.name[0]}</span><div><b>{driver.name}</b><small>{driver.car}</small></div><em>Online</em></div>)}</div>
-      : openTab === 'company' && !activeJob ? <div className="company-card"><span className="stat-icon"><Icon name="company" /></span><h2>TaxiFlow Dublin</h2><p>12 completed rides today</p><strong>€286.40 <small>today's revenue</small></strong></div>
-      : activeJob ? <div className="active-card"><div className="status-line"><span className={`status-icon ${phase}`} /><b>{phase === 'to-pickup' ? 'Heading to pickup' : phase === 'with-passenger' ? 'Passenger on board' : phase === 'dropped-off' ? 'Ride complete' : phase === 'roaming' ? 'Finding nearby jobs' : 'Driver available'}</b></div><div className="driver-chip"><span>{activeDriver?.name.slice(0, 1)}</span><div><b>{activeDriver?.name}</b><small>{activeDriver?.car}</small></div></div><RouteDetails job={activeJob} />{phase === 'dropped-off' && <div className="next-actions"><p>What should the driver do?</p><button onClick={() => finishDriver('staying')}>Stay here</button><button className="primary" onClick={() => finishDriver('roaming')}>Roam for jobs</button></div>}</div>
-      : <><div className="jobs-summary"><span><b>{jobs.length}</b> waiting nearby</span><button onClick={() => setJobs((current) => [...current, makeJob(current.length)])}>＋ Add job</button></div><div className="job-list">{jobs.map((job) => <button key={job.id} className={selected?.id === job.id ? 'job selected' : 'job'} onClick={() => setSelected(job)}><span className="passenger-avatar">{job.passenger[0]}</span><span className="job-copy"><b>{job.passenger}</b><small>{job.pickupName} → {job.dropoffName}</small></span><span className="job-price">€{job.fare}<small>{job.eta} min</small></span></button>)}</div>{selected && <div className="assignment"><RouteDetails job={selected} /><label htmlFor="driver">Assign a driver</label><select id="driver" value={assignedDriver} onChange={(event) => setAssignedDriver(event.target.value)}><option value="">Choose an available driver…</option>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name} · {driver.car.split(' · ')[0]}</option>)}</select><button className="assign-button" disabled={!assignedDriver} onClick={assign}>Dispatch driver <span>→</span></button></div>}</>}
-    </aside>}
-
-    <nav className="bottom-nav" aria-label="Primary navigation">{(['map', 'jobs', 'fleet', 'company'] as Tab[]).map((tab) => <button key={tab} className={openTab === tab && !activeJob ? 'active' : ''} onClick={() => setOpenTab(tab)}><Icon name={tab} /><span>{tab[0].toUpperCase() + tab.slice(1)}</span></button>)}</nav>
-  </main>
-}
-
-function RouteDetails({ job }: { job: Job }) { return <div className="route-details"><div><i className="pickup-dot" /><span><small>PICKUP</small><b>{job.pickupName}</b></span></div><div><i className="dropoff-dot" /><span><small>DROPOFF</small><b>{job.dropoffName}</b></span></div></div> }
+export default function App(){const [tab,setTab]=useState<Tab>('map');const station:Coordinate=[-6.2763,53.3498];return <main className="app">{tab==='map'&&<><DispatchMap jobs={jobs} selectedJob={null} activeJob={null} phase={'idle' as TripPhase} station={station} placingStation={false} onSelectJob={()=>setTab('jobs')} onStationPlaced={()=>{}} onPhaseChange={()=>{}} onTripComplete={()=>{}}/><div className="map-tools"><button><Icon name="target"/></button><button><Icon name="layers"/></button></div><button className="jobs-fab" onClick={()=>setTab('jobs')}><Icon name="jobs"/> Jobs <b>3</b></button></>}{tab!=='map'&&<div className="screen">{tab==='jobs'?<Jobs/>:tab==='fleet'?<Fleet/>:<Company/>}</div>}<Header/><Nav tab={tab} setTab={setTab}/></main>}

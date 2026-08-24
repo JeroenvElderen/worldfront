@@ -11,7 +11,7 @@ import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
 import { idleRoamPosition } from '../services/idleRoaming'
 
-interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; serviceRadiusKm: number; vehicles: Vehicle[]; jobs: TaxiJob[]; demandHotspots: DemandHotspot[]; focusedJobId: string | null; placingStation: boolean; onBuildStation: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void }
+interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; serviceRadiusKm: number; vehicles: Vehicle[]; jobs: TaxiJob[]; demandHotspots: DemandHotspot[]; focusedJobId: string | null; placingStation: boolean; onBuildStation: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void; onIdleRoamRoute: (vehicleId: string, startedAt: string, waypoints: Coordinates[]) => void }
 const token = mapboxAccessToken
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
@@ -114,7 +114,7 @@ const removeJobRoute = (instance: mapboxgl.Map, jobId: string) => {
   if (instance.getSource(sourceId)) instance.removeSource(sourceId)
 }
 
-function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles, jobs, demandHotspots, focusedJobId, placingStation, onBuildStation, onOpenJob }: GameMapProps) {
+function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles, jobs, demandHotspots, focusedJobId, placingStation, onBuildStation, onOpenJob, onIdleRoamRoute }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const pickupJobIds = useRef(new Set<string>())
@@ -122,6 +122,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
   const liveJobIds = useRef(new Set<string>())
   const liveJobTimers = useRef(new Map<string, number>())
   const liveJobRunners = useRef(new Map<string, () => void>())
+  const requestedIdleRoutes = useRef(new Set<string>())
   const [mapRevision, setMapRevision] = useState(0)
 
   useEffect(() => {
@@ -486,6 +487,23 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
   useEffect(() => {
     const instance = map.current
     if (!instance) return
+    if (token) {
+      for (const vehicle of vehicles) {
+        const roam = vehicle.idleRoam
+        if (!roam || vehicle.status !== 'available') continue
+        const routeKey = `${vehicle.id}:${roam.startedAt}`
+        if (requestedIdleRoutes.current.has(routeKey)) continue
+        requestedIdleRoutes.current.add(routeKey)
+        const waypoints = roam.waypoints.map((coordinate) => coordinate.join(',')).join(';')
+        void fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${waypoints}?continue_straight=true&geometries=geojson&overview=full&access_token=${token}`)
+          .then(async (response) => response.ok ? response.json() as Promise<{ routes?: Array<{ geometry: { coordinates: Coordinates[] } }> }> : undefined)
+          .then((result) => {
+            const roadWaypoints = result?.routes?.[0]?.geometry.coordinates
+            if (roadWaypoints && roadWaypoints.length > 1) onIdleRoamRoute(vehicle.id, roam.startedAt, roadWaypoints)
+          })
+          .catch(() => undefined)
+      }
+    }
     const updateRoamingVehicles = () => {
       for (const vehicle of vehicles) {
         if (!vehicle.idleRoam || vehicle.status !== 'available') continue
@@ -496,7 +514,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
     updateRoamingVehicles()
     const interval = window.setInterval(updateRoamingVehicles, 500)
     return () => window.clearInterval(interval)
-  }, [vehicles, mapRevision])
+  }, [vehicles, mapRevision, onIdleRoamRoute])
 
   useEffect(() => {
     const instance = map.current
@@ -810,6 +828,7 @@ export const GameMap = memo(GameMapView, (previous, next) =>
   previous.vehicles === next.vehicles &&
   previous.demandHotspots === next.demandHotspots &&
   previous.focusedJobId === next.focusedJobId &&
+  previous.onIdleRoamRoute === next.onIdleRoamRoute &&
   previous.onOpenJob === next.onOpenJob &&
   previous.jobs === next.jobs
 )

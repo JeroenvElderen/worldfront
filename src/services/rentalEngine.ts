@@ -1,4 +1,5 @@
 import type { Coordinates, RentalJourney, Vehicle } from '../models/game'
+import { SIMULATED_MINUTE_MS } from './jobEngine'
 
 export const RENTAL_MIN_MINUTES = 2
 export const RENTAL_MAX_MINUTES = 6
@@ -28,7 +29,8 @@ export function createRentalJourney(vehicle: Vehicle, branch: Coordinates, now =
   return {
     waypoints,
     startedAt: new Date(now).toISOString(),
-    arrivesAt: new Date(now + durationMinutes * 60_000).toISOString(),
+    // Keep rentals on the same accelerated clock as the rest of the fleet.
+    arrivesAt: new Date(now + durationMinutes * SIMULATED_MINUTE_MS).toISOString(),
     reward,
     distanceKm,
   }

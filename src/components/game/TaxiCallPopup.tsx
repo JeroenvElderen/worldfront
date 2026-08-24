@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import type { Passenger, TaxiJob, Vehicle } from '../../models/game'
 import { distanceKmBetween, jobOfferExpiresAt } from '../../services/jobEngine'
 import { categoryDetails, vehicleCanTakeJob } from '../../services/earlyGameEngine'
-import { travelOperationFor } from '../../services/travelOperations'
 
 interface TaxiCallPopupProps {
   focusedJobId: string | null
@@ -15,47 +14,73 @@ interface TaxiCallPopupProps {
   onClose: () => void
 }
 
-const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
+type JobView = TaxiJob['status']
+
+const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 })
 
 const remainingTime = (job: TaxiJob, now: number) => {
   const seconds = Math.max(0, Math.ceil((jobOfferExpiresAt(job) - now) / 1000))
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
+const viewDetails: Array<{ id: JobView; label: string }> = [
+  { id: 'offered', label: 'Available' },
+  { id: 'accepted', label: 'Accepted' },
+  { id: 'complete', label: 'Completed' },
+]
+
 export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, onAccept, onDecline, onViewMap, onClose }: TaxiCallPopupProps) {
   const [now, setNow] = useState(Date.now())
+  const [view, setView] = useState<JobView>('offered')
+  const [categoryFilter, setCategoryFilter] = useState('all')
+
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1_000)
     return () => window.clearInterval(interval)
   }, [])
+
   const availableTaxis = vehicles.filter((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available')
-  const offers = jobs.filter((job) => job.status === 'offered')
-  const activeJobs = jobs.filter((job) => job.status === 'accepted')
-  const staffedTaxis = vehicles.filter((vehicle) => vehicle.type === 'taxi' && vehicle.driverId)
+  const visibleJobs = jobs.filter((job) => job.status === view && (categoryFilter === 'all' || (job.category ?? 'standard') === categoryFilter))
+  const availableCategories = [...new Set(jobs.map((job) => job.category ?? 'standard'))]
 
   return <section className="section-sheet jobs-sheet game-panel" aria-labelledby="jobs-title" aria-live="polite">
-    <div className="sheet-handle" /><button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
-    <header className="dispatch-header">
-      <div><small>DISPATCH</small><h2 id="jobs-title">Requests</h2></div>
-      <div className="dispatch-status" aria-label="Dispatch overview">
-        <span><b>{offers.length}</b> open</span>
-        <span><b>{activeJobs.length}</b> active</span>
-        <span><b>{availableTaxis.filter((vehicle) => vehicle.driverId).length}/{staffedTaxis.length}</b> ready</span>
-      </div>
+    <div className="sheet-handle" />
+    <button className="sheet-close" onClick={onClose} aria-label="Close jobs">×</button>
+    <header className="jobs-heading">
+      <div><h2 id="jobs-title">Jobs</h2><p>Choose a job to assign to a taxi</p></div>
+      <label className="job-filter"><span aria-hidden="true">⌯</span><select aria-label="Filter jobs by category" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">All types</option>{availableCategories.map((category) => <option value={category} key={category}>{categoryDetails[category].label}</option>)}</select></label>
     </header>
-    <div className="job-list">{offers.length ? offers.map((job) => {
+    <nav className="job-tabs" aria-label="Job status">
+      {viewDetails.map((item) => <button type="button" key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}>
+        {item.label}<b>{jobs.filter((job) => job.status === item.id).length}</b>
+      </button>)}
+    </nav>
+    <div className="job-list">{visibleJobs.length ? visibleJobs.map((job) => {
       const passenger = passengers.find((candidate) => job.passengerIds.includes(candidate.id))
       const taxi = availableTaxis.filter((vehicle) => vehicle.driverId && vehicleCanTakeJob(vehicle, job, passenger?.partySize ?? 1))
         .map((vehicle) => ({ vehicle, distance: vehicle.position ? distanceKmBetween(vehicle.position, job.pickup) : Infinity }))
         .sort((left, right) => left.distance - right.distance)[0]
       const category = categoryDetails[job.category ?? 'standard']
-      const operation = travelOperationFor(job)
-      return <article className={`job-card ${job.id === focusedJobId ? 'focused' : ''}`} key={job.id}>
-        <header className="operation-heading"><span className="operation-icon">{operation.icon}</span><div><small>{operation.service} · {operation.reference}</small><strong>{category.label} · {passenger?.name ?? 'Passenger'}</strong></div><b className="job-timer">{remainingTime(job, now)}</b></header>
-        <div className="job-route"><span>●</span><div><strong>{job.pickupLabel}</strong><i /><strong>{job.destinationLabel}</strong></div></div>
-        <div className="job-meta"><span>{taxi && Number.isFinite(taxi.distance) ? `${taxi.distance.toFixed(1)} km to pickup` : 'No suitable staffed taxi'}</span><span>{job.distanceKm} km trip</span><b>{money.format(job.fare)}</b></div>
-        <div className="dispatch-actions"><button className="view-job-map" onClick={() => onViewMap(job.id)} aria-label="View route on map">Map</button><button className="decline-call" onClick={() => onDecline(job.id)}>Pass</button><button className="accept-call" disabled={!taxi} onClick={() => onAccept(job.id)}>{taxi ? 'Dispatch' : 'Unavailable'}</button></div>
+      
+      return <article className={`job-card job-board-card ${job.id === focusedJobId ? 'focused' : ''}`} key={job.id}>
+        <div className="job-route-column">
+          <div className="job-route-line" aria-hidden="true"><span /><i /><span /></div>
+          <div className="job-stops">
+            <span><small>PICKUP</small><strong>{job.pickupLabel}</strong></span>
+            <span><small>DESTINATION</small><strong>{job.destinationLabel}</strong></span>
+          </div>
+          <div className="job-trip-meta"><span><i aria-hidden="true">⌁</i>{job.distanceKm.toFixed(1)} km</span><span><i aria-hidden="true">◷</i>{Math.round(job.durationMinutes)} min</span></div>
+        </div>
+        <div className="job-offer-column">
+          <span className="job-category">{category.label} <b>♟ {passenger?.partySize ?? 1}</b></span>
+          <strong className="job-fare">{money.format(job.fare)}</strong>
+          <small>{view === 'complete' ? 'Final fare' : 'Estimated fare'}</small>
+          {view === 'offered' ? <>
+            <button className="accept-call" disabled={!taxi} onClick={() => onAccept(job.id)}>{taxi ? 'Accept' : 'Unavailable'}</button>
+            <div className="job-card-links"><button onClick={() => onViewMap(job.id)}>Map</button><button onClick={() => onDecline(job.id)}>Pass</button><span><i aria-hidden="true">◷</i>{remainingTime(job, now)}</span></div>
+          </> : <button className="view-job-map job-status-action" onClick={() => onViewMap(job.id)}>{view === 'accepted' ? 'Track job' : 'View route'}</button>}
+        </div>
       </article>
-    }) : <div className="job-empty"><strong>Operations under control</strong><p>New travel requests will appear when a staffed taxi becomes available.</p></div>}</div>
+    }) : <div className="job-empty"><strong>No {viewDetails.find((item) => item.id === view)?.label.toLowerCase()} jobs</strong><p>{view === 'offered' ? 'New requests will appear when a staffed taxi becomes available.' : `Your ${view === 'accepted' ? 'active' : 'finished'} jobs will appear here.`}</p></div>}</div>
   </section>
 }

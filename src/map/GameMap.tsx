@@ -76,9 +76,9 @@ const vehicleColor = {
 const VEHICLE_MARKER_RADIUS = 4
 const VEHICLE_MARKER_STROKE_WIDTH = 1.5
 // Android WebViews can throttle requestAnimationFrame when Mapbox has no
-// camera animation in progress. Drive live taxi updates from a short timer so
-// an accepted taxi keeps moving even while the map itself is otherwise idle.
-const LIVE_JOURNEY_UPDATE_INTERVAL_MS = 100
+// camera animation in progress. Drive every journey from a short timer so an
+// idle map still updates smoothly and reliably.
+const JOURNEY_UPDATE_INTERVAL_MS = 50
 // A fleet index is not a stable identity: buying or selling another vehicle can
 // change which vehicle an existing indexed source represents. Key map sources by
 // the persisted vehicle id so dispatch always animates the vehicle assigned to
@@ -193,26 +193,29 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
           const sourceId = vehicleSourceId(vehicle.id)
           let roadCoordinates: number[][] = rental.waypoints
           if (token) {
-            try {
-              const waypoints = rental.waypoints.map((coordinate) => coordinate.join(',')).join(';')
-              const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${waypoints}?geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
-              if (response.ok) {
-                const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] } }> }
-                roadCoordinates = result.routes?.[0]?.geometry.coordinates ?? roadCoordinates
-              }
-            } catch (error) { if ((error as Error).name === 'AbortError') return }
+            void (async () => {
+              try {
+                const waypoints = rental.waypoints.map((coordinate) => coordinate.join(',')).join(';')
+                const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${waypoints}?geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
+                if (response.ok) {
+                  const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] } }> }
+                  roadCoordinates = result.routes?.[0]?.geometry.coordinates ?? roadCoordinates
+                }
+              } catch { /* Straight-line waypoints keep the journey moving offline. */ }
+            })()
           }
           instance.addSource(sourceId, { type: 'geojson', data: point(routePosition(roadCoordinates, rentalJourneyProgress(rental))) })
           instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': vehicleColor.rental, 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
           let rentalTimer: number | undefined
           const animateRental = () => {
             if (rentalTimer !== undefined) {
-              window.cancelAnimationFrame(rentalTimer)
+              window.clearTimeout(rentalTimer)
               animationTimers.delete(rentalTimer)
             }
             const progress = rentalJourneyProgress(rental)
             ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(roadCoordinates, progress)))
-            if (progress < 1 && document.visibilityState !== 'hidden') { rentalTimer = window.requestAnimationFrame(animateRental); animationTimers.add(rentalTimer) }
+            instance.triggerRepaint()
+            if (progress < 1 && document.visibilityState !== 'hidden') { rentalTimer = window.setTimeout(animateRental, JOURNEY_UPDATE_INTERVAL_MS); animationTimers.add(rentalTimer) }
           }
           animationRunners.add(animateRental); animateRental(); continue
         }
@@ -221,14 +224,16 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
           const sourceId = vehicleSourceId(vehicle.id)
           let roadCoordinates: number[][] = postal.stops.map((stop) => stop.coordinates)
           if (token) {
-            try {
-              const waypoints = postal.stops.map((stop) => stop.coordinates.join(',')).join(';')
-              const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${waypoints}?continue_straight=true&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
-              if (response.ok) {
-                const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] } }> }
-                roadCoordinates = result.routes?.[0]?.geometry.coordinates ?? roadCoordinates
-              }
-            } catch (error) { if ((error as Error).name === 'AbortError') return }
+            void (async () => {
+              try {
+                const waypoints = postal.stops.map((stop) => stop.coordinates.join(',')).join(';')
+                const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${waypoints}?continue_straight=true&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
+                if (response.ok) {
+                  const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] } }> }
+                  roadCoordinates = result.routes?.[0]?.geometry.coordinates ?? roadCoordinates
+                }
+              } catch { /* Stop coordinates keep the journey moving offline. */ }
+            })()
           }
           postal.stops.slice(1, -1).forEach((stop, stopIndex) => {
             const stopId = `${sourceId}-post-stop-${stopIndex}`
@@ -241,12 +246,13 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
           let postalTimer: number | undefined
           const animatePostal = () => {
             if (postalTimer !== undefined) {
-              window.cancelAnimationFrame(postalTimer)
+              window.clearTimeout(postalTimer)
               animationTimers.delete(postalTimer)
             }
             const progress = postalRouteProgress(postal)
             ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(roadCoordinates, progress)))
-            if (progress < 1 && document.visibilityState !== 'hidden') { postalTimer = window.requestAnimationFrame(animatePostal); animationTimers.add(postalTimer) }
+            instance.triggerRepaint()
+            if (progress < 1 && document.visibilityState !== 'hidden') { postalTimer = window.setTimeout(animatePostal, JOURNEY_UPDATE_INTERVAL_MS); animationTimers.add(postalTimer) }
           }
           animationRunners.add(animatePostal); animatePostal(); continue
         }
@@ -287,14 +293,15 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
           let serviceTimer: number | undefined
           const animateService = () => {
             if (serviceTimer !== undefined) {
-              window.cancelAnimationFrame(serviceTimer)
+              window.clearTimeout(serviceTimer)
               animationTimers.delete(serviceTimer)
             }
             const startedAt = new Date(service.startedAt).getTime()
             const arrivesAt = new Date(service.arrivesAt).getTime()
             const progress = Math.max(0, Math.min(1, (Date.now() - startedAt) / (arrivesAt - startedAt)))
             ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition([service.from, service.destination], progress)))
-            if (progress < 1 && document.visibilityState !== 'hidden') { serviceTimer = window.requestAnimationFrame(animateService); animationTimers.add(serviceTimer) }
+            instance.triggerRepaint()
+            if (progress < 1 && document.visibilityState !== 'hidden') { serviceTimer = window.setTimeout(animateService, JOURNEY_UPDATE_INTERVAL_MS); animationTimers.add(serviceTimer) }
           }
           animationRunners.add(animateService); animateService(); continue
         }
@@ -308,16 +315,16 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
         let animationTimer: number | undefined
         const scheduleAnimation = () => {
           if (animationTimer !== undefined) {
-            window.cancelAnimationFrame(animationTimer)
+            window.clearTimeout(animationTimer)
             animationTimers.delete(animationTimer)
           }
           if (document.visibilityState === 'hidden') return
-          animationTimer = window.requestAnimationFrame(animate)
+          animationTimer = window.setTimeout(animate, JOURNEY_UPDATE_INTERVAL_MS)
           animationTimers.add(animationTimer)
         }
         const animate = () => {
           if (animationTimer !== undefined) {
-            window.cancelAnimationFrame(animationTimer)
+            window.clearTimeout(animationTimer)
             animationTimers.delete(animationTimer)
           }
           const time = Date.now()
@@ -337,6 +344,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
           ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(routeAhead))
           instance.setPaintProperty(sourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
           if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
+          instance.triggerRepaint()
           if (time < journey.arrivesAt) scheduleAnimation()
           else animationRunners.delete(animate)
         }
@@ -347,7 +355,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
     })
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
-        animationTimers.forEach(window.cancelAnimationFrame)
+        animationTimers.forEach(window.clearTimeout)
         animationTimers.clear()
         currentLiveJobTimers.forEach(window.clearTimeout)
         currentLiveJobTimers.clear()
@@ -365,7 +373,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
     window.addEventListener('online', handleVisibilityChange)
     return () => {
       abortController.abort()
-      animationTimers.forEach(window.cancelAnimationFrame)
+      animationTimers.forEach(window.clearTimeout)
       currentLiveJobTimers.forEach(window.clearTimeout)
       currentLiveJobTimers.clear()
       currentLiveJobRunners.clear()
@@ -577,7 +585,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
         // necessary on some idle Android WebViews.
         instance.triggerRepaint()
         if (now < journey.arrivesAt && document.visibilityState !== 'hidden') {
-          liveJobTimers.current.set(job.id, window.setTimeout(animate, LIVE_JOURNEY_UPDATE_INTERVAL_MS))
+          liveJobTimers.current.set(job.id, window.setTimeout(animate, JOURNEY_UPDATE_INTERVAL_MS))
         } else if (now >= journey.arrivesAt) {
           liveJobRunners.current.delete(job.id)
         }

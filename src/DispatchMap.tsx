@@ -30,7 +30,7 @@ export function DispatchMap(props: Props) {
   useEffect(() => {
     if (!container.current || map.current) return
     mapboxgl.accessToken = mapboxAccessToken
-    const instance = new mapboxgl.Map({ container: container.current, style: 'mapbox://styles/mapbox/light-v11', center: [-6.275, 53.36], zoom: 11.7, attributionControl: false })
+    const instance = new mapboxgl.Map({ container: container.current, style: 'mapbox://styles/mapbox/dark-v11', center: [-6.275, 53.36], zoom: 11.7, attributionControl: false })
     map.current = instance
     instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right')
     instance.on('load', () => setLoaded(true))
@@ -78,7 +78,7 @@ export function DispatchMap(props: Props) {
     const feature: GeoJSON.Feature<GeoJSON.LineString> = { type: 'Feature', properties: {}, geometry: route }
     const existing = map.current.getSource('active-route') as mapboxgl.GeoJSONSource | undefined
     if (existing) existing.setData(feature)
-    else { map.current.addSource('active-route', { type: 'geojson', data: feature }); map.current.addLayer({ id: 'active-route', type: 'line', source: 'active-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#7357de', 'line-width': 5, 'line-opacity': .9 } }) }
+    else { map.current.addSource('active-route', { type: 'geojson', data: feature }); map.current.addLayer({ id: 'active-route', type: 'line', source: 'active-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#10e3c7', 'line-width': 6, 'line-opacity': .95, 'line-blur': 1 } }) }
     driverMarker.current?.remove(); pickupMarker.current?.remove(); dropoffMarker.current?.remove()
     driverMarker.current = new mapboxgl.Marker({ element: marker('driver-marker', 'Assigned driver') }).setLngLat(station).addTo(map.current)
     pickupMarker.current = new mapboxgl.Marker({ element: marker('map-marker pickup-marker', 'Passenger pickup') }).setLngLat(activeJob.pickup).addTo(map.current)

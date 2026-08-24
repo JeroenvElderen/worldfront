@@ -106,10 +106,10 @@ export default function App() {
           <article><small>TODAY’S REVENUE</small><strong>€{revenue.toFixed(2)}</strong><em className="good">↗ 12.5%</em></article>
         </section>
 
-        {tab === 'dispatch' && <div className="workspace">
+        {tab === 'dispatch' && <div className="workspace map-workspace">
           <section className="map-panel">
             <DispatchMap rides={mapRides} selected={selected} active={active} progress={progress} onSelect={(ride) => setSelected(mapRides.find((item) => item.id === ride.id) ?? null)} />
-            <div className="map-legend"><span><i className="driver-dot" />Available driver</span><span><i className="pickup-dot" />Pickup</span></div>
+            <div className="map-legend"><span><i className="driver-dot" />Vehicles</span><span><i className="pickup-dot" />Pickup</span><span><i className="dropoff-dot" />Drop off</span></div>
             {active && <div className="trip-progress"><div><small>TRIP IN PROGRESS</small><strong>{active.pickup} → {active.destination}</strong></div><b>{progress}%</b><span><i style={{ width: `${progress}%` }} /></span></div>}
           </section>
           <aside className="request-panel">

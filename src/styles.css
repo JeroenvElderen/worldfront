@@ -151,15 +151,22 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .jobs-sheet .job-board-card::before { content: ''; position: absolute; top: -70%; right: 8%; width: 160px; height: 220px; background: radial-gradient(circle, rgba(16, 177, 174, .09), transparent 68%); pointer-events: none; }
 .jobs-sheet .job-board-card:hover { border-color: rgba(37, 222, 203, .36); transform: translateY(-1px); }
 .jobs-sheet .job-board-card.focused { border-color: rgba(41, 226, 200, .62); box-shadow: 0 12px 32px rgba(0, 9, 17, .3), inset 3px 0 #24dac1; }
-.job-route-column { position: relative; display: grid; grid-template-columns: 24px minmax(0, 1fr); min-width: 0; }
+.job-route-column { position: relative; min-width: 0; min-height: 138px; }
+.job-route-preview { position: absolute; inset: 0; width: 100%; min-width: 0; overflow: hidden; padding: 0; border: 1px solid rgba(34, 220, 196, .25); border-radius: 12px; background: #082633; cursor: pointer; }
+.job-route-preview-map { position: absolute; inset: 0; transition: transform .25s ease; }
+.job-route-preview:hover .job-route-preview-map { transform: scale(1.035); }
+.job-route-preview::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 48%, rgba(2, 18, 28, .88)); pointer-events: none; }
+.job-route-preview-label { position: absolute; z-index: 1; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 6px; padding: 5px 7px; border: 1px solid rgba(73, 230, 210, .2); border-radius: 9px; background: rgba(2, 24, 34, .78); color: #dffff9; font-size: 8px; font-weight: 850; letter-spacing: .03em; backdrop-filter: blur(5px); }
+.job-route-preview-label b { color: #2de2ca; font-size: 11px; }
+.job-trip-meta { position: absolute; z-index: 2; bottom: 8px; left: 10px; display: flex; gap: 17px; color: #a9c0c7; font-size: 8px; pointer-events: none; }
 .job-route-line { display: grid; grid-template-rows: 15px 1fr 15px; place-items: center; grid-row: 1; padding: 3px 0 31px; }
 .job-route-line span { z-index: 1; width: 13px; height: 13px; border: 2px solid rgba(147, 255, 239, .34); border-radius: 50%; background: linear-gradient(145deg, #45e5ca, #07a99e); box-shadow: 0 0 0 4px rgba(24, 218, 193, .06), 0 0 15px rgba(30, 225, 199, .55); }
 .job-route-line i { width: 1px; height: 100%; background: repeating-linear-gradient(to bottom, #63818b 0 5px, transparent 5px 9px); }
-.job-stops { display: flex; grid-column: 2; grid-row: 1; justify-content: space-between; flex-direction: column; min-width: 0; padding: 0 0 34px 4px; }
+.job-stops { display: flex; grid-column: 2; grid-row: 1; justify-content: space-between; flex-direction: column; min-width: 0; padding: 2px 0 34px; }
 .job-stops span { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .job-stops small { color: #22dcc4 !important; font-size: 7px !important; font-weight: 950; letter-spacing: .11em; }
 .job-stops strong { overflow: hidden; color: #edf5f7; font-size: 12px !important; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
-.job-trip-meta { position: absolute; right: 0; bottom: 0; left: 28px; display: flex; gap: 17px; color: #91a5b0; font-size: 8px; }
+.job-trip-meta { position: absolute; right: 0; bottom: 0; left: calc(45% + 12px); display: flex; gap: 17px; color: #91a5b0; font-size: 8px; }
 .job-trip-meta span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .job-trip-meta i { color: #76919c; font-size: 11px; font-style: normal; }
 .job-offer-column { position: relative; z-index: 1; display: flex; align-items: flex-end; flex-direction: column; min-width: 0; text-align: right; }
@@ -200,10 +207,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
   .job-vehicle { grid-template-columns: 22px minmax(0, 1fr); padding: 6px; }
   .job-vehicle > span { width: 22px; height: 22px; }
   .job-vehicle > b { grid-column: 1 / 3; justify-self: stretch; text-align: center; }
-  .job-route-column { grid-template-columns: 20px minmax(0, 1fr); }
-  .job-stops { padding-left: 2px; }
-  .job-stops strong { font-size: 10px !important; }
-  .job-trip-meta { left: 22px; gap: 10px; font-size: 7px; }
+  .job-route-column { min-height: 162px; }
+  .job-trip-meta { left: 8px; gap: 10px; font-size: 7px; }
   .job-fare { font-size: 21px !important; }
   .job-category { padding: 5px 7px; font-size: 7px; }
   .job-offer-column > .accept-call, .job-status-action { min-height: 39px; }

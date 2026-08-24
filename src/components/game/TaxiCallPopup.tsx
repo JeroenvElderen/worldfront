@@ -3,6 +3,7 @@ import type { Driver, Passenger, TaxiJob, Vehicle } from '../../models/game'
 import { distanceKmBetween, jobOfferExpiresAt, jobPickup } from '../../services/jobEngine'
 import { categoryDetails, vehicleCanTakeJob } from '../../services/earlyGameEngine'
 import { licensePlateForVehicle, vehicleMakeAndModel } from '../../services/vehicleIdentity'
+import { JobRoutePreview } from './JobRoutePreview'
 
 interface TaxiCallPopupProps {
   focusedJobId: string | null
@@ -73,11 +74,7 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, driver
       
       return <article className={`job-card job-board-card ${job.id === focusedJobId ? 'focused' : ''}`} key={job.id}>
         <div className="job-route-column">
-          <div className="job-route-line" aria-hidden="true"><span /><i /><span /></div>
-          <div className="job-stops">
-            <span><small>PICKUP</small><strong>{job.pickupLabel}</strong></span>
-            <span><small>DESTINATION</small><strong>{job.destinationLabel}</strong></span>
-          </div>
+          <JobRoutePreview job={job} onOpen={() => onViewMap(job.id)} />
           <div className="job-trip-meta"><span><i aria-hidden="true">⌁</i>{job.distanceKm.toFixed(1)} km</span><span><i aria-hidden="true">◷</i>{Math.round(job.durationMinutes)} min</span></div>
         </div>
         <div className="job-offer-column">

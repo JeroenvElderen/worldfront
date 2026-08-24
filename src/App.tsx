@@ -24,7 +24,7 @@ export default function App() {
   const researchFleetSlots = (hasResearch(game.completedResearch ?? [], 'autonomous-operations') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'global-network') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'regional-hubs') ? game.branches.length : 0)
   const stationFleetFull = game.vehicles.length >= fleetSlotCapacity(game.company?.level ?? 1, game.garageLevel ?? 0, game.branches) + researchFleetSlots
 
-  const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, acceptJob, hasHydrated } = game
+  const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, runAutomation, hasHydrated } = game
 
   const availableOfferCapacity = jobOfferCapacity(game.vehicles, game.drivers)
 
@@ -51,7 +51,7 @@ export default function App() {
 
       // Smart roof signs attract an additional request for their taxi.
       if (availableOffers > offered) {
-        void addRandomJob()
+        void addRandomJob().then(() => useGameStore.getState().runAutomation())
       }
     }
 
@@ -247,7 +247,7 @@ export default function App() {
     const recover = () => {
       if (document.visibilityState === 'hidden') return
       tickJobs()
-      void useGameStore.getState().addRandomJob()
+      void useGameStore.getState().addRandomJob().then(() => useGameStore.getState().runAutomation())
     }
 
     recover()
@@ -263,9 +263,8 @@ export default function App() {
   /** Let a hired branch manager dispatch qualifying calls for larger fleets. */
   useEffect(() => {
     if (!automation?.enabled || !company || !hasHydrated) return
-    const offer = jobs.find((job) => job.status === 'offered' && job.fare >= automation.minFare)
-    if (offer) acceptJob(offer.id)
-  }, [company, automation, hasHydrated, jobs, acceptJob])
+    runAutomation()
+  }, [company, automation, hasHydrated, jobs, runAutomation])
 
   if (!game.hasHydrated) {
     return (

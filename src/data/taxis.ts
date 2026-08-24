@@ -12,6 +12,8 @@ export interface TaxiModel {
   powertrain: TaxiPowertrain
   marker: string
   color: string
+  collection?: 'exclusive'
+  tripSpeedMultiplier?: number
 }
 
 export const taxiModels: TaxiModel[] = [
@@ -25,6 +27,10 @@ export const taxiModels: TaxiModel[] = [
   { id: 'audi-a6-avant', brand: 'Audi', name: 'A6 Avant', price: 42_000, capacity: 4, topSpeedKmh: 250, logoUrl: 'https://cdn.simpleicons.org/audi/eaf7f4', description: 'Executive estate with luggage room', powertrain: 'diesel', marker: 'A', color: '#64748b' },
   { id: 'bmw-i5', brand: 'BMW', name: 'i5', price: 48_000, capacity: 4, topSpeedKmh: 193, logoUrl: 'https://cdn.simpleicons.org/bmw/eaf7f4', description: 'Electric executive saloon', powertrain: 'electric', marker: 'B', color: '#2563eb' },
   { id: 'mercedes-v-class', brand: 'Mercedes-Benz', name: 'V-Class', price: 52_000, capacity: 7, topSpeedKmh: 190, logoUrl: 'https://cdn.simpleicons.org/mercedes/eaf7f4', description: 'Premium airport people carrier', powertrain: 'diesel', marker: 'M', color: '#475569' },
+  { id: 'audi-rs6-avant', brand: 'Audi', name: 'RS 6 Avant', price: 132_000, capacity: 4, topSpeedKmh: 280, logoUrl: 'https://cdn.simpleicons.org/audi/eaf7f4', description: 'Super-estate for VIP transfers', powertrain: 'hybrid', marker: 'R', color: '#ef4444', collection: 'exclusive', tripSpeedMultiplier: 2 },
+  { id: 'bmw-m5-touring', brand: 'BMW', name: 'M5 Touring', price: 145_000, capacity: 4, topSpeedKmh: 305, logoUrl: 'https://cdn.simpleicons.org/bmw/eaf7f4', description: 'Flagship performance touring car', powertrain: 'hybrid', marker: 'M', color: '#3b82f6', collection: 'exclusive', tripSpeedMultiplier: 2 },
+  { id: 'mercedes-amg-gt63', brand: 'Mercedes-AMG', name: 'GT 63 S E Performance', price: 185_000, capacity: 4, topSpeedKmh: 316, logoUrl: 'https://cdn.simpleicons.org/mercedes/eaf7f4', description: 'Four-door hybrid grand tourer', powertrain: 'hybrid', marker: 'G', color: '#cbd5e1', collection: 'exclusive', tripSpeedMultiplier: 2 },
+  { id: 'porsche-taycan-turbo', brand: 'Porsche', name: 'Taycan Turbo', price: 170_000, capacity: 4, topSpeedKmh: 260, logoUrl: 'https://cdn.simpleicons.org/porsche/eaf7f4', description: 'Electric VIP express saloon', powertrain: 'electric', marker: 'P', color: '#facc15', collection: 'exclusive', tripSpeedMultiplier: 2 },
 ]
 
 // Keep models from older saves identifiable without continuing to offer them in the dealership.
@@ -34,3 +40,6 @@ const legacyTaxiModels: TaxiModel[] = [
 ]
 
 export const getTaxiModel = (id: string) => [...taxiModels, ...legacyTaxiModels].find((taxi) => taxi.id === id || taxi.powertrain === id) ?? taxiModels[0]
+
+export const taxiTripSpeedMultiplier = (modelId?: string) =>
+  taxiModels.find((taxi) => taxi.id === modelId)?.tripSpeedMultiplier ?? 1

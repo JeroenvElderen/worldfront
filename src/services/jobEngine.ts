@@ -1,10 +1,11 @@
 import type { Company, TaxiJob, Vehicle } from '../models/game'
+import { taxiTripSpeedMultiplier } from '../data/taxis'
 import { addReputation, levelForReputation } from './companyProgression'
 
 export const MAX_JOB_OFFERS = 6
 export const JOB_OFFER_DURATION_MS = 5 * 60_000
 // Trips take 8% of their estimated real-world duration (a 12.5x game clock).
-export const REAL_TIME_TRIP_SCALE = 0.04
+export const REAL_TIME_TRIP_SCALE = 0.06
 export const SIMULATED_MINUTE_MS = 60_000 * REAL_TIME_TRIP_SCALE
 // Give the driver a brief dispatch window before the taxi pulls away.
 export const JOB_DISPATCH_DELAY_MS = 1_000
@@ -41,8 +42,9 @@ export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {
   const pickupMinutes = job.distanceKm > 0
     ? pickupDistanceKm * job.durationMinutes / job.distanceKm
     : 0
-  const pickupDurationMs = Math.max(1_000, pickupMinutes * SIMULATED_MINUTE_MS * (job.pickupTimeMultiplier ?? 1))
-  const passengerDurationMs = Math.max(3_000, job.durationMinutes * SIMULATED_MINUTE_MS)
+  const speedMultiplier = taxiTripSpeedMultiplier(vehicle.modelId)
+  const pickupDurationMs = Math.max(1_000, pickupMinutes * SIMULATED_MINUTE_MS * (job.pickupTimeMultiplier ?? 1) / speedMultiplier)
+  const passengerDurationMs = Math.max(3_000, job.durationMinutes * SIMULATED_MINUTE_MS / speedMultiplier)
   return {
     acceptedAt,
     departsAt,

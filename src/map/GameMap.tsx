@@ -106,6 +106,91 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
   const liveJobTimers = useRef(new Map<string, number>())
   const liveJobRunners = useRef(new Map<string, () => void>())
   const [mapRevision, setMapRevision] = useState(0)
+  const [followedVehicleId, setFollowedVehicleId] = useState<string | null>(null)
+
+  const stopFollowing = () => {
+    const instance = map.current
+    setFollowedVehicleId(null)
+    if (!instance) return
+    instance.easeTo({
+      pitch: 48,
+      bearing: -12,
+      zoom: Math.min(instance.getZoom(), 15),
+      padding: 0,
+      duration: 650,
+    })
+  }
+
+  useEffect(() => {
+    const instance = map.current
+    if (!instance?.isStyleLoaded()) return
+
+    const handlers = vehicles.flatMap((vehicle) => {
+      const layerId = vehicleSourceId(vehicle.id)
+      if (!instance.getLayer(layerId)) return []
+
+      const enter = () => { instance.getCanvas().style.cursor = 'pointer' }
+      const leave = () => { instance.getCanvas().style.cursor = '' }
+      const click = (event: mapboxgl.MapMouseEvent) => {
+        event.originalEvent.stopPropagation()
+        if (window.confirm(`Follow ${vehicle.name} as it drives?`)) setFollowedVehicleId(vehicle.id)
+      }
+
+      instance.on('mouseenter', layerId, enter)
+      instance.on('mouseleave', layerId, leave)
+      instance.on('click', layerId, click)
+      return [{ layerId, enter, leave, click }]
+    })
+
+    return () => {
+      handlers.forEach(({ layerId, enter, leave, click }) => {
+        if (!instance.getLayer(layerId)) return
+        instance.off('mouseenter', layerId, enter)
+        instance.off('mouseleave', layerId, leave)
+        instance.off('click', layerId, click)
+      })
+    }
+  }, [mapRevision, vehicles])
+
+  useEffect(() => {
+    const instance = map.current
+    if (!instance || !followedVehicleId) return
+    const sourceId = vehicleSourceId(followedVehicleId)
+    let lastPosition: Coordinates | null = null
+    let cameraBearing = instance.getBearing()
+
+    const follow = () => {
+      if (map.current !== instance || !instance.getSource(sourceId)) return
+      const feature = instance.querySourceFeatures(sourceId)[0]
+      if (!feature || feature.geometry.type !== 'Point') return
+      const coordinates = feature.geometry.coordinates as Coordinates
+      if (lastPosition?.[0] === coordinates[0] && lastPosition[1] === coordinates[1]) return
+
+      if (lastPosition) {
+        const averageLatitude = (lastPosition[1] + coordinates[1]) / 2 * Math.PI / 180
+        const longitudeDelta = (coordinates[0] - lastPosition[0]) * Math.cos(averageLatitude)
+        const latitudeDelta = coordinates[1] - lastPosition[1]
+        const roadBearing = Math.atan2(longitudeDelta, latitudeDelta) * 180 / Math.PI
+        const bearingDelta = ((roadBearing - cameraBearing + 540) % 360) - 180
+        cameraBearing += bearingDelta * .22
+      }
+
+      lastPosition = coordinates
+      // Push the vehicle towards the bottom of the screen so the pitched
+      // camera reads like a driver's view with the road opening up ahead.
+      instance.jumpTo({
+        center: coordinates,
+        bearing: cameraBearing,
+        pitch: 80,
+        zoom: 18.5,
+        padding: { top: 0, right: 0, bottom: instance.getContainer().clientHeight * .3, left: 0 },
+      })
+    }
+
+    instance.on('render', follow)
+    follow()
+    return () => { instance.off('render', follow) }
+  }, [followedVehicleId, mapRevision])
 
   useEffect(() => {
     const instance = map.current
@@ -755,7 +840,13 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
     }
   }, [cityId, customCities, focusedJobId, jobs, vehicles, mapRevision])
 
-  return <div ref={container} className="absolute inset-0" aria-label="Interactive game map" />
+  return <>
+    <div ref={container} className="absolute inset-0" aria-label="Interactive game map" />
+    {followedVehicleId && <div className="vehicle-follow game-panel" role="status">
+      <span><b>●</b><i>DRIVER VIEW</i> {vehicles.find((vehicle) => vehicle.id === followedVehicleId)?.name ?? 'vehicle'}</span>
+      <button type="button" onClick={stopFollowing}>Exit</button>
+    </div>}
+  </>
 }
 
 export const GameMap = memo(GameMapView, (previous, next) =>

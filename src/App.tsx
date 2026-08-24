@@ -312,6 +312,7 @@ export default function App() {
         placingStation={placingStation}
         onBuildStation={(coordinates) => { game.buildStation(coordinates); setPlacingStation(false) }}
         onOpenJob={game.openJob}
+        onIdleRoamRoute={game.setIdleRoamRoute}
       />
 
       {game.company ? (

@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { featureCollection, lineString, point } from '@turf/helpers'
@@ -7,7 +7,7 @@ import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, irelandOverview } from '../data/cities'
 import { taxiModels } from '../data/taxis'
 import type { Branch, Coordinates, TaxiJob, Vehicle } from '../models/game'
-import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
+import { getJobJourney, jobDestination, jobPickup, REAL_TIME_TRIP_SCALE } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
 
@@ -107,9 +107,13 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
   const liveJobRunners = useRef(new Map<string, () => void>())
   const [mapRevision, setMapRevision] = useState(0)
   const [followedVehicleId, setFollowedVehicleId] = useState<string | null>(null)
+  const followedVehicleIdRef = useRef<string | null>(null)
+  const followClock = useRef<{ startedAt: number; journeyTime: number } | null>(null)
 
-  const stopFollowing = () => {
+  const stopFollowing = useCallback(() => {
     const instance = map.current
+    followedVehicleIdRef.current = null
+    followClock.current = null
     setFollowedVehicleId(null)
     if (!instance) return
     instance.easeTo({
@@ -119,7 +123,18 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
       padding: 0,
       duration: 650,
     })
-  }
+  }, [])
+
+  useEffect(() => {
+    if (!followedVehicleId) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') stopFollowing()
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => { window.removeEventListener('keydown', handleKeyDown) }
+  }, [followedVehicleId, stopFollowing])
 
   useEffect(() => {
     const instance = map.current
@@ -133,7 +148,12 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
       const leave = () => { instance.getCanvas().style.cursor = '' }
       const click = (event: mapboxgl.MapMouseEvent) => {
         event.originalEvent.stopPropagation()
-        if (window.confirm(`Follow ${vehicle.name} as it drives?`)) setFollowedVehicleId(vehicle.id)
+        if (window.confirm(`Follow ${vehicle.name} as it drives?`)) {
+          const now = Date.now()
+          followedVehicleIdRef.current = vehicle.id
+          followClock.current = { startedAt: now, journeyTime: now }
+          setFollowedVehicleId(vehicle.id)
+        }
       }
 
       instance.on('mouseenter', layerId, enter)
@@ -419,7 +439,14 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
             window.clearTimeout(animationTimer)
             animationTimers.delete(animationTimer)
           }
-          const time = Date.now()
+          const now = Date.now()
+          const clock = followedVehicleIdRef.current === vehicle.id ? followClock.current : null
+          // While this vehicle is followed, advance its displayed journey at
+          // real-world speed. Exiting follow immediately returns it to the
+          // accelerated game-clock position.
+          const time = clock
+            ? clock.journeyTime + (now - clock.startedAt) * REAL_TIME_TRIP_SCALE
+            : now
           const pickingUp = time < journey.pickupAt
           const elapsed = pickingUp
             ? Math.max(0, Math.min(1, (time - journey.departsAt) / (journey.pickupAt - journey.departsAt)))
@@ -437,7 +464,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
           instance.setPaintProperty(sourceId, 'circle-color', mapVehicleColor(vehicle, pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger))
           if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
           instance.triggerRepaint()
-          if (time < journey.arrivesAt) scheduleAnimation()
+          if (now < journey.arrivesAt) scheduleAnimation()
           else animationRunners.delete(animate)
         }
         animationRunners.add(animate)
@@ -842,9 +869,9 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
 
   return <>
     <div ref={container} className="absolute inset-0" aria-label="Interactive game map" />
-    {followedVehicleId && <div className="vehicle-follow game-panel" role="status">
+    {followedVehicleId && <div className="vehicle-follow game-panel" role="status" aria-live="polite">
       <span><b>●</b><i>DRIVER VIEW</i> {vehicles.find((vehicle) => vehicle.id === followedVehicleId)?.name ?? 'vehicle'}</span>
-      <button type="button" onClick={stopFollowing}>Exit</button>
+      <button type="button" onClick={stopFollowing} aria-label="Stop following vehicle">Stop following</button>
     </div>}
   </>
 }

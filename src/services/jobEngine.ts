@@ -9,7 +9,7 @@ export const JOB_OFFER_DURATION_MS = 5 * 60_000
 export const REAL_TIME_TRIP_SCALE = 0.125
 export const SIMULATED_MINUTE_MS = 60_000 * REAL_TIME_TRIP_SCALE
 // Give the driver a brief dispatch window before the taxi pulls away.
-export const JOB_DISPATCH_DELAY_MS = 3_000
+export const JOB_DISPATCH_DELAY_MS = 10_000
 
 export const jobOfferExpiresAt = (job: TaxiJob) =>
   new Date(job.offeredAt ?? 0).getTime() + JOB_OFFER_DURATION_MS

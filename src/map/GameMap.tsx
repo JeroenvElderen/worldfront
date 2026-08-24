@@ -275,6 +275,33 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
           }
           animationRunners.add(animatePostal); animatePostal(); continue
         }
+        let pickupRoute: RouteDetails = { coordinates: job ? [start, jobPickup(job)] : [start], speedLimits: [] }
+        let passengerRoute: RouteDetails = { coordinates: job ? [jobPickup(job), jobDestination(job)] : [start], speedLimits: [] }
+        if (job && token) {
+          const fetchRoute = async (from: Coordinates, to: Coordinates) => {
+            const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?alternatives=true&annotations=maxspeed&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
+            if (!response.ok) throw new Error(`Directions request failed: ${response.status}`)
+            const result = await response.json() as { routes?: Array<{ duration: number; geometry: { coordinates: number[][] }; legs: Array<{ annotation?: { maxspeed?: RouteSpeedLimit[] } }> }> }
+            const route = result.routes?.reduce((fastest, candidate) => candidate.duration < fastest.duration ? candidate : fastest)
+            return route && { coordinates: route.geometry.coordinates, speedLimits: route.legs.flatMap((leg) => leg.annotation?.maxspeed ?? []) }
+          }
+          // A slow or unavailable Directions response must never delay the
+          // vehicle marker. Start on fallback geometry and upgrade the active
+          // route whenever both road routes arrive.
+          void Promise.all([
+            fetchRoute(start, jobPickup(job)),
+            fetchRoute(jobPickup(job), jobDestination(job)),
+          ]).then(([toPickup, toDestination]) => {
+            if (abortController.signal.aborted || map.current !== instance) return
+            pickupRoute = toPickup ?? pickupRoute
+            passengerRoute = toDestination ?? passengerRoute
+          }).catch(() => undefined)
+        }
+        // Directions may still be loading when the live-map effect starts a
+        // newly accepted job using its immediate straight-line fallback. Let
+        // that runner retain ownership instead of replacing its moving marker
+        // when these load-time requests eventually finish.
+        if (job && liveJobIds.current.has(job.id)) continue
         const sourceId = vehicleSourceId(vehicle.id)
         if (!instance.getSource(sourceId)) {
           instance.addSource(sourceId, { type: 'geojson', data: point(start) })
@@ -296,11 +323,43 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
           }
           animationRunners.add(animateService); animateService(); continue
         }
-        // Accepted taxi animation is deliberately started by the live fleet
-        // effect below. Keeping a single owner means restored/in-flight jobs use
-        // the same timer-driven runner as newly dispatched jobs; otherwise this
-        // load path claimed the job with requestAnimationFrame first, which an
-        // idle Android WebView can throttle until the marker appears frozen.
+        if (!job) continue
+        liveJobIds.current.add(job.id)
+        const journey = getJobJourney(job, vehicle)
+        let animationTimer: number | undefined
+        const scheduleAnimation = () => {
+          if (animationTimer !== undefined) {
+            window.cancelAnimationFrame(animationTimer)
+            animationTimers.delete(animationTimer)
+          }
+          if (document.visibilityState === 'hidden') return
+          animationTimer = window.requestAnimationFrame(animate)
+          animationTimers.add(animationTimer)
+        }
+        const animate = () => {
+          if (animationTimer !== undefined) {
+            window.cancelAnimationFrame(animationTimer)
+            animationTimers.delete(animationTimer)
+          }
+          const time = Date.now()
+          const pickingUp = time < journey.pickupAt
+          const elapsed = pickingUp
+            ? Math.max(0, Math.min(1, (time - journey.departsAt) / (journey.pickupAt - journey.departsAt)))
+            : Math.max(0, Math.min(1, (time - journey.pickupAt) / (journey.arrivesAt - journey.pickupAt)))
+          const activeRoute = pickingUp ? pickupRoute : passengerRoute
+          const fallbackSpeedKmh = job.durationMinutes > 0 ? job.distanceKm / (job.durationMinutes / 60) : 30
+          const motion = routeMotion(activeRoute, elapsed, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
+          const progress = motion.progress
+          const currentPosition = routePosition(activeRoute.coordinates, progress)
+          updateJobRoute(instance, job.id, activeRoute.coordinates, progress, sourceId)
+          ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(currentPosition))
+          instance.setPaintProperty(sourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
+          if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
+          if (time < journey.arrivesAt) scheduleAnimation()
+          else animationRunners.delete(animate)
+        }
+        animationRunners.add(animate)
+        animate()
       }
       setMapRevision((revision) => revision + 1)
     })
@@ -428,16 +487,10 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
   useEffect(() => {
     const instance = map.current
     if (!instance) return
-    // Dispatch and idle roaming share the vehicle GeoJSON source. Once a job
-    // owns a taxi, exclude it here even if this effect briefly sees the
-    // pre-dispatch vehicle status/idleRoam state during React updates.
-    const assignedVehicleIds = new Set(jobs
-      .filter((job) => job.status === 'accepted' && job.assignedVehicleId)
-      .map((job) => job.assignedVehicleId!))
     if (token) {
       for (const vehicle of vehicles) {
         const roam = vehicle.idleRoam
-        if (!roam || vehicle.status !== 'available' || assignedVehicleIds.has(vehicle.id)) continue
+        if (!roam || vehicle.status !== 'available') continue
         const routeKey = `${vehicle.id}:${roam.startedAt}`
         if (requestedIdleRoutes.current.has(routeKey)) continue
         requestedIdleRoutes.current.add(routeKey)
@@ -452,22 +505,16 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
       }
     }
     const updateRoamingVehicles = () => {
-      let updated = false
       for (const vehicle of vehicles) {
-        if (!vehicle.idleRoam || vehicle.status !== 'available' || assignedVehicleIds.has(vehicle.id)) continue
+        if (!vehicle.idleRoam || vehicle.status !== 'available') continue
         const source = instance.getSource(vehicleSourceId(vehicle.id)) as mapboxgl.GeoJSONSource | undefined
-        if (!source) continue
-        source.setData(point(idleRoamPosition(vehicle.idleRoam)))
-        updated = true
+        source?.setData(point(idleRoamPosition(vehicle.idleRoam)))
       }
-      // Some Android WebViews do not schedule a paint for GeoJSON setData when
-      // the camera is idle, so explicitly wake Mapbox after every movement tick.
-      if (updated) instance.triggerRepaint()
     }
     updateRoamingVehicles()
     const interval = window.setInterval(updateRoamingVehicles, 500)
     return () => window.clearInterval(interval)
-  }, [vehicles, jobs, mapRevision, onIdleRoamRoute])
+  }, [vehicles, mapRevision, onIdleRoamRoute])
 
   useEffect(() => {
     const instance = map.current
@@ -581,30 +628,18 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
             if (!liveJobIds.current.has(job.id) || map.current !== instance) return
             pickupRoute = toPickup ?? pickupRoute
             passengerRoute = toDestination ?? passengerRoute
-            // Apply the road geometry immediately. Do not wait for a possibly
-            // throttled WebView timeout to wake the moving marker again.
-            liveJobRunners.current.get(job.id)?.()
           })
           .catch(() => undefined)
       }
 
       const animate = () => {
-        if (map.current !== instance || !liveJobIds.current.has(job.id)) return
+        if (map.current !== instance || !instance.getSource(taxiSourceId)) return
         const timer = liveJobTimers.current.get(job.id)
         if (timer !== undefined) {
           window.clearTimeout(timer)
           liveJobTimers.current.delete(job.id)
         }
         const now = Date.now()
-        // Arm the next frame before touching Mapbox. A style reload or a source
-        // that is not ready yet must not permanently kill the journey runner.
-        // This is especially important in Android WebViews, where transient
-        // style/source races are common while the dispatch sheet is closing.
-        if (now < journey.arrivesAt && document.visibilityState !== 'hidden') {
-          liveJobTimers.current.set(job.id, window.setTimeout(animate, LIVE_JOURNEY_UPDATE_INTERVAL_MS))
-        }
-        const taxiSource = instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource | undefined
-        if (!taxiSource) return
         const pickingUp = now < journey.pickupAt
         const from = pickingUp ? journey.departsAt : journey.pickupAt
         const to = pickingUp ? journey.pickupAt : journey.arrivesAt
@@ -613,22 +648,18 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
         const fallbackSpeedKmh = job.durationMinutes > 0 ? job.distanceKm / (job.durationMinutes / 60) : 30
         const progress = routeMotion(route, elapsed, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130).progress
         const currentPosition = routePosition(route.coordinates, progress)
-        try {
-          updateJobRoute(instance, job.id, route.coordinates, progress, taxiSourceId)
-          taxiSource.setData(point(currentPosition))
-          instance.setPaintProperty(taxiSourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
-        } catch {
-          // A Mapbox style mutation can briefly race a style reload. The next
-          // already-scheduled frame retries instead of leaving the taxi frozen.
-          return
-        }
+        updateJobRoute(instance, job.id, route.coordinates, progress, taxiSourceId)
+        ;(instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(point(currentPosition))
+        instance.setPaintProperty(taxiSourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
         const passengerSource = instance.getSource(passengerSourceId) as mapboxgl.GeoJSONSource | undefined
         // The halo waits at pickup, then rides with the passenger's vehicle.
         passengerSource?.setData(point(pickingUp ? jobPickup(job) : currentPosition, { title: job.pickupLabel }))
         // setData normally schedules a render, but explicitly waking Mapbox is
         // necessary on some idle Android WebViews.
         instance.triggerRepaint()
-        if (now >= journey.arrivesAt) {
+        if (now < journey.arrivesAt && document.visibilityState !== 'hidden') {
+          liveJobTimers.current.set(job.id, window.setTimeout(animate, LIVE_JOURNEY_UPDATE_INTERVAL_MS))
+        } else if (now >= journey.arrivesAt) {
           liveJobRunners.current.delete(job.id)
         }
       }

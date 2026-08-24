@@ -39,6 +39,8 @@ function Icon({ name }: { name: string }) {
     search: 'm20 20-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z',
     plus: 'M12 5v14M5 12h14',
     arrow: 'M5 12h14m-5-5 5 5-5 5',
+    menu: 'M4 6h16M4 12h16M4 18h16',
+    close: 'M6 6l12 12M18 6 6 18',
   }
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name]} /></svg>
 }
@@ -50,6 +52,14 @@ export default function App() {
   const [active, setActive] = useState<Ride | null>(null)
   const [progress, setProgress] = useState(0)
   const [revenue, setRevenue] = useState(284.60)
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const closeMenu = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenuOpen(false) }
+    window.addEventListener('keydown', closeMenu)
+    return () => window.removeEventListener('keydown', closeMenu)
+  }, [menuOpen])
 
   useEffect(() => {
     if (!active) return
@@ -79,12 +89,14 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className={`app-shell ${menuOpen ? 'menu-open' : ''}`}>
+      <button className="menu-toggle" aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={menuOpen} aria-controls="main-navigation" onClick={() => setMenuOpen((open) => !open)}><Icon name={menuOpen ? 'close' : 'menu'} /></button>
+      {menuOpen && <button className="menu-backdrop" aria-label="Close navigation menu" onClick={() => setMenuOpen(false)} />}
+      <aside className="sidebar" id="main-navigation" aria-hidden={!menuOpen} inert={!menuOpen}>
         <div className="logo"><span>TF</span><div><strong>TaxiFlow</strong><small>DISPATCH</small></div></div>
         <nav>
           {(['dispatch', 'fleet', 'reports'] as Tab[]).map((item) => (
-            <button className={tab === item ? 'active' : ''} onClick={() => setTab(item)} key={item}>
+            <button className={tab === item ? 'active' : ''} onClick={() => { setTab(item); setMenuOpen(false) }} key={item}>
               <Icon name={item} /><span>{item}</span>{item === 'dispatch' && pending.length > 0 && <b>{pending.length}</b>}
             </button>
           ))}

@@ -11,7 +11,7 @@ const idleVehicles: [number, number][] = [[-6.276, 53.352], [-6.226, 53.351], [-
 function vehicleElement(active = false) {
   const vehicle = document.createElement('div')
   vehicle.className = `vehicle-marker${active ? ' active' : ''}`
-  vehicle.innerHTML = '<svg viewBox="0 0 40 24" aria-hidden="true"><path d="M7 17 9.8 8.5A3 3 0 0 1 12.6 6h14.8a3 3 0 0 1 2.8 2.5L33 17v2H7v-2Z"/><path d="M12 7h16l2 7H10l2-7Z"/><circle cx="12" cy="19" r="3"/><circle cx="28" cy="19" r="3"/><path d="M17 4h6v3h-6z"/></svg>'
+  vehicle.setAttribute('aria-label', active ? 'Active vehicle' : 'Available vehicle')
   return vehicle
 }
 
@@ -72,17 +72,16 @@ export function DispatchMap({ rides, selected, active, progress, onSelect }: { r
     rides.forEach((ride) => {
       const pickup = document.createElement('button')
       pickup.className = `location-marker pickup-marker ${selected?.id === ride.id ? 'active' : ''}`
-      pickup.innerHTML = '<span></span><b>Pickup</b>'
       pickup.setAttribute('aria-label', `Select pickup for ${ride.initials}`)
       pickup.onclick = () => onSelect(ride)
       // Once assigned, the passenger/pickup status travels with the vehicle.
       const pickupPosition = active?.id === ride.id ? driverPosition : ride.pickupCoords
-      markers.current.push(new mapboxgl.Marker({ element: pickup, anchor: 'bottom', offset: active?.id === ride.id ? [0, -13] : [0, 0] }).setLngLat(pickupPosition).addTo(map.current!))
+      markers.current.push(new mapboxgl.Marker({ element: pickup }).setLngLat(pickupPosition).addTo(map.current!))
       if (selected?.id === ride.id || active?.id === ride.id) {
         const dropoff = document.createElement('div')
         dropoff.className = 'location-marker dropoff-marker'
-        dropoff.innerHTML = '<span></span><b>Drop off</b>'
-        markers.current.push(new mapboxgl.Marker({ element: dropoff, anchor: 'bottom' }).setLngLat(ride.destinationCoords).addTo(map.current!))
+        dropoff.setAttribute('aria-label', 'Drop off')
+        markers.current.push(new mapboxgl.Marker({ element: dropoff }).setLngLat(ride.destinationCoords).addTo(map.current!))
       }
     })
   }, [active, onSelect, progress, rides, route, selected?.id])

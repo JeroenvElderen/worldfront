@@ -25,6 +25,18 @@ const routePosition = (coordinates: number[][], progress: number): Coordinates =
   return [start[0] + (end[0] - start[0]) * amount, start[1] + (end[1] - start[1]) * amount]
 }
 
+const remainingRoute = (coordinates: number[][], progress: number) => {
+  if (coordinates.length < 2) return coordinates
+  const lengths = coordinates.slice(1).map((coordinate, index) => Math.hypot(coordinate[0] - coordinates[index][0], coordinate[1] - coordinates[index][1]))
+  let target = Math.max(0, Math.min(1, progress)) * lengths.reduce((sum, length) => sum + length, 0)
+  let segment = 0
+  while (segment < lengths.length - 1 && target > lengths[segment]) target -= lengths[segment++]
+  const remaining = [routePosition(coordinates, progress), ...coordinates.slice(segment + 1)]
+  // GeoJSON LineStrings require two coordinates. Repeating the destination
+  // makes the line naturally disappear when the vehicle reaches it.
+  return remaining.length > 1 ? remaining : [remaining[0], remaining[0]]
+}
+
 // Keep moving markers synchronized with the browser's paint cycle. Calculating
 // their position from the current time (rather than accumulating frame deltas)
 // also lets a journey resume at the exact right point after a background pause.
@@ -72,6 +84,7 @@ const LIVE_JOURNEY_UPDATE_INTERVAL_MS = 100
 // the persisted vehicle id so dispatch always animates the vehicle assigned to
 // the job, including taxis added after the map was created.
 const vehicleSourceId = (vehicleId: string) => `vehicle-${vehicleId}`
+const jobRouteSourceId = (jobId: string) => `job-route-${jobId}`
 const missionColor = (jobId: string) => {
   const hash = [...jobId].reduce((value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0, 0)
   return `hsl(${hash % 360}, 100%, 60%)`
@@ -287,6 +300,10 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
         }
         if (!job) continue
         liveJobIds.current.add(job.id)
+        const routeSourceId = jobRouteSourceId(job.id)
+        instance.addSource(routeSourceId, { type: 'geojson', data: lineString([...pickupRoute.coordinates, ...passengerRoute.coordinates.slice(1)]) })
+        instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': missionColor(job.id), 'line-width': 3, 'line-opacity': .9 } })
+        instance.moveLayer(routeSourceId, sourceId)
         const journey = getJobJourney(job, vehicle)
         let animationTimer: number | undefined
         const scheduleAnimation = () => {
@@ -314,6 +331,10 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
           const progress = motion.progress
           const currentPosition = routePosition(activeRoute.coordinates, progress)
           ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(currentPosition))
+          const routeAhead = pickingUp
+            ? [...remainingRoute(pickupRoute.coordinates, progress), ...passengerRoute.coordinates.slice(1)]
+            : remainingRoute(passengerRoute.coordinates, progress)
+          ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(routeAhead))
           instance.setPaintProperty(sourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
           if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
           if (time < journey.arrivesAt) scheduleAnimation()
@@ -488,6 +509,12 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
       const start = vehicle.position ?? getCity(cityId, customCities)?.coordinates
       if (!start) continue
       const taxiSourceId = vehicleSourceId(vehicle.id)
+      const routeSourceId = jobRouteSourceId(job.id)
+      if (!instance.getSource(routeSourceId)) {
+        instance.addSource(routeSourceId, { type: 'geojson', data: lineString([start, jobPickup(job), jobDestination(job)]) })
+        instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': missionColor(job.id), 'line-width': 3, 'line-opacity': .9 } })
+        if (instance.getLayer(taxiSourceId)) instance.moveLayer(routeSourceId, taxiSourceId)
+      }
       if (instance.getLayer(taxiSourceId)) instance.setPaintProperty(taxiSourceId, 'circle-color', vehicleColor.pickingUp)
       const passengerSourceId = `pickup-${job.id}`
       if (instance.getLayer(passengerSourceId) && instance.getLayer(taxiSourceId)) {
@@ -538,6 +565,10 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
         const progress = routeMotion(route, elapsed, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130).progress
         const currentPosition = routePosition(route.coordinates, progress)
         ;(instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(point(currentPosition))
+        const routeAhead = pickingUp
+          ? [...remainingRoute(pickupRoute.coordinates, progress), ...passengerRoute.coordinates.slice(1)]
+          : remainingRoute(passengerRoute.coordinates, progress)
+        ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(routeAhead))
         instance.setPaintProperty(taxiSourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
         const passengerSource = instance.getSource(passengerSourceId) as mapboxgl.GeoJSONSource | undefined
         // The halo waits at pickup, then rides with the passenger's vehicle.
@@ -571,6 +602,9 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
       liveJobIds.current.delete(job.id)
       taxiSource?.setData(point(jobDestination(job)))
       if (instance.getLayer(sourceId)) instance.setPaintProperty(sourceId, 'circle-color', vehicleColor.available)
+      const routeSourceId = jobRouteSourceId(job.id)
+      if (instance.getLayer(routeSourceId)) instance.removeLayer(routeSourceId)
+      if (instance.getSource(routeSourceId)) instance.removeSource(routeSourceId)
     }
   }, [cityId, customCities, jobs, vehicles, mapRevision, onOpenJob])
 
@@ -647,7 +681,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
           type: 'line',
           source: sourceId,
           paint: {
-            'line-color': '#38bdf8',
+            'line-color': missionColor(job.id),
             'line-width': 2.5,
             'line-opacity': 0.95,
           },

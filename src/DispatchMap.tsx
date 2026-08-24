@@ -1,95 +1,86 @@
 import { useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
-import { along, length, lineString } from '@turf/turf'
+import { along, length, lineSlice, lineString } from '@turf/turf'
 import { mapboxAccessToken } from './config/mapbox'
 
-type MapRide = { id: number; initials: string; pickup: string; destination: string; pickupCoords: [number, number]; destinationCoords: [number, number] }
-type Route = { geometry: GeoJSON.LineString; duration: number; distance: number }
-
-const idleVehicles: [number, number][] = [[-6.276, 53.352], [-6.226, 53.351], [-6.286, 53.371]]
-
-function vehicleElement(active = false) {
-  const vehicle = document.createElement('div')
-  vehicle.className = `vehicle-marker${active ? ' active' : ''}`
-  vehicle.setAttribute('aria-label', active ? 'Active vehicle' : 'Available vehicle')
-  return vehicle
+const pickup: [number, number] = [-6.2675, 53.3455]
+const dropoff: [number, number] = [-6.2499, 53.4264]
+const fallbackRoute: GeoJSON.LineString = {
+  type: 'LineString',
+  coordinates: [pickup, [-6.264, 53.350], [-6.260, 53.361], [-6.254, 53.375], [-6.251, 53.397], dropoff],
 }
 
-export function DispatchMap({ rides, selected, active, progress, onSelect }: { rides: MapRide[]; selected: MapRide | null; active: MapRide | null; progress: number; onSelect: (ride: MapRide) => void }) {
+function marker(className: string, label: string) {
+  const element = document.createElement('div')
+  element.className = className
+  element.setAttribute('aria-label', label)
+  return element
+}
+
+export function DispatchMap({ progress }: { progress: number }) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
-  const markers = useRef<mapboxgl.Marker[]>([])
+  const driver = useRef<mapboxgl.Marker | null>(null)
+  const pickupMarker = useRef<mapboxgl.Marker | null>(null)
+  const dropoffMarker = useRef<mapboxgl.Marker | null>(null)
   const [loaded, setLoaded] = useState(false)
-  const [route, setRoute] = useState<Route | null>(null)
+  const [route, setRoute] = useState(fallbackRoute)
 
   useEffect(() => {
     if (!container.current || map.current) return
     mapboxgl.accessToken = mapboxAccessToken
-    map.current = new mapboxgl.Map({ container: container.current, style: 'mapbox://styles/mapbox/streets-v12', center: [-6.2603, 53.354], zoom: 12.4, attributionControl: true })
-    map.current.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right')
-    map.current.on('load', () => setLoaded(true))
-    return () => { map.current?.remove(); map.current = null }
+    const instance = new mapboxgl.Map({
+      container: container.current,
+      style: 'mapbox://styles/mapbox/light-v11',
+      center: [-6.258, 53.382],
+      zoom: 12.1,
+      attributionControl: false,
+    })
+    map.current = instance
+    instance.on('load', () => setLoaded(true))
+    return () => { instance.remove(); map.current = null }
   }, [])
 
   useEffect(() => {
-    const ride = active ?? selected
-    if (!ride) { setRoute(null); return }
     const controller = new AbortController()
-    const coordinates = `${ride.pickupCoords.join(',')};${ride.destinationCoords.join(',')}`
-    fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coordinates}?geometries=geojson&overview=full&access_token=${mapboxAccessToken}`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Route unavailable')))
-      .then((data) => setRoute(data.routes?.[0] ?? null))
-      .catch((error) => { if (error.name !== 'AbortError') setRoute(null) })
+    fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${pickup.join(',')};${dropoff.join(',')}?geometries=geojson&overview=full&access_token=${mapboxAccessToken}`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject())
+      .then((data) => { if (data.routes?.[0]?.geometry) setRoute(data.routes[0].geometry) })
+      .catch(() => undefined)
     return () => controller.abort()
-  }, [active, selected])
+  }, [])
 
   useEffect(() => {
     if (!loaded || !map.current) return
-    const source = map.current.getSource('driving-route') as mapboxgl.GeoJSONSource | undefined
-    const data: GeoJSON.Feature<GeoJSON.LineString> = { type: 'Feature', properties: {}, geometry: route?.geometry ?? { type: 'LineString', coordinates: [] } }
-    if (!source) {
-      map.current.addSource('driving-route', { type: 'geojson', data })
-      map.current.addLayer({ id: 'route-casing', type: 'line', source: 'driving-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': .92 } })
-      map.current.addLayer({ id: 'route-line', type: 'line', source: 'driving-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#6d4aff', 'line-width': 5 } })
-    } else source.setData(data)
-    if (route && route.geometry.coordinates.length) {
-      const bounds = route.geometry.coordinates.reduce((box, coordinate) => box.extend(coordinate as [number, number]), new mapboxgl.LngLatBounds(route.geometry.coordinates[0] as [number, number], route.geometry.coordinates[0] as [number, number]))
-      map.current.fitBounds(bounds, { padding: { top: 145, right: 390, bottom: 80, left: 80 }, maxZoom: 14, duration: 700 })
+    const data: GeoJSON.Feature<GeoJSON.LineString> = { type: 'Feature', properties: {}, geometry: route }
+    const source = map.current.getSource('route') as mapboxgl.GeoJSONSource | undefined
+    if (source) source.setData(data)
+    else {
+      map.current.addSource('route', { type: 'geojson', data })
+      map.current.addLayer({ id: 'route', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#7557e8', 'line-width': 4, 'line-opacity': .88 } })
     }
+
+    if (!driver.current) driver.current = new mapboxgl.Marker({ element: marker('driver-marker', 'Driver') }).setLngLat(pickup).addTo(map.current)
+    if (!pickupMarker.current) pickupMarker.current = new mapboxgl.Marker({ element: marker('map-marker pickup-marker', 'Pickup') }).setLngLat(pickup).addTo(map.current)
+    if (!dropoffMarker.current) dropoffMarker.current = new mapboxgl.Marker({ element: marker('map-marker dropoff-marker', 'Dropoff') }).setLngLat(dropoff).addTo(map.current)
+
+    const bounds = route.coordinates.reduce((box, coordinate) => box.extend(coordinate as [number, number]), new mapboxgl.LngLatBounds(pickup, pickup))
+    map.current.fitBounds(bounds, { padding: { top: 70, right: 55, bottom: 130, left: 55 }, duration: 0 })
   }, [loaded, route])
 
   useEffect(() => {
-    if (!map.current) return
-    markers.current.forEach((marker) => marker.remove())
-    markers.current = []
-    let driverPosition = idleVehicles[0]
-    if (active && route?.geometry.coordinates.length) {
-      const road = lineString(route.geometry.coordinates)
-      driverPosition = along(road, length(road) * progress / 100).geometry.coordinates as [number, number]
-    }
-    idleVehicles.slice(active ? 1 : 0).forEach((position) => markers.current.push(new mapboxgl.Marker({ element: vehicleElement() }).setLngLat(position).addTo(map.current!)))
-    markers.current.push(new mapboxgl.Marker({ element: vehicleElement(Boolean(active)) }).setLngLat(driverPosition).addTo(map.current))
-    rides.forEach((ride) => {
-      const pickup = document.createElement('button')
-      pickup.className = `location-marker pickup-marker ${selected?.id === ride.id ? 'active' : ''}`
-      pickup.setAttribute('aria-label', `Select pickup for ${ride.initials}`)
-      pickup.onclick = () => onSelect(ride)
-      // Once assigned, the passenger/pickup status travels with the vehicle.
-      const pickupPosition = active?.id === ride.id ? driverPosition : ride.pickupCoords
-      markers.current.push(new mapboxgl.Marker({ element: pickup }).setLngLat(pickupPosition).addTo(map.current!))
-      if (selected?.id === ride.id || active?.id === ride.id) {
-        const dropoff = document.createElement('div')
-        dropoff.className = 'location-marker dropoff-marker'
-        dropoff.setAttribute('aria-label', 'Drop off')
-        markers.current.push(new mapboxgl.Marker({ element: dropoff }).setLngLat(ride.destinationCoords).addTo(map.current!))
-      }
-    })
-  }, [active, onSelect, progress, rides, route, selected?.id])
+    if (!loaded || !map.current || !driver.current || !pickupMarker.current) return
+    const road = lineString(route.coordinates)
+    const distance = length(road)
+    const position = along(road, distance * progress / 100)
+    const coordinates = position.geometry.coordinates as [number, number]
+    driver.current.setLngLat(coordinates)
+    pickupMarker.current.setLngLat(coordinates)
 
-  const minutes = route ? Math.max(1, Math.round(route.duration / 60)) : null
-  const kilometres = route ? (route.distance / 1000).toFixed(1) : null
-  return <>
-    <div ref={container} className="dispatch-map" aria-label="Live taxi dispatch map" />
-    {(active ?? selected) && <div className="route-summary"><span className="route-arrow">↗</span><div><small>{active ? 'DRIVING NOW' : 'SELECTED ROUTE'}</small><strong>{active ? `${Math.max(1, Math.ceil((minutes ?? 0) * (1 - progress / 100)))} min remaining` : `${minutes ?? '—'} min drive`}</strong></div><b>{kilometres ?? '—'} km</b></div>}
-  </>
+    const remaining = lineSlice(position, along(road, distance), road)
+    const source = map.current.getSource('route') as mapboxgl.GeoJSONSource | undefined
+    source?.setData(remaining)
+  }, [loaded, progress, route])
+
+  return <div ref={container} className="map" aria-label="Live driver route map" />
 }

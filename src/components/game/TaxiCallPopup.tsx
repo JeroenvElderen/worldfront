@@ -52,6 +52,7 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, onAcce
       const operation = travelOperationFor(job)
       return <article className={`job-card ${job.id === focusedJobId ? 'focused' : ''}`} key={job.id}>
         <header className="operation-heading"><span className="operation-icon">{operation.icon}</span><div><small>{operation.service} · {operation.reference}</small><strong>{category.label} · {passenger?.name ?? 'Passenger'}</strong></div><b className="job-timer">{remainingTime(job, now)}</b></header>
+        {job.demandLevel && <div className={`demand-signal demand-${job.demandLevel}`}><span>◉ {job.demandLevel} demand</span><small>{job.demandReason}{job.demandMultiplier && job.demandMultiplier > 1 ? ` · ${Math.round((job.demandMultiplier - 1) * 100)}% peak fare` : ''}</small></div>}
         <div className="job-route"><span>●</span><div><strong>{job.pickupLabel}</strong><i /><strong>{job.destinationLabel}</strong></div></div>
         <div className="job-meta"><span>{taxi && Number.isFinite(taxi.distance) ? `${taxi.distance.toFixed(1)} km to pickup` : 'No suitable staffed taxi'}</span><span>{job.distanceKm} km trip</span><b>{money.format(job.fare)}</b></div>
         <div className="dispatch-actions"><button className="view-job-map" onClick={() => onViewMap(job.id)} aria-label="View route on map">Map</button><button className="decline-call" onClick={() => onDecline(job.id)}>Pass</button><button className="accept-call" disabled={!taxi} onClick={() => onAccept(job.id)}>{taxi ? 'Dispatch' : 'Unavailable'}</button></div>

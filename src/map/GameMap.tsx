@@ -5,12 +5,13 @@ import { featureCollection, lineString, point } from '@turf/helpers'
 import { circle } from '@turf/turf'
 import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, irelandOverview } from '../data/cities'
-import type { Branch, Coordinates, TaxiJob, Vehicle } from '../models/game'
+import type { Branch, Coordinates, DemandHotspot, TaxiJob, Vehicle } from '../models/game'
 import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
+import { idleRoamPosition } from '../services/idleRoaming'
 
-interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; serviceRadiusKm: number; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; placingStation: boolean; onBuildStation: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void }
+interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; serviceRadiusKm: number; vehicles: Vehicle[]; jobs: TaxiJob[]; demandHotspots: DemandHotspot[]; focusedJobId: string | null; placingStation: boolean; onBuildStation: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void }
 const token = mapboxAccessToken
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
@@ -113,7 +114,7 @@ const removeJobRoute = (instance: mapboxgl.Map, jobId: string) => {
   if (instance.getSource(sourceId)) instance.removeSource(sourceId)
 }
 
-function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles, jobs, focusedJobId, placingStation, onBuildStation, onOpenJob }: GameMapProps) {
+function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles, jobs, demandHotspots, focusedJobId, placingStation, onBuildStation, onOpenJob }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const pickupJobIds = useRef(new Set<string>())
@@ -444,6 +445,61 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
 
   useEffect(() => {
     const instance = map.current
+    if (!instance) return
+    const updateDemand = () => {
+      const data = featureCollection(demandHotspots.map((hotspot) => point(hotspot.coordinates, {
+        name: hotspot.name,
+        score: hotspot.score,
+        reason: hotspot.reason,
+      })))
+      const source = instance.getSource('demand-hotspots') as mapboxgl.GeoJSONSource | undefined
+      if (source) { source.setData(data); return }
+      instance.addSource('demand-hotspots', { type: 'geojson', data })
+      instance.addLayer({
+        id: 'demand-hotspot-glow', type: 'circle', source: 'demand-hotspots',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['get', 'score'], 45, 14, 100, 38],
+          'circle-color': ['interpolate', ['linear'], ['get', 'score'], 45, '#38bdf8', 70, '#fbbf24', 88, '#fb7185'],
+          'circle-opacity': .18,
+          'circle-blur': .65,
+        },
+      })
+      instance.addLayer({
+        id: 'demand-hotspot-core', type: 'circle', source: 'demand-hotspots',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['get', 'score'], 45, 3, 100, 8],
+          'circle-color': ['interpolate', ['linear'], ['get', 'score'], 45, '#38bdf8', 70, '#fbbf24', 88, '#fb7185'],
+          'circle-stroke-color': 'rgba(255,255,255,.75)', 'circle-stroke-width': 1,
+        },
+      })
+      instance.addLayer({
+        id: 'demand-hotspot-label', type: 'symbol', source: 'demand-hotspots', minzoom: 11,
+        layout: { 'text-field': ['concat', ['get', 'name'], '\n', ['get', 'reason']], 'text-size': 9, 'text-offset': [0, 1.35], 'text-anchor': 'top', 'text-optional': true },
+        paint: { 'text-color': '#fff', 'text-halo-color': '#071821', 'text-halo-width': 2 },
+      })
+    }
+    if (instance.isStyleLoaded()) updateDemand()
+    else instance.once('load', updateDemand)
+    return () => { instance.off('load', updateDemand) }
+  }, [demandHotspots, mapRevision])
+
+  useEffect(() => {
+    const instance = map.current
+    if (!instance) return
+    const updateRoamingVehicles = () => {
+      for (const vehicle of vehicles) {
+        if (!vehicle.idleRoam || vehicle.status !== 'available') continue
+        const source = instance.getSource(vehicleSourceId(vehicle.id)) as mapboxgl.GeoJSONSource | undefined
+        source?.setData(point(idleRoamPosition(vehicle.idleRoam)))
+      }
+    }
+    updateRoamingVehicles()
+    const interval = window.setInterval(updateRoamingVehicles, 500)
+    return () => window.clearInterval(interval)
+  }, [vehicles, mapRevision])
+
+  useEffect(() => {
+    const instance = map.current
     if (!instance?.isStyleLoaded()) return
     // Closing the calls sheet changes the map viewport on mobile. Resize before
     // adding the accepted route so Mapbox never presents a stale/black frame.
@@ -752,6 +808,7 @@ export const GameMap = memo(GameMapView, (previous, next) =>
   previous.cityId === next.cityId &&
   previous.customCities === next.customCities &&
   previous.vehicles === next.vehicles &&
+  previous.demandHotspots === next.demandHotspots &&
   previous.focusedJobId === next.focusedJobId &&
   previous.onOpenJob === next.onOpenJob &&
   previous.jobs === next.jobs

@@ -21,6 +21,8 @@ The Mapbox public token is embedded in the app and should use URL/app restrictio
 
 The Dispatch screen presents each call as a Travel Empire operation, with a service type, priority, reference number, dispatch window, and resource checklist. This operational layer reuses the existing nearest-suitable-taxi assignment and does not change vehicle markers, road routing, or journey behaviour.
 
+Demand is simulated at real Mapbox points of interest using the accelerated game hour, day of week, and location type. Airports, stations, offices, schools, hotels, shops, healthcare, nightlife, and attractions peak at different times. The optional demand overlay shows live hotspots on the map, high-demand pickups are more likely to produce calls, and their fares include a visible peak-demand adjustment.
+
 ## Battery use
 
 The map is deliberately updated once per second while a taxi is moving instead
@@ -36,6 +38,8 @@ Vehicles are rendered as small map dots, with a consistent purple marker for
 every vehicle type and operating state.
 Active journeys follow a thin route line, and selecting a job highlights the
 road route the nearest available driver will take to its pickup and destination.
+Staffed taxis continue circulating locally while they wait for another call;
+dispatch captures their live patrol position before routing them to the pickup.
 
 ## Postal service
 

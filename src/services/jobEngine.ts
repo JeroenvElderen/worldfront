@@ -1,6 +1,7 @@
 import type { Company, TaxiJob, Vehicle } from '../models/game'
 import { addReputation, levelForReputation } from './companyProgression'
 import { isExclusiveTaxi } from '../data/taxis'
+import { idleRoamPosition } from './idleRoaming'
 
 export const MAX_JOB_OFFERS = 6
 export const JOB_OFFER_DURATION_MS = 5 * 60_000
@@ -62,18 +63,21 @@ export function acceptJobState(
   if (jobs.some((job) => job.id === jobId && job.status === 'accepted')) return null
 
   const job = jobs.find((candidate) => candidate.id === jobId && candidate.status === 'offered')
-  const vehicle = (job && vehicles
+  const currentVehicles = vehicles.map((candidate) => candidate.idleRoam
+    ? { ...candidate, position: idleRoamPosition(candidate.idleRoam) }
+    : candidate)
+  const vehicle = (job && currentVehicles
     .filter((candidate) => candidate.type === 'taxi' && candidate.status === 'available' && candidate.position && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
     .sort((left, right) => distanceSquared(left.position!, jobPickup(job)) - distanceSquared(right.position!, jobPickup(job)))[0])
-    ?? vehicles.find((candidate) => candidate.type === 'taxi' && candidate.status === 'available' && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
+    ?? currentVehicles.find((candidate) => candidate.type === 'taxi' && candidate.status === 'available' && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
   if (!vehicle || !job) return null
 
   return {
     jobs: jobs.map((candidate) => candidate.id === jobId
       ? { ...candidate, status: 'accepted' as const, assignedVehicleId: vehicle.id, acceptedAt: new Date().toISOString() }
       : candidate),
-    vehicles: vehicles.map((candidate) => candidate.id === vehicle.id
-      ? { ...candidate, status: 'on-job' as const }
+    vehicles: currentVehicles.map((candidate) => candidate.id === vehicle.id
+      ? { ...candidate, status: 'on-job' as const, idleRoam: undefined }
       : candidate),
   }
 }

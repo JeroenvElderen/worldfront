@@ -13,10 +13,15 @@ import { fleetSlotCapacity, maxJobDistanceForFleet } from './services/companyPro
 import { hasResearch } from './services/research'
 import { getTaxiModel } from './data/taxis'
 import { jobOfferCapacity } from './services/earlyGameEngine'
+import { getCity } from './data/cities'
+import type { DemandHotspot } from './models/game'
+import { getDemandHotspots } from './services/jobOfferService'
 
 export default function App() {
   const game = useGameStore()
   const [placingStation, setPlacingStation] = useState(false)
+  const [demandHotspots, setDemandHotspots] = useState<DemandHotspot[]>([])
+  const [showDemand, setShowDemand] = useState(true)
   const taxiCount = game.vehicles.filter((vehicle) => vehicle.type === 'taxi').length
   const serviceRadiusKm = maxJobDistanceForFleet(game.company?.level ?? 1, taxiCount) * (hasResearch(game.completedResearch ?? [], 'predictive-demand') ? 1.25 : 1)
   const stationPackageCost = Math.round(15_000 * (game.specialization === 'mobility' ? .9 : 1) * (hasResearch(game.completedResearch ?? [], 'prefab-depots') ? .8 : 1)) + getTaxiModel('toyota-corolla').price
@@ -30,6 +35,23 @@ export default function App() {
   const offeredJobCount = game.jobs.filter(
     (job) => job.status === 'offered',
   ).length
+
+  /** Refresh demand once per accelerated game hour and whenever the active city changes. */
+  useEffect(() => {
+    const foundedAt = company?.foundedAt
+    if (!foundedAt || !game.hasHydrated) return
+    const city = getCity(game.activeCityId ?? game.startingCityId, game.customCities)
+    if (!city) return
+    const controller = new AbortController()
+    const refresh = () => {
+      void getDemandHotspots(city, serviceRadiusKm, foundedAt, controller.signal)
+        .then(setDemandHotspots)
+        .catch((error: unknown) => { if ((error as Error).name !== 'AbortError') setDemandHotspots([]) })
+    }
+    refresh()
+    const interval = window.setInterval(refresh, 60_000)
+    return () => { controller.abort(); window.clearInterval(interval) }
+  }, [company?.foundedAt, game.activeCityId, game.startingCityId, game.customCities, game.hasHydrated, serviceRadiusKm])
 
   /**
    * Generate job offers when taxis are available.
@@ -285,6 +307,7 @@ export default function App() {
         serviceRadiusKm={serviceRadiusKm}
         vehicles={game.vehicles}
         jobs={game.jobs}
+        demandHotspots={showDemand ? demandHotspots : []}
         focusedJobId={game.focusedJobId}
         placingStation={placingStation}
         onBuildStation={(coordinates) => { game.buildStation(coordinates); setPlacingStation(false) }}
@@ -294,6 +317,10 @@ export default function App() {
       {game.company ? (
         <>
           <TopHud company={game.company} />
+
+          {game.activeSection === 'map' && <button className={`demand-toggle ${showDemand ? 'active' : ''}`} onClick={() => setShowDemand((visible) => !visible)} aria-pressed={showDemand}>
+            <span>◉</span><b>DEMAND</b><small>{showDemand ? `${demandHotspots.filter((hotspot) => hotspot.level === 'surging' || hotspot.level === 'busy').length} hotspots` : 'hidden'}</small>
+          </button>}
 
           {game.activeSection === 'map' && !placingStation && <button className="station-add-button" disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => setPlacingStation(true)} aria-label="Build next station">＋</button>}
           {placingStation && <aside className="depot-placement-banner"><span>⌖</span><div><b>Place Station {game.branches.length + 1}</b><small>Tap the map to build a station with one taxi for {new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(stationPackageCost)}.</small></div><button onClick={() => setPlacingStation(false)}>Cancel</button></aside>}

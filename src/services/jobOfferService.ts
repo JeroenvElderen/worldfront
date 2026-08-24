@@ -1,8 +1,9 @@
-import type { City, Coordinates, Passenger, TaxiJob } from '../models/game'
+import type { City, Coordinates, DemandHotspot, Passenger, TaxiJob } from '../models/game'
 import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 import { categoryDetails, categoryForRoute } from './earlyGameEngine'
+import { buildDemandHotspots, demandForPlace } from './demandEngine'
 
 export const MIN_JOB_DISTANCE_KM = 6
 export const MAX_PICKUP_DISTANCE_KM = 5
@@ -151,6 +152,11 @@ async function findMapboxPlaces(city: City, radiusKm: number, signal?: AbortSign
   return unlockedPlaces
 }
 
+/** Reuses the POI cache used for calls, so the heatmap does not duplicate Mapbox searches. */
+export async function getDemandHotspots(city: City, radiusKm: number, foundedAt?: string, signal?: AbortSignal): Promise<DemandHotspot[]> {
+  return buildDemandHotspots(city.id, await findMapboxPlaces(city, radiusKm, signal), foundedAt)
+}
+
 const routeSignature = (pickup: string, destination: string) =>
   `${pickup.trim().toLocaleLowerCase()}→${destination.trim().toLocaleLowerCase()}`
 
@@ -167,22 +173,24 @@ export async function generateJobOffers(
   maxDistanceKm = BASE_JOB_DISTANCE_KM,
   signal?: AbortSignal,
   taxiPositions: Coordinates[] = [city.coordinates],
-  fareMultiplier = 1
+  fareMultiplier = 1,
+  foundedAt?: string,
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
   const places = await findMapboxPlaces(city, maxDistanceKm, signal)
   const excluded = new Set(excludedRoutes)
   const routes = shuffled(places.flatMap((pickup) => places.flatMap((destination) => {
     const distanceKm = Math.round(distanceKmBetween(pickup.coordinates, destination.coordinates) * 10) / 10
     const signature = routeSignature(pickup.name, destination.name)
+    const demand = demandForPlace(pickup, foundedAt)
     return pickup.id !== destination.id &&
       taxiPositions.some((position) => distanceKmBetween(position, pickup.coordinates) <= MAX_PICKUP_DISTANCE_KM) &&
       distanceKmBetween(city.coordinates, pickup.coordinates) <= maxDistanceKm &&
       distanceKmBetween(city.coordinates, destination.coordinates) <= maxDistanceKm &&
       distanceKm >= MIN_JOB_DISTANCE_KM && distanceKm <= maxDistanceKm &&
       !excluded.has(signature)
-      ? [{ pickup, destination, distanceKm, signature }]
+      ? [{ pickup, destination, distanceKm, signature, demand, draw: Math.random() * 100 / Math.max(1, demand.score) }]
       : []
-  }))).slice(0, count)
+  }))).sort((left, right) => left.draw - right.draw).slice(0, count)
 
   if (!routes.length) throw new Error(`No new routes have a pickup within ${MAX_PICKUP_DISTANCE_KM} km of an available taxi. Try again after a taxi has moved.`)
 
@@ -196,13 +204,15 @@ export async function generateJobOffers(
   const jobs = routes.map((route, index): TaxiJob => {
     const category = categoryForRoute(route.pickup.name, route.destination.name, route.distanceKm, passengers[index].partySize)
     const categoryInfo = categoryDetails[category]
+    const demandMultiplier = 0.9 + route.demand.score / 250
     return ({
     id: crypto.randomUUID(), cityId: city.id,
     pickup: route.pickup.coordinates, destination: route.destination.coordinates,
     pickupRoad: stops[index].pickupRoad, destinationRoad: stops[index].destinationRoad,
     pickupLabel: route.pickup.name, destinationLabel: route.destination.name,
-    passengerIds: [passengers[index].id], fare: Math.round(taxiFareForDistance(route.distanceKm) * fareMultiplier * categoryInfo.fare * 100) / 100,
-    distanceKm: route.distanceKm, durationMinutes: Math.max(5, Math.round(route.distanceKm * 3.2)), category, requiredUpgrade: categoryInfo.requiredUpgrade, status: 'offered', offeredAt,
+    passengerIds: [passengers[index].id], fare: Math.round(taxiFareForDistance(route.distanceKm) * fareMultiplier * categoryInfo.fare * demandMultiplier * 100) / 100,
+    distanceKm: route.distanceKm, durationMinutes: Math.max(5, Math.round(route.distanceKm * 3.2)), category, requiredUpgrade: categoryInfo.requiredUpgrade,
+    demandLevel: route.demand.level, demandReason: route.demand.reason, demandMultiplier, status: 'offered', offeredAt,
   })})
 
   return {

@@ -325,6 +325,7 @@ export default function App() {
               vehicles={game.vehicles}
               jobs={game.jobs}
               passengers={game.passengers}
+              drivers={game.drivers}
               onAccept={game.acceptJob}
               onDecline={game.declineJob}
               onViewMap={game.showJobOnMap}

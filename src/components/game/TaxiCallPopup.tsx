@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
-import type { Passenger, TaxiJob, Vehicle } from '../../models/game'
-import { distanceKmBetween, jobOfferExpiresAt } from '../../services/jobEngine'
+import type { Driver, Passenger, TaxiJob, Vehicle } from '../../models/game'
+import { distanceKmBetween, jobOfferExpiresAt, jobPickup } from '../../services/jobEngine'
 import { categoryDetails, vehicleCanTakeJob } from '../../services/earlyGameEngine'
+import { licensePlateForVehicle, vehicleMakeAndModel } from '../../services/vehicleIdentity'
 
 interface TaxiCallPopupProps {
   focusedJobId: string | null
   vehicles: Vehicle[]
   jobs: TaxiJob[]
   passengers: Passenger[]
+  drivers: Driver[]
   onAccept: (jobId: string) => void
   onDecline: (jobId: string) => void
   onViewMap: (jobId: string) => void
@@ -29,7 +31,7 @@ const viewDetails: Array<{ id: JobView; label: string }> = [
   { id: 'complete', label: 'Completed' },
 ]
 
-export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, onAccept, onDecline, onViewMap, onClose }: TaxiCallPopupProps) {
+export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, drivers, onAccept, onDecline, onViewMap, onClose }: TaxiCallPopupProps) {
   const [now, setNow] = useState(Date.now())
   const [view, setView] = useState<JobView>('offered')
   const [categoryFilter, setCategoryFilter] = useState('all')
@@ -39,7 +41,6 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, onAcce
     return () => window.clearInterval(interval)
   }, [])
 
-  const availableTaxis = vehicles.filter((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available')
   const visibleJobs = jobs.filter((job) => job.status === view && (categoryFilter === 'all' || (job.category ?? 'standard') === categoryFilter))
   const availableCategories = [...new Set(jobs.map((job) => job.category ?? 'standard'))]
 
@@ -57,8 +58,16 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, onAcce
     </nav>
     <div className="job-list">{visibleJobs.length ? visibleJobs.map((job) => {
       const passenger = passengers.find((candidate) => job.passengerIds.includes(candidate.id))
-      const taxi = availableTaxis.filter((vehicle) => vehicle.driverId && vehicleCanTakeJob(vehicle, job, passenger?.partySize ?? 1))
-        .map((vehicle) => ({ vehicle, distance: vehicle.position ? distanceKmBetween(vehicle.position, job.pickup) : Infinity }))
+      const assignedTaxi = vehicles.find((vehicle) => vehicle.id === job.assignedVehicleId)
+      const taxi = assignedTaxi ? { vehicle: assignedTaxi, distance: 0 } : vehicles
+        .filter((vehicle) => {
+          const driver = drivers.find((candidate) => candidate.id === vehicle.driverId)
+          return vehicle.type === 'taxi' && vehicle.cityId === job.cityId && vehicle.status === 'available' && driver?.status === 'available' &&
+            vehicleCanTakeJob(vehicle, job, passenger?.partySize ?? 1) &&
+            (job.category !== 'accessible' || (driver.certifications ?? []).includes('accessible')) &&
+            (job.category !== 'executive' || (driver.certifications ?? []).includes('executive'))
+        })
+        .map((vehicle) => ({ vehicle, distance: vehicle.position ? distanceKmBetween(vehicle.position, jobPickup(job)) : Infinity }))
         .sort((left, right) => left.distance - right.distance)[0]
       const category = categoryDetails[job.category ?? 'standard']
       
@@ -75,6 +84,7 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, onAcce
           <span className="job-category">{category.label} <b>♟ {passenger?.partySize ?? 1}</b></span>
           <strong className="job-fare">{money.format(job.fare)}</strong>
           <small>{view === 'complete' ? 'Final fare' : 'Estimated fare'}</small>
+          {taxi && <div className="job-vehicle"><span aria-hidden="true">🚕</span><div><small>{view === 'offered' ? 'NEXT VEHICLE' : 'ASSIGNED VEHICLE'}</small><strong>{vehicleMakeAndModel(taxi.vehicle)}</strong></div><b>{licensePlateForVehicle(taxi.vehicle)}</b></div>}
           {view === 'offered' ? <>
             <button className="accept-call" disabled={!taxi} onClick={() => onAccept(job.id)}>{taxi ? 'Accept' : 'Unavailable'}</button>
             <div className="job-card-links"><button onClick={() => onViewMap(job.id)}>Map</button><button onClick={() => onDecline(job.id)}>Pass</button><span><i aria-hidden="true">◷</i>{remainingTime(job, now)}</span></div>

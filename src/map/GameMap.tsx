@@ -5,6 +5,7 @@ import { featureCollection, lineString, point } from '@turf/helpers'
 import { circle } from '@turf/turf'
 import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, irelandOverview } from '../data/cities'
+import { taxiModels } from '../data/taxis'
 import type { Branch, Coordinates, TaxiJob, Vehicle } from '../models/game'
 import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
@@ -72,6 +73,12 @@ const vehicleColor = {
   postal: '#8b5cf6',
   rental: '#8b5cf6',
 } as const
+
+const EXCLUSIVE_VEHICLE_COLOR = '#f5be48'
+const mapVehicleColor = (vehicle: Vehicle, standardColor: string) =>
+  vehicle.type === 'taxi' && taxiModels.some((model) => model.id === vehicle.modelId && model.collection === 'exclusive')
+    ? EXCLUSIVE_VEHICLE_COLOR
+    : standardColor
 
 const VEHICLE_MARKER_RADIUS = 4
 const VEHICLE_MARKER_STROKE_WIDTH = 1.5
@@ -286,7 +293,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
         const sourceId = vehicleSourceId(vehicle.id)
         if (!instance.getSource(sourceId)) {
           instance.addSource(sourceId, { type: 'geojson', data: point(start) })
-          instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': vehicle.type === 'post' ? vehicleColor.postal : job ? vehicleColor.pickingUp : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available, 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
+          instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': mapVehicleColor(vehicle, vehicle.type === 'post' ? vehicleColor.postal : job ? vehicleColor.pickingUp : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available), 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
         }
         if (!job && vehicle.serviceTrip) {
           const service = vehicle.serviceTrip
@@ -342,7 +349,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
             ? [...remainingRoute(pickupRoute.coordinates, progress), ...passengerRoute.coordinates.slice(1)]
             : remainingRoute(passengerRoute.coordinates, progress)
           ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(routeAhead))
-          instance.setPaintProperty(sourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
+          instance.setPaintProperty(sourceId, 'circle-color', mapVehicleColor(vehicle, pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger))
           if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
           instance.triggerRepaint()
           if (time < journey.arrivesAt) scheduleAnimation()
@@ -460,7 +467,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
         source: sourceId,
         paint: {
           'circle-radius': VEHICLE_MARKER_RADIUS,
-          'circle-color': vehicle.type === 'post' ? vehicleColor.postal : vehicle.type === 'rental' ? vehicleColor.rental : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available,
+          'circle-color': mapVehicleColor(vehicle, vehicle.type === 'post' ? vehicleColor.postal : vehicle.type === 'rental' ? vehicleColor.rental : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available),
           'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH,
           'circle-stroke-color': '#ffffff',
         },
@@ -523,11 +530,11 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
         instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': missionColor(job.id), 'line-width': 3, 'line-opacity': .9 } })
         if (instance.getLayer(taxiSourceId)) instance.moveLayer(routeSourceId, taxiSourceId)
       }
-      if (instance.getLayer(taxiSourceId)) instance.setPaintProperty(taxiSourceId, 'circle-color', vehicleColor.pickingUp)
+      if (instance.getLayer(taxiSourceId)) instance.setPaintProperty(taxiSourceId, 'circle-color', mapVehicleColor(vehicle, vehicleColor.pickingUp))
       const passengerSourceId = `pickup-${job.id}`
       if (instance.getLayer(passengerSourceId) && instance.getLayer(taxiSourceId)) {
         // Once assigned, the pickup dot becomes a passenger halo. Keep it
-        // underneath the purple vehicle dot so the vehicle marker stays clear.
+        // underneath the vehicle dot so the fleet marker stays clear.
         instance.setPaintProperty(passengerSourceId, 'circle-radius', VEHICLE_MARKER_RADIUS + 3)
         instance.setPaintProperty(passengerSourceId, 'circle-opacity', .45)
         instance.setPaintProperty(passengerSourceId, 'circle-stroke-width', 0)
@@ -577,7 +584,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
           ? [...remainingRoute(pickupRoute.coordinates, progress), ...passengerRoute.coordinates.slice(1)]
           : remainingRoute(passengerRoute.coordinates, progress)
         ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(routeAhead))
-        instance.setPaintProperty(taxiSourceId, 'circle-color', pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger)
+        instance.setPaintProperty(taxiSourceId, 'circle-color', mapVehicleColor(vehicle, pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger))
         const passengerSource = instance.getSource(passengerSourceId) as mapboxgl.GeoJSONSource | undefined
         // The halo waits at pickup, then rides with the passenger's vehicle.
         passengerSource?.setData(point(pickingUp ? job.pickup : currentPosition, { title: job.pickupLabel }))
@@ -609,7 +616,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
       liveJobRunners.current.delete(job.id)
       liveJobIds.current.delete(job.id)
       taxiSource?.setData(point(jobDestination(job)))
-      if (instance.getLayer(sourceId)) instance.setPaintProperty(sourceId, 'circle-color', vehicleColor.available)
+      if (instance.getLayer(sourceId)) instance.setPaintProperty(sourceId, 'circle-color', mapVehicleColor(vehicle, vehicleColor.available))
       const routeSourceId = jobRouteSourceId(job.id)
       if (instance.getLayer(routeSourceId)) instance.removeLayer(routeSourceId)
       if (instance.getSource(routeSourceId)) instance.removeSource(routeSourceId)

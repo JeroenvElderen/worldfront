@@ -16,11 +16,19 @@ export function TopHud({ company }: { company: Company }) {
   const date = new Intl.DateTimeFormat('en-IE', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(gameDate)
   const time = new Intl.DateTimeFormat('en-IE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' }).format(gameDate)
   return <header className="top-hud game-panel">
-    <div className="brand"><span className="brand-mark" aria-hidden="true">TE</span><div><small className="brand-kicker">COMMAND CENTER</small><p>{company.name}</p><small>{date} · {time}</small></div></div>
-    <div className="stats">
-      <div><small>CASH</small><strong className="cash">{money.format(company.cash)}</strong></div>
-      <div><small>REP</small><strong>★ {company.reputation.toFixed(1)}</strong></div>
-      <div className="level-stat" title={`${progression.current.toFixed(1)}/${progression.required} reputation · jobs up to ${progression.maxJobDistanceKm} km`}><small>LEVEL</small><strong>{progression.level}</strong><span>{progression.current.toFixed(1)}/{progression.required} · {progression.maxJobDistanceKm} KM</span><i><b style={{ width: `${Math.min(100, progression.current / progression.required * 100)}%` }} /></i></div>
+    <div className="hud-card balance-card">
+      <span className="hud-icon" aria-hidden="true">▰</span>
+      <span className="hud-copy"><strong>{money.format(company.cash)}</strong><small>Balance</small></span>
     </div>
+    <div className="hud-card level-card" title={`${progression.current.toFixed(1)}/${progression.required} reputation · jobs up to ${progression.maxJobDistanceKm} km`}>
+      <span className="level-gem" aria-hidden="true">{progression.level}</span>
+      <span className="hud-copy"><strong>Level {progression.level}</strong><i><b style={{ width: `${Math.min(100, progression.current / progression.required * 100)}%` }} /></i><small>{progression.current.toFixed(1)} / {progression.required} XP</small></span>
+    </div>
+    <div className="hud-card rating-card">
+      <span className="rating-star" aria-hidden="true">★</span>
+      <span className="hud-copy"><strong>{company.reputation.toFixed(1)}</strong><small>Rating</small></span>
+      <span className="hud-menu" aria-hidden="true">☰</span>
+    </div>
+    <span className="hud-context">{company.name} · {date} · {time}</span>
   </header>
 }

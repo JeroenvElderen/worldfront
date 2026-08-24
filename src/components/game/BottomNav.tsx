@@ -1,13 +1,13 @@
 import type { Section } from '../../stores/gameStore'
 
 const items: { id: Section; label: string; hint: string; icon: string }[] = [
-  { id: 'map', label: 'Map', hint: 'Live operations', icon: '⌖' },
-  { id: 'jobs', label: 'Dispatch', hint: 'Travel operations', icon: '☷' },
-  { id: 'fleet', label: 'Fleet', hint: 'Vehicles', icon: '◈' },
-  { id: 'hotels', label: 'Hotels', hint: 'Properties & markets', icon: '▥' },
+  { id: 'map', label: 'Map', hint: 'Live operations', icon: '◇' },
+  { id: 'jobs', label: 'Dispatch', hint: 'Travel operations', icon: '▣' },
+  { id: 'fleet', label: 'Fleet', hint: 'Vehicles', icon: '▱' },
+  { id: 'hotels', label: 'Hotels', hint: 'Properties & markets', icon: '▦' },
   { id: 'travel', label: 'Travel', hint: 'Grow network', icon: '✈' },
   { id: 'finance', label: 'Finance', hint: 'Performance', icon: '€' },
-  { id: 'company', label: 'Company', hint: 'Team & goals', icon: '▦' },
+  { id: 'company', label: 'Company', hint: 'Team & goals', icon: '▥' },
 ]
 export function BottomNav({ active, onChange, availableJobCount = 0 }: { active: Section; onChange: (section: Section) => void; availableJobCount?: number }) {
   return <nav className="bottom-nav game-panel" aria-label="Game sections">{items.map((item) =>

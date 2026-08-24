@@ -365,6 +365,7 @@ export default function App() {
                 onClose={() =>
                   game.setSection('map')
                 }
+                onOpenFleet={() => game.setSection('fleet')}
                 onReset={game.resetGame}
                 onBuyTaxi={game.buyTaxi}
                 onLeaseTaxi={game.leaseTaxi}

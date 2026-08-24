@@ -6,7 +6,8 @@
 .vehicle-follow span { display: flex; align-items: center; gap: 6px; }
 .vehicle-follow b { color: #8b5cf6; text-shadow: 0 0 8px #8b5cf6; }
 .vehicle-follow i { color: #46ddb6; font-size: 7px; font-style: normal; letter-spacing: .12em; }
-.vehicle-follow button { border: 0; border-radius: 999px; background: rgba(36, 213, 174, .15); color: #46ddb6; padding: 6px 10px; font-size: 9px; font-weight: 850; }
+.vehicle-follow button { min-height: 30px; border: 0; border-radius: 999px; background: rgba(36, 213, 174, .15); color: #46ddb6; padding: 6px 11px; font-size: 9px; font-weight: 850; cursor: pointer; }
+.vehicle-follow button:hover { background: rgba(36, 213, 174, .24); }
 
 :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; color: #eaf7f4; background: #08131d; font-synthesis: none; }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }

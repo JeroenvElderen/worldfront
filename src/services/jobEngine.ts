@@ -4,7 +4,8 @@ import { addReputation, levelForReputation } from './companyProgression'
 
 export const MAX_JOB_OFFERS = 6
 export const JOB_OFFER_DURATION_MS = 5 * 60_000
-// Trips take 8% of their estimated real-world duration (a 12.5x game clock).
+// Trips normally use the accelerated game clock. Follow mode temporarily
+// compensates for this scale for the vehicle being watched.
 export const REAL_TIME_TRIP_SCALE = 0.06
 export const SIMULATED_MINUTE_MS = 60_000 * REAL_TIME_TRIP_SCALE
 // Give the driver a brief dispatch window before the taxi pulls away.

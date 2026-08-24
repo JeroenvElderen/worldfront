@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { featureCollection, lineString, point } from '@turf/helpers'
@@ -7,7 +7,7 @@ import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, irelandOverview } from '../data/cities'
 import { taxiModels } from '../data/taxis'
 import type { Branch, Coordinates, TaxiJob, Vehicle } from '../models/game'
-import { getJobJourney, jobDestination, jobPickup, REAL_TIME_TRIP_SCALE } from '../services/jobEngine'
+import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
 
@@ -106,112 +106,6 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
   const liveJobTimers = useRef(new Map<string, number>())
   const liveJobRunners = useRef(new Map<string, () => void>())
   const [mapRevision, setMapRevision] = useState(0)
-  const [followedVehicleId, setFollowedVehicleId] = useState<string | null>(null)
-  const followedVehicleIdRef = useRef<string | null>(null)
-  const followClock = useRef<{ startedAt: number; journeyTime: number } | null>(null)
-
-  const stopFollowing = useCallback(() => {
-    const instance = map.current
-    followedVehicleIdRef.current = null
-    followClock.current = null
-    setFollowedVehicleId(null)
-    if (!instance) return
-    instance.easeTo({
-      pitch: 48,
-      bearing: -12,
-      zoom: Math.min(instance.getZoom(), 15),
-      padding: 0,
-      duration: 650,
-    })
-  }, [])
-
-  useEffect(() => {
-    if (!followedVehicleId) return
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') stopFollowing()
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => { window.removeEventListener('keydown', handleKeyDown) }
-  }, [followedVehicleId, stopFollowing])
-
-  useEffect(() => {
-    const instance = map.current
-    if (!instance?.isStyleLoaded()) return
-
-    const handlers = vehicles.flatMap((vehicle) => {
-      const layerId = vehicleSourceId(vehicle.id)
-      if (!instance.getLayer(layerId)) return []
-
-      const enter = () => { instance.getCanvas().style.cursor = 'pointer' }
-      const leave = () => { instance.getCanvas().style.cursor = '' }
-      const click = (event: mapboxgl.MapMouseEvent) => {
-        event.originalEvent.stopPropagation()
-        if (window.confirm(`Follow ${vehicle.name} as it drives?`)) {
-          const now = Date.now()
-          followedVehicleIdRef.current = vehicle.id
-          followClock.current = { startedAt: now, journeyTime: now }
-          setFollowedVehicleId(vehicle.id)
-        }
-      }
-
-      instance.on('mouseenter', layerId, enter)
-      instance.on('mouseleave', layerId, leave)
-      instance.on('click', layerId, click)
-      return [{ layerId, enter, leave, click }]
-    })
-
-    return () => {
-      handlers.forEach(({ layerId, enter, leave, click }) => {
-        if (!instance.getLayer(layerId)) return
-        instance.off('mouseenter', layerId, enter)
-        instance.off('mouseleave', layerId, leave)
-        instance.off('click', layerId, click)
-      })
-    }
-  }, [mapRevision, vehicles])
-
-  useEffect(() => {
-    const instance = map.current
-    if (!instance || !followedVehicleId) return
-    const sourceId = vehicleSourceId(followedVehicleId)
-    let lastPosition: Coordinates | null = null
-    let cameraBearing = instance.getBearing()
-
-    const follow = () => {
-      if (map.current !== instance || !instance.getSource(sourceId)) return
-      const feature = instance.querySourceFeatures(sourceId)[0]
-      if (!feature || feature.geometry.type !== 'Point') return
-      const coordinates = feature.geometry.coordinates as Coordinates
-      if (lastPosition?.[0] === coordinates[0] && lastPosition[1] === coordinates[1]) return
-
-      if (lastPosition) {
-        const averageLatitude = (lastPosition[1] + coordinates[1]) / 2 * Math.PI / 180
-        const longitudeDelta = (coordinates[0] - lastPosition[0]) * Math.cos(averageLatitude)
-        const latitudeDelta = coordinates[1] - lastPosition[1]
-        const roadBearing = Math.atan2(longitudeDelta, latitudeDelta) * 180 / Math.PI
-        const bearingDelta = ((roadBearing - cameraBearing + 540) % 360) - 180
-        cameraBearing += bearingDelta * .22
-      }
-
-      lastPosition = coordinates
-      // Push the vehicle towards the bottom of the screen so the pitched
-      // camera reads like a driver's view with the road opening up ahead.
-      instance.jumpTo({
-        center: coordinates,
-        bearing: cameraBearing,
-        pitch: 80,
-        zoom: 18.5,
-        padding: { top: 0, right: 0, bottom: instance.getContainer().clientHeight * .3, left: 0 },
-      })
-    }
-
-    instance.on('render', follow)
-    follow()
-    return () => { instance.off('render', follow) }
-  }, [followedVehicleId, mapRevision])
-
   useEffect(() => {
     const instance = map.current
     if (!instance) return
@@ -440,13 +334,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
             animationTimers.delete(animationTimer)
           }
           const now = Date.now()
-          const clock = followedVehicleIdRef.current === vehicle.id ? followClock.current : null
-          // While this vehicle is followed, advance its displayed journey at
-          // real-world speed. Exiting follow immediately returns it to the
-          // accelerated game-clock position.
-          const time = clock
-            ? clock.journeyTime + (now - clock.startedAt) * REAL_TIME_TRIP_SCALE
-            : now
+          const time = now
           const pickingUp = time < journey.pickupAt
           const elapsed = pickingUp
             ? Math.max(0, Math.min(1, (time - journey.departsAt) / (journey.pickupAt - journey.departsAt)))
@@ -867,13 +755,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
     }
   }, [cityId, customCities, focusedJobId, jobs, vehicles, mapRevision])
 
-  return <>
-    <div ref={container} className="absolute inset-0" aria-label="Interactive game map" />
-    {followedVehicleId && <div className="vehicle-follow game-panel" role="status" aria-live="polite">
-      <span><b>●</b><i>DRIVER VIEW</i> {vehicles.find((vehicle) => vehicle.id === followedVehicleId)?.name ?? 'vehicle'}</span>
-      <button type="button" onClick={stopFollowing} aria-label="Stop following vehicle">Stop following</button>
-    </div>}
-  </>
+  return <div ref={container} className="absolute inset-0" aria-label="Interactive game map" />
 }
 
 export const GameMap = memo(GameMapView, (previous, next) =>

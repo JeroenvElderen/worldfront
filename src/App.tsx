@@ -297,20 +297,6 @@ export default function App() {
           {game.activeSection === 'map' && !placingStation && <button className="station-add-button" disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => setPlacingStation(true)} aria-label="Build next station">＋</button>}
           {placingStation && <aside className="depot-placement-banner"><span>⌖</span><div><b>Place Station {game.branches.length + 1}</b><small>Tap the map to build a station with one taxi for {new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(stationPackageCost)}.</small></div><button onClick={() => setPlacingStation(false)}>Cancel</button></aside>}
 
-          {game.activeEvent && (
-            <aside className="event-banner">
-              <b>
-                ⚡ {game.activeEvent.name}
-              </b>
-
-              <span>
-                {game.activeEvent.description}
-                {' · '}
-                Fares ×
-                {game.activeEvent.fareMultiplier.toFixed(2)}
-              </span>
-            </aside>
-          )}
           {game.worldCondition && game.worldCondition.weather !== 'clear' && (
             <aside className="weather-chip" title={game.worldCondition.description}>
               <span>{game.worldCondition.weather === 'rain' ? '🌧️' : game.worldCondition.weather === 'snow' ? '🌨️' : game.worldCondition.weather === 'storm' ? '⛈️' : '🌡️'}</span>

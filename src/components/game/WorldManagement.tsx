@@ -1,6 +1,6 @@
+import { useCurrency } from './CurrencyContext'
 import type { BrandStrategy, Competitor, Difficulty, Driver, DriverCertification, Vehicle, VehicleIncident, WorldCondition } from '../../models/game'
 
-const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
 const certifications: DriverCertification[] = ['accessible', 'executive', 'coach', 'hazardous']
 
 interface Props {
@@ -9,6 +9,7 @@ interface Props {
 }
 
 export function WorldManagement({ cash, competitors, difficulty, condition, incidents, brand, drivers, vehicles, onDifficulty, onBrand, onMarketing, onPartner, onAcquire, onTrain, onResolve }: Props) {
+  const { money } = useCurrency()
   return <div className="world-management">
     <div className="condition-hero"><span>{condition.weather === 'rain' ? '🌧️' : condition.weather === 'snow' ? '🌨️' : condition.weather === 'storm' ? '⛈️' : condition.weather === 'heatwave' ? '🌡️' : '☀️'}</span><div><small>LIVE OPERATING CONDITIONS · {condition.temperatureC}°C</small><strong>{condition.weather} · {condition.disruption.replace('-', ' ')}</strong><p>{condition.description}</p></div></div>
 

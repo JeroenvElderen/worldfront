@@ -1,12 +1,12 @@
 import { cities, getCity } from '../../data/cities'
 import type { City, CityEconomy, Company, Hotel } from '../../models/game'
+import { useCurrency } from './CurrencyContext'
 import { HOTEL_PURCHASE_COST, hotelOccupancy, hotelUpgradeCost, pendingHotelRevenue } from '../../services/hotelEconomy'
-
-const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
 
 interface Props { company: Company; activeCityId: string; customCities: City[]; hotels: Hotel[]; economies: CityEconomy[]; onBuy: () => void; onUpgrade: (id: string) => void; onCollect: (id: string) => void; onClose: () => void }
 
 export function HotelDashboard({ company, activeCityId, customCities, hotels, economies, onBuy, onUpgrade, onCollect, onClose }: Props) {
+  const { money } = useCurrency()
   const city = getCity(activeCityId, customCities)
   const economy = economies.find((item) => item.cityId === activeCityId)
   const hotel = hotels.find((item) => item.cityId === activeCityId)

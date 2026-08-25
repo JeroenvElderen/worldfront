@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
 import type { FinancialTransaction, Vehicle } from '../../models/game'
 import { vehicleMarketValue } from '../../services/vehicleEconomics'
+import { useCurrency } from './CurrencyContext'
 
-const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
 const periods = { day: 24 * 60 * 60 * 1_000, week: 7 * 24 * 60 * 60 * 1_000, all: Number.POSITIVE_INFINITY }
 
 export function FinancialDashboard({ cash, debt, transactions, vehicles, onClose }: { cash: number; debt: number; transactions: FinancialTransaction[]; vehicles: Vehicle[]; onClose: () => void }) {
+  const { money, locale } = useCurrency()
   const [period, setPeriod] = useState<keyof typeof periods>('week')
   const filtered = useMemo(() => transactions
     .filter((entry) => Date.now() - new Date(entry.occurredAt).getTime() <= periods[period])
@@ -36,6 +37,6 @@ export function FinancialDashboard({ cash, debt, transactions, vehicles, onClose
     <h3>Breakdown</h3>
     <div className="category-breakdown">{categories.length ? categories.map(([category, amount]) => <div key={category}><span>{category}</span><i><em style={{ width: `${Math.abs(amount) / maxCategory * 100}%` }} /></i><b className={amount >= 0 ? 'positive' : 'negative'}>{money.format(amount)}</b></div>) : <p>No transactions in this period yet.</p>}</div>
     <h3>Recent transactions</h3>
-    <div className="transaction-list">{filtered.length ? filtered.slice(0, 40).map((entry) => <div key={entry.id}><span><b>{entry.description}</b><small>{new Date(entry.occurredAt).toLocaleString('en-IE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {entry.category}</small></span><strong className={entry.amount >= 0 ? 'positive' : 'negative'}>{entry.amount >= 0 ? '+' : ''}{money.format(entry.amount)}</strong></div>) : <p>Complete a job or make a purchase to begin your ledger.</p>}</div>
+    <div className="transaction-list">{filtered.length ? filtered.slice(0, 40).map((entry) => <div key={entry.id}><span><b>{entry.description}</b><small>{new Date(entry.occurredAt).toLocaleString(locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {entry.category}</small></span><strong className={entry.amount >= 0 ? 'positive' : 'negative'}>{entry.amount >= 0 ? '+' : ''}{money.format(entry.amount)}</strong></div>) : <p>Complete a job or make a purchase to begin your ledger.</p>}</div>
   </section>
 }

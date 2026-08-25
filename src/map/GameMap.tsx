@@ -4,7 +4,7 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 import { featureCollection, lineString, point } from '@turf/helpers'
 import { circle } from '@turf/turf'
 import { mapboxAccessToken } from '../config/mapbox'
-import { getCity, irelandOverview } from '../data/cities'
+import { getCity, worldOverview } from '../data/cities'
 import { taxiModels } from '../data/taxis'
 import type { Branch, Coordinates, TaxiJob, Vehicle } from '../models/game'
 import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
@@ -132,8 +132,8 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
     const instance = new mapboxgl.Map({
       container: container.current,
       style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle,
-      center: selected?.coordinates ?? irelandOverview.center,
-      zoom: selected?.mapZoom ?? irelandOverview.zoom,
+      center: selected?.coordinates ?? worldOverview.center,
+      zoom: selected?.mapZoom ?? worldOverview.zoom,
       pitch: 48,
       bearing: -12,
       attributionControl: false,

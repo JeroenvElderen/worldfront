@@ -14,6 +14,9 @@ import { fleetSlotCapacity, maxJobDistanceForFleet } from './services/companyPro
 import { hasResearch } from './services/research'
 import { getTaxiModel } from './data/taxis'
 import { jobOfferCapacity } from './services/earlyGameEngine'
+import { getCity } from './data/cities'
+import { moneyFormatterForCity } from './services/localization'
+import { CurrencyProvider } from './components/game/CurrencyContext'
 
 export default function App() {
   const game = useGameStore()
@@ -23,6 +26,8 @@ export default function App() {
   const stationPackageCost = Math.round(15_000 * (game.specialization === 'mobility' ? .9 : 1) * (hasResearch(game.completedResearch ?? [], 'prefab-depots') ? .8 : 1)) + getTaxiModel('toyota-corolla').price
   const researchFleetSlots = (hasResearch(game.completedResearch ?? [], 'autonomous-operations') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'global-network') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'regional-hubs') ? game.branches.length : 0)
   const stationFleetFull = game.vehicles.length >= fleetSlotCapacity(game.company?.level ?? 1, game.garageLevel ?? 0, game.branches) + researchFleetSlots
+  const activeCity = getCity(game.activeCityId ?? game.startingCityId, game.customCities ?? [])
+  const money = moneyFormatterForCity(activeCity)
 
   const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, runAutomation, hasHydrated } = game
 
@@ -275,6 +280,7 @@ export default function App() {
   }
 
   return (
+    <CurrencyProvider city={activeCity}>
     <div className="game-shell">
       <GameMap
         cityId={game.activeCityId ?? game.startingCityId}
@@ -294,7 +300,7 @@ export default function App() {
           <TopHud company={game.company} />
 
           {game.activeSection === 'map' && !placingStation && <button className="station-add-button" disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => setPlacingStation(true)} aria-label="Build next station">＋</button>}
-          {placingStation && <aside className="depot-placement-banner"><span>⌖</span><div><b>Place Station {game.branches.length + 1}</b><small>Tap the map to build a station with one taxi for {new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(stationPackageCost)}.</small></div><button onClick={() => setPlacingStation(false)}>Cancel</button></aside>}
+          {placingStation && <aside className="depot-placement-banner"><span>⌖</span><div><b>Place Station {game.branches.length + 1}</b><small>Tap the map to build a station with one taxi for {money.format(stationPackageCost)}.</small></div><button onClick={() => setPlacingStation(false)}>Cancel</button></aside>}
 
           {game.worldCondition && game.worldCondition.weather !== 'clear' && (
             <aside className="weather-chip" title={game.worldCondition.description}>
@@ -340,7 +346,7 @@ export default function App() {
                 agencies={game.agencies ?? []}
                 tours={game.tours ?? []}
                 coachRoutes={game.coachRoutes ?? []}
-                countryLicenses={game.countryLicenses ?? ['IE']}
+                countryLicenses={game.countryLicenses ?? []}
                 transportAssets={game.transportAssets ?? []}
                 transportRoutes={game.transportRoutes ?? []}
                 contracts={game.contracts ?? []}
@@ -446,5 +452,6 @@ export default function App() {
         />
       )}
     </div>
+    </CurrencyProvider>
   )
 }

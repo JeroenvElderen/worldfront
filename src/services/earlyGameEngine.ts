@@ -41,7 +41,7 @@ export function createDriverCandidates(home: Driver['home'], now = Date.now()): 
 
 const goalTemplates: Array<{ metric: GoalMetric; label: (target: number) => string; daily: number; weekly: number }> = [
   { metric: 'fares', label: (n) => `Complete ${n} taxi fares`, daily: 3, weekly: 15 },
-  { metric: 'earnings', label: (n) => `Earn €${n.toLocaleString()} from jobs`, daily: 500, weekly: 3_000 },
+  { metric: 'earnings', label: (n) => `Earn ${n.toLocaleString()} from jobs`, daily: 500, weekly: 3_000 },
   { metric: 'safe-jobs', label: (n) => `Finish ${n} jobs above 20% energy`, daily: 2, weekly: 10 },
   { metric: 'postal-rounds', label: (n) => `Complete ${n} postal round${n === 1 ? '' : 's'}`, daily: 1, weekly: 4 },
   { metric: 'airport-jobs', label: (n) => `Serve ${n} airport customers`, daily: 2, weekly: 8 },

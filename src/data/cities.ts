@@ -31,8 +31,8 @@ export const countries = [
   { code: 'PT', name: 'Portugal', flag: '🇵🇹', licenseCost: 85_000 },
 ] as const
 
-export const irelandOverview = {
-  center: [-8.1, 53.25] as [number, number],
-  zoom: 5.7,
+export const worldOverview = {
+  center: [0, 25] as [number, number],
+  zoom: 1.7,
 }
 export const getCity = (id: string | null, customCities: City[] = []) => [...customCities, ...cities].find((city) => city.id === id)

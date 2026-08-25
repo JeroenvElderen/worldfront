@@ -229,3 +229,6 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
   .jobs-sheet { left: 238px; width: min(720px, calc(100vw - 270px)); max-height: min(640px, calc(100dvh - 132px)); }
   .jobs-sheet .job-list { max-height: calc(min(640px, calc(100dvh - 132px)) - 146px); }
 }
+
+.automation-log { display: grid; gap: .4rem; margin-top: .75rem; padding-top: .75rem; border-top: 1px solid rgba(255,255,255,.1); }
+.automation-log small { display: block; opacity: .78; }

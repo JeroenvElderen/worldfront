@@ -36,7 +36,8 @@ export interface CoachRoute { id: string; fromCityId: string; toCityId: string; 
 export type TransportMode = 'train' | 'ferry' | 'airliner'
 export interface TransportAsset { id: string; mode: TransportMode; name: string; model: string; capacity: number; speedKmh: number; value: number; condition: number; status: 'available' | 'on-route'; cityId: string; lifetimeRevenue: number; journey?: { routeId: string; startedAt: string; arrivesAt: string; reward: number; distanceKm: number; destinationCityId: string } }
 export interface TransportRoute { id: string; mode: TransportMode; fromCityId: string; toCityId: string; name: string; ticketPrice: number; assetId?: string; departureHour?: number; frequencyHours?: number }
-export interface AutomationPolicy { enabled: boolean; minFare: number; maxPickupKm: number; autoServiceBelow: number }
+export interface AutomationLogEntry { id: string; occurredAt: string; action: 'dispatch' | 'service'; message: string }
+export interface AutomationPolicy { enabled: boolean; minFare: number; maxPickupKm: number; minFuel: number; minCondition: number; autoServiceBelow: number; cashReserve: number; activity: AutomationLogEntry[] }
 export interface BusinessContract { id: string; name: string; description: string; category: JobCategory | 'postal' | 'tour'; target: number; progress: number; reward: number; expiresAt: string; accepted: boolean; completed: boolean }
 export interface Loan { id: string; principal: number; balance: number; paymentAmount: number; nextPaymentAt: string }
 export interface DynamicEvent { id: string; name: string; description: string; fareMultiplier: number; fuelMultiplier: number; expiresAt: string }

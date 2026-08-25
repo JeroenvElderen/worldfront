@@ -296,6 +296,18 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
         }
         if (!job && vehicle.serviceTrip) {
           const service = vehicle.serviceTrip
+          let roadCoordinates: number[][] = [service.from, service.destination]
+          if (token) {
+            void (async () => {
+              try {
+                const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${service.from.join(',')};${service.destination.join(',')}?continue_straight=true&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
+                if (response.ok) {
+                  const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] } }> }
+                  roadCoordinates = result.routes?.[0]?.geometry.coordinates ?? roadCoordinates
+                }
+              } catch { /* The direct route keeps recovery trips moving offline. */ }
+            })()
+          }
           let serviceTimer: number | undefined
           const animateService = () => {
             if (serviceTimer !== undefined) {
@@ -305,7 +317,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
             const startedAt = new Date(service.startedAt).getTime()
             const arrivesAt = new Date(service.arrivesAt).getTime()
             const progress = Math.max(0, Math.min(1, (Date.now() - startedAt) / (arrivesAt - startedAt)))
-            ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition([service.from, service.destination], progress)))
+            ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(roadCoordinates, progress)))
             instance.triggerRepaint()
             if (progress < 1 && document.visibilityState !== 'hidden') { serviceTimer = window.setTimeout(animateService, JOURNEY_UPDATE_INTERVAL_MS); animationTimers.add(serviceTimer) }
           }

@@ -294,35 +294,6 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
           instance.addSource(sourceId, { type: 'geojson', data: point(start) })
           instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': mapVehicleColor(vehicle, vehicle.type === 'post' ? vehicleColor.postal : job ? vehicleColor.pickingUp : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available), 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
         }
-        if (!job && vehicle.serviceTrip) {
-          const service = vehicle.serviceTrip
-          let roadCoordinates: number[][] = [service.from, service.destination]
-          if (token) {
-            void (async () => {
-              try {
-                const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${service.from.join(',')};${service.destination.join(',')}?continue_straight=true&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
-                if (response.ok) {
-                  const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] } }> }
-                  roadCoordinates = result.routes?.[0]?.geometry.coordinates ?? roadCoordinates
-                }
-              } catch { /* The direct route keeps recovery trips moving offline. */ }
-            })()
-          }
-          let serviceTimer: number | undefined
-          const animateService = () => {
-            if (serviceTimer !== undefined) {
-              window.clearTimeout(serviceTimer)
-              animationTimers.delete(serviceTimer)
-            }
-            const startedAt = new Date(service.startedAt).getTime()
-            const arrivesAt = new Date(service.arrivesAt).getTime()
-            const progress = Math.max(0, Math.min(1, (Date.now() - startedAt) / (arrivesAt - startedAt)))
-            ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(roadCoordinates, progress)))
-            instance.triggerRepaint()
-            if (progress < 1 && document.visibilityState !== 'hidden') { serviceTimer = window.setTimeout(animateService, JOURNEY_UPDATE_INTERVAL_MS); animationTimers.add(serviceTimer) }
-          }
-          animationRunners.add(animateService); animateService(); continue
-        }
         if (!job) continue
         liveJobIds.current.add(job.id)
         const routeSourceId = jobRouteSourceId(job.id)
@@ -634,6 +605,65 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
       if (instance.getSource(routeSourceId)) instance.removeSource(routeSourceId)
     }
   }, [cityId, customCities, jobs, vehicles, mapRevision, onOpenJob])
+
+  // Recovery trips can begin long after Mapbox was constructed. Animate them
+  // in their own synchronized effect so a newly tired driver drives away
+  // immediately instead of having the marker jump when tickJobs settles it.
+  useEffect(() => {
+    const instance = map.current
+    if (!instance?.isStyleLoaded()) return
+    const abortController = new AbortController()
+    const timers = new Set<number>()
+    const routeSourceIds: string[] = []
+
+    vehicles.filter((vehicle) => vehicle.serviceTrip).forEach((vehicle) => {
+      const service = vehicle.serviceTrip!
+      const vehicleId = vehicleSourceId(vehicle.id)
+      const routeId = `${vehicleId}-service-route`
+      let roadCoordinates: number[][] = [service.from, service.destination]
+      routeSourceIds.push(routeId)
+      if (!instance.getSource(routeId)) {
+        instance.addSource(routeId, { type: 'geojson', data: lineString(roadCoordinates) })
+        instance.addLayer({ id: routeId, type: 'line', source: routeId, paint: { 'line-color': '#8b5cf6', 'line-width': 2, 'line-opacity': .65, 'line-dasharray': [2, 2] } })
+        instance.moveLayer(routeId, vehicleId)
+      }
+
+      if (token) void (async () => {
+        try {
+          const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${service.from.join(',')};${service.destination.join(',')}?continue_straight=true&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
+          if (!response.ok) return
+          const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] } }> }
+          roadCoordinates = result.routes?.[0]?.geometry.coordinates ?? roadCoordinates
+          ;(instance.getSource(routeId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(roadCoordinates))
+        } catch { /* Keep animating on direct fallback geometry when offline. */ }
+      })()
+
+      let timer: number | undefined
+      const animate = () => {
+        if (timer !== undefined) timers.delete(timer)
+        const startedAt = new Date(service.startedAt).getTime()
+        const arrivesAt = new Date(service.arrivesAt).getTime()
+        const progress = Math.max(0, Math.min(1, (Date.now() - startedAt) / Math.max(1, arrivesAt - startedAt)))
+        ;(instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(roadCoordinates, progress)))
+        ;(instance.getSource(routeId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(remainingRoute(roadCoordinates, progress)))
+        instance.triggerRepaint()
+        if (progress < 1 && document.visibilityState !== 'hidden') {
+          timer = window.setTimeout(animate, JOURNEY_UPDATE_INTERVAL_MS)
+          timers.add(timer)
+        }
+      }
+      animate()
+    })
+
+    return () => {
+      abortController.abort()
+      timers.forEach(window.clearTimeout)
+      routeSourceIds.forEach((routeId) => {
+        if (instance.getLayer(routeId)) instance.removeLayer(routeId)
+        if (instance.getSource(routeId)) instance.removeSource(routeId)
+      })
+    }
+  }, [vehicles, mapRevision])
 
   useEffect(() => {
     const instance = map.current

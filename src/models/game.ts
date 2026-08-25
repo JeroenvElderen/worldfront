@@ -1,11 +1,11 @@
 export type Coordinates = [longitude: number, latitude: number]
 export type VehicleStatus = 'available' | 'on-job' | 'maintenance'
 export type VehicleOwnership = 'owned' | 'financed' | 'leased'
-export type ServiceTripKind = 'fuel' | 'home'
+export type ServiceTripKind = 'fuel' | 'home' | 'lodging'
 export type TaxiPowertrain = 'diesel' | 'hybrid' | 'electric'
 export type ExteriorAccessory = 'panoramic-roof' | 'towbar' | 'roof-rack' | 'mud-flaps' | 'wind-deflectors'
 export type DriverTrait = 'careful' | 'efficient' | 'charming' | 'night-owl' | 'local-expert' | 'unreliable'
-export type VehicleUpgrade = 'eco-tires' | 'premium-seats' | 'range-pack' | 'meter-pro' | 'roof-sign' | 'parcel-shelving' | 'dash-camera'
+export type VehicleUpgrade = 'eco-tires' | 'premium-seats' | 'wifi' | 'air-conditioning' | 'luggage-capacity' | 'wheelchair-access' | 'child-seats' | 'entertainment-system' | 'security-partition' | 'luxury-interior' | 'range-pack' | 'meter-pro' | 'roof-sign' | 'parcel-shelving' | 'dash-camera'
 export type RefuelStrategy = 'automatic' | 'fast' | 'economy' | 'overnight'
 export type JobCategory = 'standard' | 'airport' | 'family' | 'executive' | 'accessible' | 'late-night' | 'long-distance' | 'courier' | 'pet-friendly'
 export type GoalMetric = 'fares' | 'earnings' | 'safe-jobs' | 'postal-rounds' | 'airport-jobs' | 'rating'

@@ -232,3 +232,4 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 
 .automation-log { display: grid; gap: .4rem; margin-top: .75rem; padding-top: .75rem; border-top: 1px solid rgba(255,255,255,.1); }
 .automation-log small { display: block; opacity: .78; }
+.comfort-summary{display:flex;gap:14px;align-items:center;padding:16px;margin:8px 0 14px;border-radius:16px;background:linear-gradient(135deg,#2f2454,#6b3fa0);color:#fff}.comfort-summary>span{font-size:30px}.comfort-summary div{display:grid;gap:2px}.comfort-summary small{font-size:10px;letter-spacing:.12em;opacity:.75}.comfort-summary strong{font-size:22px}.comfort-summary p{margin:2px 0 0;font-size:12px;opacity:.85}

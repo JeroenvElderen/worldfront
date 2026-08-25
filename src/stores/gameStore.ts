@@ -9,13 +9,13 @@ import { indexedDbStorage } from '../services/saveDatabase'
 import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import { generateJobOffers } from '../services/jobOfferService'
 import { acceptJobState, completeArrivedJobsState, completeJobState, distanceKmBetween, getJobJourney, jobDestination, jobOfferExpiresAt, jobPickup, MAX_JOB_OFFERS } from '../services/jobEngine'
-import { createDynamicEvent, energyUseForJob, fatigueUseForJob, startRecoveryTrip } from '../services/operationsEngine'
+import { createDynamicEvent, energyUseForJob, fatigueUseForJob, OVERNIGHT_STAY_COST, startRecoveryTrip } from '../services/operationsEngine'
 import { nextMonthlyPaymentAt } from '../services/gameTime'
 import { createPostalRoute } from '../services/postalEngine'
 import { createRentalJourney } from '../services/rentalEngine'
 import { maintenanceCost, vehicleMarketValue } from '../services/vehicleEconomics'
 import { canResearch, hasResearch, researchNodes } from '../services/research'
-import { calculateJobOutcome, createDriverCandidates, createGoals, energyMultiplier, jobOfferCapacity, pickupSpeedMultiplier, updateGoals, upgradeAppliesToVehicle, upgradeDetails, vehicleCanTakeJob } from '../services/earlyGameEngine'
+import { calculateJobOutcome, createDriverCandidates, createGoals, energyMultiplier, jobOfferCapacity, pickupSpeedMultiplier, updateGoals, upgradeAppliesToVehicle, upgradeDetails, vehicleCanTakeJob, vehicleComfortScore } from '../services/earlyGameEngine'
 import { cityDemandMultiplier, createCityEconomy, HOTEL_PURCHASE_COST, hotelUpgradeCost, pendingHotelRevenue } from '../services/hotelEconomy'
 import { competitorGrowth, createCompetitors, createWorldCondition, defaultBrandStrategy, fareMultiplier, marketingDemandMultiplier } from '../services/worldSystems'
 
@@ -275,6 +275,12 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
         state = { ...state, goals }
       }
     }
+    const completedLodgingTrips = vehicles.filter((vehicle) => vehicle.serviceTrip?.kind === 'lodging' && new Date(vehicle.serviceTrip.arrivesAt).getTime() <= now)
+    if (completedLodgingTrips.length) {
+      const lodgingCost = completedLodgingTrips.length * OVERNIGHT_STAY_COST
+      company = { ...company, cash: company.cash - lodgingCost }
+      financialTransactions = addTransactions(financialTransactions, ...completedLodgingTrips.map((vehicle) => transaction('hotels', `${vehicle.name}: driver overnight stay`, -OVERNIGHT_STAY_COST, vehicle.id, vehicle.serviceTrip!.arrivesAt)))
+    }
     vehicles = vehicles.map((vehicle) => {
       if (vehicle.scheduledJourney && new Date(vehicle.scheduledJourney.arrivesAt).getTime() <= now) {
         const journey = vehicle.scheduledJourney
@@ -331,8 +337,9 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
       if (driver.missedShiftUntil && new Date(driver.missedShiftUntil).getTime() <= now) return { ...driver, missedShiftUntil: undefined, status: 'available' as const }
       const vehicle = vehicles.find((candidate) => candidate.driverId === driver.id)
       if (vehicle?.serviceTrip) return driver
-      const returningHome = state.vehicles.find((candidate) => candidate.driverId === driver.id)?.serviceTrip?.kind === 'home'
-      return { ...driver, fatigue: returningHome ? 0 : driver.fatigue, status: 'available' as const }
+      const completedRestTrip = state.vehicles.find((candidate) => candidate.driverId === driver.id)?.serviceTrip
+      const rested = completedRestTrip?.kind === 'home' || completedRestTrip?.kind === 'lodging'
+      return { ...driver, fatigue: rested ? 0 : driver.fatigue, status: 'available' as const }
     })
     let loans = state.loans ?? []
     for (const loan of loans.filter((item) => new Date(item.nextPaymentAt).getTime() <= now)) {
@@ -400,8 +407,14 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     }
     let passengers = state.passengers
     if (result?.completedJobIds.length) {
-      const completedPassengerIds = new Set(state.jobs.filter((job) => result.completedJobIds.includes(job.id)).flatMap((job) => job.passengerIds))
-      passengers = passengers.map((passenger) => completedPassengerIds.has(passenger.id) ? { ...passenger, trips: (passenger.trips ?? 0) + 1, loyalty: Math.min(100, (passenger.loyalty ?? 0) + 8), segment: passenger.segment ?? (passenger.partySize > 2 ? 'family' as const : Math.random() < .34 ? 'commuter' as const : Math.random() < .5 ? 'business' as const : 'tourist' as const) } : passenger)
+      const completedJobs = state.jobs.filter((job) => result.completedJobIds.includes(job.id))
+      passengers = passengers.map((passenger) => {
+        const job = completedJobs.find((candidate) => candidate.passengerIds.includes(passenger.id))
+        if (!job) return passenger
+        const vehicle = state.vehicles.find((candidate) => candidate.id === job.assignedVehicleId)
+        const loyaltyGain = 8 + (vehicle ? Math.floor(vehicleComfortScore(vehicle) / 20) : 0)
+        return { ...passenger, trips: (passenger.trips ?? 0) + 1, loyalty: Math.min(100, (passenger.loyalty ?? 0) + loyaltyGain), segment: passenger.segment ?? (passenger.partySize > 2 ? 'family' as const : Math.random() < .34 ? 'commuter' as const : Math.random() < .5 ? 'business' as const : 'tourist' as const) }
+      })
     }
     if (result?.completedJobIds.length) drivers = drivers.map((driver) => {
       const completed = result.completedJobIds.filter((jobId) => state.vehicles.find((vehicle) => vehicle.driverId === driver.id)?.id === state.jobs.find((job) => job.id === jobId)?.assignedVehicleId).length
@@ -486,7 +499,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
   dispatchTour: (tourId, vehicleId) => set((state) => {
     const tour = state.tours.find((item) => item.id === tourId); const agency = state.agencies.find((item) => item.id === tour?.agencyId); const vehicle = state.vehicles.find((item) => item.id === vehicleId && item.cityId === agency?.cityId && item.status === 'available' && item.driverId && (item.type === 'taxi' || item.type === 'coach'))
     if (!tour || !vehicle) return state
-    const startedAt = new Date(); const guestCount = vehicle.serviceClass === 'tour-bus' ? Math.round(vehicle.capacity * .75) : Math.min(vehicle.capacity, 12); const reward = Math.round(tour.price * guestCount * .72)
+    const startedAt = new Date(); const guestCount = vehicle.serviceClass === 'tour-bus' ? Math.round(vehicle.capacity * .75) : Math.min(vehicle.capacity, 12); const reward = Math.round(tour.price * guestCount * .72 * (1 + vehicleComfortScore(vehicle) / 250))
     return { tours: state.tours.map((item) => item.id === tourId ? { ...item, vehicleId } : item), vehicles: state.vehicles.map((item) => item.id === vehicleId ? { ...item, status: 'on-job' as const, scheduledJourney: { kind: 'tour' as const, routeId: tourId, startedAt: startedAt.toISOString(), arrivesAt: new Date(startedAt.getTime() + 90_000).toISOString(), reward, distanceKm: 28, destination: tour.stops.at(-1)! } } : item), updatedAt: startedAt.toISOString(), activeSection: 'map' }
   }),
   buyTourBus: () => set((state) => {

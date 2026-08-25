@@ -24,6 +24,11 @@ const templates: Record<JobCategory, OperationTemplate> = {
 
 const upgradeRequirement: Partial<Record<VehicleUpgrade, string>> = {
   'premium-seats': 'Premium seats',
+  'luggage-capacity': 'Luggage capacity',
+  'wheelchair-access': 'Wheelchair access',
+  'child-seats': 'Child seats',
+  'security-partition': 'Security partition',
+  'luxury-interior': 'Luxury interior',
   'range-pack': 'Journey range',
 }
 

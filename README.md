@@ -111,6 +111,12 @@ The game includes the first-time city flow, local autosave, starter company, fle
 
 Vehicle lifecycle management now tracks odometer mileage, age-based depreciation, lifetime revenue and expenses, escalating high-mileage service costs, major-service intervals, manufacturer warranty status, and electric-battery health. The Fleet screen estimates market value, net return, and replacement recommendations for every vehicle. A dedicated Financials tab records income and expenses in an on-device ledger, with cash flow, operating profit, category breakdowns, fleet value, debt, net worth, and recent transactions.
 
+Vehicle interiors can be specialized with passenger Wi-Fi, climate control,
+luggage storage, accessibility equipment, child seats, entertainment, security
+partitions, premium seating, and luxury trim. Each vehicle receives a comfort
+score that improves passenger satisfaction and tips, builds loyalty, increases
+tour revenue, and qualifies equipped taxis for premium passenger categories.
+
 Early-company management includes four rotating driver candidates with gameplay traits, daily and weekly goals, categorized passenger requests with vehicle requirements, satisfaction-based tips and reputation, vehicle wear and three maintenance plans, functional upgrades, and per-vehicle refueling strategies. Every listed research and vehicle-upgrade benefit is applied to its corresponding fare, request capacity, range, energy, wear, service, resale, construction, or fleet-capacity calculation; for example, a Smart roof sign keeps an additional passenger request available for its taxi, while Eco tires, Range packs, and Dash cameras now reduce energy use and wear on taxi, rental, postal, and scheduled journeys. Vehicle finance is available from level 1 so a new company can expand with a 10% deposit: a 36-month lease returns the car at the end of its term, while 48-month hire purchase transfers ownership after the final payment. Newly purchased, leased, or financed vehicles are delivered without a driver and must be staffed from the Company screen; the starter taxi includes a careful driver so a new game remains immediately playable.
 
 Every station includes a facility builder, with three levels each for parking,
@@ -131,6 +137,11 @@ service-radius, fleet-capacity, maintenance, energy, resale, and station-network
 improvements.
 
 Fleet operations now track energy and driver fatigue. A taxi that runs low automatically drives to a fuel or charging station; a tired driver takes the taxi home to rest, with both recovery journeys shown on the map. Players can select day or night shifts in Fleet. The Company screen offers interest-bearing loans, while the dealership supports vehicle leasing and owned vehicles can be sold at a condition-adjusted value. The HUD shows an accelerated calendar and clock, advancing one game minute per real second. Recurring driver, lease, and loan payments are collected at the start of each game month. Timed city events create temporary fare and energy-use modifiers and are announced above the map.
+
+Fatigued drivers now visibly follow a road route home instead of being moved
+directly to their destination. When home is more than 12 km away, the driver
+takes the vehicle to a nearby hotel for a paid overnight stay instead; the live
+map shows the moving vehicle and its remaining recovery route.
 
 The company Market center adds AI competitors with configurable aggression,
 market share, partnerships, and acquisitions. Live rain, snow, storms, heat and

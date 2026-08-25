@@ -3,6 +3,7 @@ import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 import { categoryDetails, categoryForRoute } from './earlyGameEngine'
+import { addJobsToJobJson, jobRouteSignature, readJobJson, type StoredJobRoute } from './jobJsonService'
 
 export const MIN_JOB_DISTANCE_KM = 6
 export const MAX_PICKUP_DISTANCE_KM = 5
@@ -39,14 +40,18 @@ const isCoordinates = (value: unknown): value is Coordinates =>
 async function roadStops(from: Coordinates, to: Coordinates, signal?: AbortSignal) {
   try {
     const coordinates = `${from.join(',')};${to.join(',')}`
-    const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?access_token=${mapboxToken}`, { signal })
+    const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?geometries=geojson&overview=full&access_token=${mapboxToken}`, { signal })
     if (!response.ok) return { pickupRoad: from, destinationRoad: to }
-    const result = await response.json() as { waypoints?: Array<{ location?: unknown }> }
+    const result = await response.json() as { waypoints?: Array<{ location?: unknown }>; routes?: Array<{ geometry?: { coordinates?: unknown } }> }
     const pickup = result.waypoints?.[0]?.location
     const destination = result.waypoints?.[1]?.location
+    const routeCoordinates = result.routes?.[0]?.geometry?.coordinates
     return {
       pickupRoad: isCoordinates(pickup) ? [pickup[0], pickup[1]] as Coordinates : from,
       destinationRoad: isCoordinates(destination) ? [destination[0], destination[1]] as Coordinates : to,
+      routeCoordinates: Array.isArray(routeCoordinates) && routeCoordinates.every(isCoordinates)
+        ? routeCoordinates.map((coordinate) => [coordinate[0], coordinate[1]] as Coordinates)
+        : undefined,
     }
   } catch (error) {
     if ((error as Error).name === 'AbortError') throw error
@@ -151,9 +156,6 @@ async function findMapboxPlaces(city: City, radiusKm: number, signal?: AbortSign
   return unlockedPlaces
 }
 
-const routeSignature = (pickup: string, destination: string) =>
-  `${pickup.trim().toLocaleLowerCase()}→${destination.trim().toLocaleLowerCase()}`
-
 const shuffled = <T,>(values: T[]) => values
   .map((value) => ({ value, order: Math.random() }))
   .sort((left, right) => left.order - right.order)
@@ -169,20 +171,37 @@ export async function generateJobOffers(
   taxiPositions: Coordinates[] = [city.coordinates],
   fareMultiplier = 1
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
-  const places = await findMapboxPlaces(city, maxDistanceKm, signal)
   const excluded = new Set(excludedRoutes)
-  const routes = shuffled(places.flatMap((pickup) => places.flatMap((destination) => {
-    const distanceKm = Math.round(distanceKmBetween(pickup.coordinates, destination.coordinates) * 10) / 10
-    const signature = routeSignature(pickup.name, destination.name)
-    return pickup.id !== destination.id &&
-      taxiPositions.some((position) => distanceKmBetween(position, pickup.coordinates) <= MAX_PICKUP_DISTANCE_KM) &&
-      distanceKmBetween(city.coordinates, pickup.coordinates) <= maxDistanceKm &&
-      distanceKmBetween(city.coordinates, destination.coordinates) <= maxDistanceKm &&
-      distanceKm >= MIN_JOB_DISTANCE_KM && distanceKm <= maxDistanceKm &&
-      !excluded.has(signature)
-      ? [{ pickup, destination, distanceKm, signature }]
-      : []
-  }))).slice(0, count)
+  let routes: Array<{ pickup: MapboxPlace; destination: MapboxPlace; distanceKm: number; signature: string; stored?: StoredJobRoute }>
+  try {
+    const places = await findMapboxPlaces(city, maxDistanceKm, signal)
+    const uniqueRoutes = new Map<string, (typeof routes)[number]>()
+    for (const pickup of places) for (const destination of places) {
+      const distanceKm = Math.round(distanceKmBetween(pickup.coordinates, destination.coordinates) * 10) / 10
+      const signature = jobRouteSignature(pickup.name, destination.name)
+      if (pickup.id !== destination.id &&
+        taxiPositions.some((position) => distanceKmBetween(position, pickup.coordinates) <= MAX_PICKUP_DISTANCE_KM) &&
+        distanceKmBetween(city.coordinates, pickup.coordinates) <= maxDistanceKm &&
+        distanceKmBetween(city.coordinates, destination.coordinates) <= maxDistanceKm &&
+        distanceKm >= MIN_JOB_DISTANCE_KM && distanceKm <= maxDistanceKm &&
+        !excluded.has(signature) && !uniqueRoutes.has(signature)) {
+        uniqueRoutes.set(signature, { pickup, destination, distanceKm, signature })
+      }
+    }
+    routes = shuffled([...uniqueRoutes.values()]).slice(0, count)
+  } catch (error) {
+    if ((error as Error).name === 'AbortError') throw error
+    routes = shuffled(readJobJson().routes.flatMap((stored) => {
+      const signature = jobRouteSignature(stored.pickupLabel, stored.destinationLabel)
+      return stored.cityId === city.id && !excluded.has(signature) &&
+        taxiPositions.some((position) => distanceKmBetween(position, stored.pickup) <= MAX_PICKUP_DISTANCE_KM) &&
+        distanceKmBetween(city.coordinates, stored.pickup) <= maxDistanceKm &&
+        distanceKmBetween(city.coordinates, stored.destination) <= maxDistanceKm &&
+        stored.distanceKm >= MIN_JOB_DISTANCE_KM && stored.distanceKm <= maxDistanceKm
+        ? [{ pickup: { id: signature, name: stored.pickupLabel, coordinates: stored.pickup }, destination: { id: signature, name: stored.destinationLabel, coordinates: stored.destination }, distanceKm: stored.distanceKm, signature, stored }]
+        : []
+    })).slice(0, count)
+  }
 
   if (!routes.length) throw new Error(`No new routes have a pickup within ${MAX_PICKUP_DISTANCE_KM} km of an available taxi. Try again after a taxi has moved.`)
 
@@ -192,7 +211,9 @@ export async function generateJobOffers(
     partySize: 1 + Math.floor(Math.random() * 4),
   }))
   const offeredAt = new Date().toISOString()
-  const stops = await Promise.all(routes.map((route) => roadStops(route.pickup.coordinates, route.destination.coordinates, signal)))
+  const stops = await Promise.all(routes.map((route) => route.stored
+    ? { pickupRoad: route.stored.pickupRoad ?? route.pickup.coordinates, destinationRoad: route.stored.destinationRoad ?? route.destination.coordinates, routeCoordinates: route.stored.routeCoordinates }
+    : roadStops(route.pickup.coordinates, route.destination.coordinates, signal)))
   const jobs = routes.map((route, index): TaxiJob => {
     const category = categoryForRoute(route.pickup.name, route.destination.name, route.distanceKm, passengers[index].partySize)
     const categoryInfo = categoryDetails[category]
@@ -200,10 +221,13 @@ export async function generateJobOffers(
     id: crypto.randomUUID(), cityId: city.id,
     pickup: route.pickup.coordinates, destination: route.destination.coordinates,
     pickupRoad: stops[index].pickupRoad, destinationRoad: stops[index].destinationRoad,
+    routeCoordinates: stops[index].routeCoordinates,
     pickupLabel: route.pickup.name, destinationLabel: route.destination.name,
     passengerIds: [passengers[index].id], fare: Math.round(taxiFareForDistance(route.distanceKm) * fareMultiplier * categoryInfo.fare * 100) / 100,
-    distanceKm: route.distanceKm, durationMinutes: Math.max(5, Math.round(route.distanceKm * 3.2)), category, requiredUpgrade: categoryInfo.requiredUpgrade, status: 'offered', offeredAt,
+    distanceKm: route.distanceKm, durationMinutes: route.stored?.durationMinutes ?? Math.max(5, Math.round(route.distanceKm * 3.2)), category, requiredUpgrade: categoryInfo.requiredUpgrade, status: 'offered', offeredAt,
   })})
+
+  addJobsToJobJson(jobs)
 
   return {
     jobs,

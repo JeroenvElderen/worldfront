@@ -21,14 +21,22 @@ interface MapboxFeature {
 }
 
 const mapboxToken = mapboxAccessToken
-/** Broad everyday POIs make calls feel like real city journeys, not a transport-only list. */
+/**
+ * Search across the places a passenger might actually name. Searchbox also
+ * returns useful non-POI features (addresses, streets, neighbourhoods and
+ * localities), so requests intentionally do not restrict results to `poi`.
+ */
 export const placeSearches = [
-  'airport', 'train station', 'bus station', 'hotel', 'hospital', 'medical clinic',
-  'restaurant', 'cafe', 'shopping centre', 'supermarket', 'car dealership',
-  'office', 'business park', 'park', 'museum', 'university', 'school', 'stadium',
-  'cinema', 'theatre', 'tourist attraction', 'government office', 'courthouse',
-  'bank', 'pharmacy',
+  'restaurant', 'cafe', 'hotel', 'hostel', 'guest house', 'holiday rental', 'Airbnb',
+  'supermarket', 'shop', 'shopping centre', 'market', 'convenience store',
+  'airport', 'train station', 'bus station', 'ferry terminal', 'taxi rank', 'car park',
+  'hospital', 'medical clinic', 'pharmacy', 'school', 'university', 'library',
+  'office', 'business park', 'factory', 'warehouse', 'bank', 'post office',
+  'park', 'forest', 'mountain', 'beach', 'lake', 'nature reserve', 'viewpoint',
+  'landmark', 'tourist attraction', 'museum', 'monument', 'place of worship',
+  'stadium', 'sports centre', 'cinema', 'theatre', 'nightclub', 'government office',
 ]
+const RANDOM_LOCATIONS_PER_BOX = 12
 const MAPBOX_REQUEST_INTERVAL_MS = 250
 interface PlaceCacheEntry { loadedRadiusKm: number; places: MapboxPlace[]; pending?: Promise<void> }
 const placeCache = new Map<string, PlaceCacheEntry>()
@@ -80,6 +88,21 @@ const boxesForNewArea = (center: Coordinates, previousRadiusKm: number, radiusKm
   ]
 }
 
+/** Add unlabeled points from across the map so jobs are not limited to indexed businesses. */
+const randomMapLocations = (city: City, boxes: BoundingBox[], previousRadiusKm: number, radiusKm: number): MapboxPlace[] =>
+  boxes.flatMap((box, boxIndex) => Array.from({ length: RANDOM_LOCATIONS_PER_BOX }, (_, locationIndex) => {
+    const longitude = box[0] + Math.random() * (box[2] - box[0])
+    const latitude = box[1] + Math.random() * (box[3] - box[1])
+    const coordinates: Coordinates = [longitude, latitude]
+    const distanceFromBase = distanceKmBetween(city.coordinates, coordinates)
+    if (distanceFromBase <= previousRadiusKm || distanceFromBase > radiusKm) return null
+    return {
+      id: `map-location:${city.id}:${longitude.toFixed(5)}:${latitude.toFixed(5)}`,
+      name: `Map location near ${city.name} ${boxIndex + 1}-${locationIndex + 1}`,
+      coordinates,
+    }
+  }).filter((place): place is MapboxPlace => place !== null))
+
 const wait = (milliseconds: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
   const onAbort = () => {
     clearTimeout(timeout)
@@ -103,7 +126,6 @@ async function fetchMapboxPlaces(city: City, previousRadiusKm: number, radiusKm:
       url.searchParams.set('proximity', city.coordinates.join(','))
       url.searchParams.set('bbox', box.join(','))
       url.searchParams.set('country', city.countryCode)
-      url.searchParams.set('types', 'poi')
       url.searchParams.set('limit', '10')
       url.searchParams.set('language', 'en')
       const response = await fetch(url, { signal })
@@ -115,7 +137,7 @@ async function fetchMapboxPlaces(city: City, previousRadiusKm: number, radiusKm:
     }
   }
 
-  const places = responses.flatMap(({ features = [] }) => features.flatMap((feature): MapboxPlace[] => {
+  const indexedPlaces = responses.flatMap(({ features = [] }) => features.flatMap((feature): MapboxPlace[] => {
     const id = feature.properties?.mapbox_id
     const name = feature.properties?.name ?? feature.properties?.full_address
     const rawCoordinates = feature.geometry?.coordinates
@@ -126,6 +148,7 @@ async function fetchMapboxPlaces(city: City, previousRadiusKm: number, radiusKm:
       ? [{ id, name: name.trim(), coordinates }]
       : []
   }))
+  const places = [...indexedPlaces, ...randomMapLocations(city, boxes, previousRadiusKm, radiusKm)]
   return [...new Map(places.map((place) => [place.id, place])).values()]
 }
 
@@ -161,7 +184,7 @@ const shuffled = <T,>(values: T[]) => values
   .sort((left, right) => left.order - right.order)
   .map(({ value }) => value)
 
-/** Uses Mapbox-grounded places and an on-device selector; no AI or game backend is involved. */
+/** Uses indexed places plus ordinary map coordinates; no AI or game backend is involved. */
 export async function generateJobOffers(
   city: City,
   count: number,

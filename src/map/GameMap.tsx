@@ -263,7 +263,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
           animationRunners.add(animatePostal); animatePostal(); continue
         }
         let pickupRoute: RouteDetails = { coordinates: job ? [start, jobPickup(job)] : [start], speedLimits: [] }
-        let passengerRoute: RouteDetails = { coordinates: job ? [jobPickup(job), jobDestination(job)] : [start], speedLimits: [] }
+        let passengerRoute: RouteDetails = { coordinates: job?.routeCoordinates ?? (job ? [jobPickup(job), jobDestination(job)] : [start]), speedLimits: [] }
         if (job && token) {
           const fetchRoute = async (from: Coordinates, to: Coordinates) => {
             const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?alternatives=true&annotations=maxspeed&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
@@ -538,7 +538,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
       const taxiSourceId = vehicleSourceId(vehicle.id)
       const routeSourceId = jobRouteSourceId(job.id)
       if (!instance.getSource(routeSourceId)) {
-        instance.addSource(routeSourceId, { type: 'geojson', data: lineString([start, jobPickup(job), jobDestination(job)]) })
+        instance.addSource(routeSourceId, { type: 'geojson', data: lineString([start, ...(job.routeCoordinates ?? [jobPickup(job), jobDestination(job)])]) })
         instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': missionColor(job.id), 'line-width': 3, 'line-opacity': .9 } })
         if (instance.getLayer(taxiSourceId)) instance.moveLayer(routeSourceId, taxiSourceId)
       }
@@ -557,7 +557,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
       liveJobIds.current.add(job.id)
       const journey = getJobJourney(job, vehicle)
       let pickupRoute: RouteDetails = { coordinates: [start, jobPickup(job)], speedLimits: [] }
-      let passengerRoute: RouteDetails = { coordinates: [jobPickup(job), jobDestination(job)], speedLimits: [] }
+      let passengerRoute: RouteDetails = { coordinates: job.routeCoordinates ?? [jobPickup(job), jobDestination(job)], speedLimits: [] }
       if (token) {
         const fetchRoute = async (from: Coordinates, to: Coordinates) => {
           const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?annotations=maxspeed&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`)
@@ -726,7 +726,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
 
     const loadRoute = async () => {
       if (!token) {
-        drawRoute([start, jobPickup(job), jobDestination(job)])
+        drawRoute([start, ...(job.routeCoordinates ?? [jobPickup(job), jobDestination(job)])])
         return
       }
 
@@ -750,11 +750,11 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
 
         drawRoute(
           result.routes?.[0]?.geometry.coordinates ??
-            [start, jobPickup(job), jobDestination(job)],
+            [start, ...(job.routeCoordinates ?? [jobPickup(job), jobDestination(job)])],
         )
       } catch (error) {
         if ((error as Error).name !== 'AbortError') {
-          drawRoute([start, jobPickup(job), jobDestination(job)])
+          drawRoute([start, ...(job.routeCoordinates ?? [jobPickup(job), jobDestination(job)])])
         }
       }
     }

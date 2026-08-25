@@ -80,7 +80,7 @@ function JobRoutePreviewView({ job, onOpen }: JobRoutePreviewProps) {
     map.on('load', async () => {
       map.resize()
 
-      let route: number[][] = [pickup, destination]
+      let route: number[][] = job.routeCoordinates ?? [pickup, destination]
 
       if (mapboxAccessToken) {
         try {

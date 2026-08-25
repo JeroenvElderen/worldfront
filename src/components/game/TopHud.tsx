@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import type { Company } from '../../models/game'
 import { progressionForReputation } from '../../services/companyProgression'
 import { gameDateAt } from '../../services/gameTime'
+import { useCurrency } from './CurrencyContext'
 
-const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
 export function TopHud({ company }: { company: Company }) {
+  const { money, locale } = useCurrency()
   const progression = progressionForReputation(company.reputation)
   const [gameDate, setGameDate] = useState(() => gameDateAt(company.foundedAt))
   useEffect(() => {
@@ -13,8 +14,8 @@ export function TopHud({ company }: { company: Company }) {
     const timer = window.setInterval(updateClock, 1_000)
     return () => window.clearInterval(timer)
   }, [company.foundedAt])
-  const date = new Intl.DateTimeFormat('en-IE', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(gameDate)
-  const time = new Intl.DateTimeFormat('en-IE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' }).format(gameDate)
+  const date = new Intl.DateTimeFormat(locale, { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(gameDate)
+  const time = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' }).format(gameDate)
   return <header className="top-hud game-panel">
     <div className="hud-card balance-card">
       <span className="hud-icon" aria-hidden="true">▰</span>

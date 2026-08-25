@@ -4,6 +4,7 @@ import { distanceKmBetween, jobOfferExpiresAt, jobPickup } from '../../services/
 import { categoryDetails, vehicleCanTakeJob } from '../../services/earlyGameEngine'
 import { licensePlateForVehicle, vehicleMakeAndModel } from '../../services/vehicleIdentity'
 import { JobRoutePreview } from './JobRoutePreview'
+import { useCurrency } from './CurrencyContext'
 
 interface TaxiCallPopupProps {
   focusedJobId: string | null
@@ -19,8 +20,6 @@ interface TaxiCallPopupProps {
 
 type JobView = TaxiJob['status']
 
-const money = new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 })
-
 const remainingTime = (job: TaxiJob, now: number) => {
   const seconds = Math.max(0, Math.ceil((jobOfferExpiresAt(job) - now) / 1000))
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
@@ -33,6 +32,8 @@ const viewDetails: Array<{ id: JobView; label: string }> = [
 ]
 
 export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, drivers, onAccept, onDecline, onViewMap, onClose }: TaxiCallPopupProps) {
+  const { currency, locale } = useCurrency()
+  const money = new Intl.NumberFormat(locale, { style: 'currency', currency, minimumFractionDigits: 2 })
   const [now, setNow] = useState(Date.now())
   const [view, setView] = useState<JobView>('offered')
   const [categoryFilter, setCategoryFilter] = useState('all')

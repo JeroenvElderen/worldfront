@@ -468,9 +468,9 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
   }),
   buyCountryLicense: (countryCode) => set((state) => {
     const country = countries.find((item) => item.code === countryCode)
-    if (!country || !state.company || state.company.level < 3 || state.company.cash < country.licenseCost || (state.countryLicenses ?? ['IE']).includes(countryCode)) return state
+    if (!country || !state.company || state.company.level < 3 || state.company.cash < country.licenseCost || (state.countryLicenses ?? []).includes(countryCode)) return state
     const newMarkets = cities.filter((city) => city.countryCode === countryCode && !state.cityEconomies.some((economy) => economy.cityId === city.id)).map(createCityEconomy)
-    return { company: { ...state.company, cash: state.company.cash - country.licenseCost }, countryLicenses: [...(state.countryLicenses ?? ['IE']), countryCode], cityEconomies: [...state.cityEconomies, ...newMarkets], financialTransactions: addTransactions(state.financialTransactions, transaction('expansion', `${country.name} operating license`, -country.licenseCost)), updatedAt: new Date().toISOString() }
+    return { company: { ...state.company, cash: state.company.cash - country.licenseCost }, countryLicenses: [...(state.countryLicenses ?? []), countryCode], cityEconomies: [...state.cityEconomies, ...newMarkets], financialTransactions: addTransactions(state.financialTransactions, transaction('expansion', `${country.name} operating license`, -country.licenseCost)), updatedAt: new Date().toISOString() }
   }),
   openAgency: () => set((state) => {
     const city = getCity(state.activeCityId ?? state.startingCityId, state.customCities); const cost = 5_000
@@ -524,7 +524,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
   createTransportRoute: (mode, toCityId) => set((state) => {
     const from = getCity(state.activeCityId ?? state.startingCityId, state.customCities)
     const to = getCity(toCityId, state.customCities)
-    const licensed = state.countryLicenses ?? ['IE']
+    const licensed = state.countryLicenses ?? []
     if (!from || !to || from.id === to.id || !licensed.includes(to.countryCode) || (state.transportRoutes ?? []).some((route) => route.mode === mode && route.fromCityId === from.id && route.toCityId === to.id)) return state
     const distanceKm = distanceKmBetween(from.coordinates, to.coordinates)
     const baseFare = mode === 'train' ? 0.13 : mode === 'ferry' ? 0.1 : 0.2
@@ -555,7 +555,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
       .sort((left, right) => right.fare - left.fare)[0]
     if (offer) {
       get().acceptJob(offer.id)
-      if (get().jobs.find((job) => job.id === offer.id)?.status === 'accepted') set((latest) => ({ automation: { ...latest.automation, activity: [{ id: crypto.randomUUID(), occurredAt: new Date().toISOString(), action: 'dispatch' as const, message: `Accepted ${offer.pickupLabel} to ${offer.destinationLabel} for €${offer.fare.toFixed(2)}` }, ...(latest.automation.activity ?? [])].slice(0, 20) } }))
+      if (get().jobs.find((job) => job.id === offer.id)?.status === 'accepted') set((latest) => ({ automation: { ...latest.automation, activity: [{ id: crypto.randomUUID(), occurredAt: new Date().toISOString(), action: 'dispatch' as const, message: `Accepted ${offer.pickupLabel} to ${offer.destinationLabel} for ${offer.fare.toFixed(2)}` }, ...(latest.automation.activity ?? [])].slice(0, 20) } }))
       return
     }
     const serviceVehicle = state.vehicles.find((vehicle) => vehicle.status === 'available' && vehicle.condition < policy.autoServiceBelow)

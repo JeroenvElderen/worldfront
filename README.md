@@ -59,7 +59,7 @@ condition wear, and electric-battery wear to the existing fleet lifecycle.
 ## Build an empire
 
 Company progression now opens five connected management systems. At level 2,
-players can establish branches across Ireland and switch the live command map
+players can establish branches around whichever location they choose and switch the live command map
 between cities. Level 3 unlocks local travel agencies, player-created sightseeing
 tours, and automatic tour dispatch. Dedicated 32-seat hybrid tour buses can be
 purchased directly from the Travel screen, while 48-seat coaches serve scheduled

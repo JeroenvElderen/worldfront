@@ -13,6 +13,14 @@ export const driverTraitDetails: Record<DriverTrait, { label: string; descriptio
 export const upgradeDetails: Record<VehicleUpgrade, { label: string; description: string; price: number }> = {
   'eco-tires': { label: 'Eco tires', description: '10% less energy use.', price: 900 },
   'premium-seats': { label: 'Premium seats', description: 'Improves passenger satisfaction.', price: 1_400 },
+  wifi: { label: 'Passenger Wi-Fi', description: 'Adds comfort and earns stronger business-passenger tips.', price: 950 },
+  'air-conditioning': { label: 'Air conditioning', description: 'Keeps passengers comfortable and improves satisfaction.', price: 1_250 },
+  'luggage-capacity': { label: 'Luggage capacity', description: 'Unlocks premium airport transfers.', price: 1_100 },
+  'wheelchair-access': { label: 'Wheelchair access', description: 'Unlocks accessible passenger transfers.', price: 2_800 },
+  'child-seats': { label: 'Child seats', description: 'Unlocks family transfers and improves family satisfaction.', price: 600 },
+  'entertainment-system': { label: 'Entertainment system', description: 'Improves long-distance trips and tour revenue.', price: 1_600 },
+  'security-partition': { label: 'Security partition', description: 'Unlocks secure late-night work and improves safety.', price: 1_300 },
+  'luxury-interior': { label: 'Luxury interior', description: 'Unlocks the best premium fares and boosts tips and tours.', price: 3_800 },
   'range-pack': { label: 'Range pack', description: 'Uses 15% less fuel or electricity.', price: 2_200 },
   'meter-pro': { label: 'Meter Pro', description: 'Adds 8% to taxi fares.', price: 1_800 },
   'roof-sign': { label: 'Smart roof sign', description: 'Keeps one extra passenger request visible while this taxi is available.', price: 700 },
@@ -22,7 +30,8 @@ export const upgradeDetails: Record<VehicleUpgrade, { label: string; description
 
 /** Prevent upgrades from being sold to vehicle types that cannot benefit from them. */
 export function upgradeAppliesToVehicle(upgrade: VehicleUpgrade, vehicle: Vehicle) {
-  if (upgrade === 'meter-pro' || upgrade === 'roof-sign' || upgrade === 'premium-seats') return vehicle.type === 'taxi'
+  if (upgrade === 'meter-pro' || upgrade === 'roof-sign' || upgrade === 'wheelchair-access' || upgrade === 'child-seats' || upgrade === 'security-partition') return vehicle.type === 'taxi'
+  if (['premium-seats', 'wifi', 'air-conditioning', 'luggage-capacity', 'entertainment-system', 'luxury-interior'].includes(upgrade)) return vehicle.type === 'taxi' || vehicle.type === 'coach' || vehicle.type === 'rental'
   if (upgrade === 'parcel-shelving') return vehicle.type === 'post'
   return true
 }
@@ -60,7 +69,7 @@ export function updateGoals(goals: CompanyGoal[], metric: GoalMetric, amount: nu
 }
 
 export const categoryDetails: Record<JobCategory, { label: string; icon: string; fare: number; requiredUpgrade?: VehicleUpgrade }> = {
-  standard: { label: 'Standard', icon: '🚕', fare: 1 }, airport: { label: 'Airport', icon: '✈️', fare: 1.2 }, family: { label: 'Family', icon: '👨‍👩‍👧', fare: 1.1 }, executive: { label: 'Executive', icon: '💼', fare: 1.35, requiredUpgrade: 'premium-seats' }, accessible: { label: 'Accessible', icon: '♿', fare: 1.25 }, 'late-night': { label: 'Late night', icon: '🌙', fare: 1.2 }, 'long-distance': { label: 'Long distance', icon: '🛣️', fare: 1.15 }, courier: { label: 'Courier', icon: '📦', fare: 1.05 }, 'pet-friendly': { label: 'Pet friendly', icon: '🐾', fare: 1.1 },
+  standard: { label: 'Standard', icon: '🚕', fare: 1 }, airport: { label: 'Airport', icon: '✈️', fare: 1.2, requiredUpgrade: 'luggage-capacity' }, family: { label: 'Family', icon: '👨‍👩‍👧', fare: 1.1, requiredUpgrade: 'child-seats' }, executive: { label: 'Executive', icon: '💼', fare: 1.35, requiredUpgrade: 'luxury-interior' }, accessible: { label: 'Accessible', icon: '♿', fare: 1.25, requiredUpgrade: 'wheelchair-access' }, 'late-night': { label: 'Late night', icon: '🌙', fare: 1.2, requiredUpgrade: 'security-partition' }, 'long-distance': { label: 'Long distance', icon: '🛣️', fare: 1.15 }, courier: { label: 'Courier', icon: '📦', fare: 1.05 }, 'pet-friendly': { label: 'Pet friendly', icon: '🐾', fare: 1.1 },
 }
 
 export function categoryForRoute(pickup: string, destination: string, distanceKm: number, partySize: number): JobCategory {
@@ -91,17 +100,31 @@ export function calculateJobOutcome(job: TaxiJob, vehicle: Vehicle, driver?: Dri
   const pickupMinutes = Math.max(0, journey.pickupAt - journey.acceptedAt) / 60_000
   let satisfaction = 92 - pickupMinutes * 2 - (100 - vehicle.condition) * .22 - (driver?.fatigue ?? 0) * .12
   satisfaction += ((driver?.rating ?? 4.2) - 4) * 12
-  if ((vehicle.upgrades ?? []).includes('premium-seats')) satisfaction += 7
+  satisfaction += vehicleComfortScore(vehicle) * .22
+  if (job.category === 'family' && (vehicle.upgrades ?? []).includes('child-seats')) satisfaction += 3
+  if (job.category === 'long-distance' && (vehicle.upgrades ?? []).includes('entertainment-system')) satisfaction += 4
   if (driver?.trait === 'charming') satisfaction += 6
   if (driver?.trait === 'night-owl' && driver.shift === 'night') satisfaction += 5
   satisfaction = Math.round(Math.max(35, Math.min(100, satisfaction)))
   const charmingMultiplier = driver?.trait === 'charming' ? 1.4 : 1
-  const tip = satisfaction >= 70 ? Math.round(job.fare * ((satisfaction - 60) / 200) * charmingMultiplier * 100) / 100 : 0
+  const premiumTipMultiplier = (vehicle.upgrades ?? []).includes('luxury-interior') ? 1.2 : (vehicle.upgrades ?? []).includes('wifi') && job.category === 'executive' ? 1.1 : 1
+  const tip = satisfaction >= 70 ? Math.round(job.fare * ((satisfaction - 60) / 200) * charmingMultiplier * premiumTipMultiplier * 100) / 100 : 0
   const customerRating = Math.max(1, Math.min(5, Math.ceil(satisfaction / 20)))
   const reputationEarned = customerRating * 0.2
   const baseWear = Math.max(.15, job.distanceKm * .035)
   const wear = baseWear * (driver?.trait === 'careful' ? .75 : 1) * ((vehicle.upgrades ?? []).includes('dash-camera') ? .9 : 1)
   return { satisfaction, customerRating, tip, reputationEarned, wear: Math.round(wear * 100) / 100 }
+}
+
+const comfortValues: Partial<Record<VehicleUpgrade, number>> = {
+  'premium-seats': 12, wifi: 7, 'air-conditioning': 10, 'luggage-capacity': 3,
+  'wheelchair-access': 5, 'child-seats': 4, 'entertainment-system': 8,
+  'security-partition': 3, 'luxury-interior': 18,
+}
+
+/** A visible 0–100 rating shared by passenger feedback and sightseeing tours. */
+export function vehicleComfortScore(vehicle: Vehicle) {
+  return Math.min(100, (vehicle.upgrades ?? []).reduce((score, upgrade) => score + (comfortValues[upgrade] ?? 0), 0))
 }
 
 export function pickupSpeedMultiplier(driver?: Driver) {

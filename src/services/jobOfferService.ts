@@ -191,6 +191,11 @@ export async function generateJobOffers(
     routes = shuffled([...uniqueRoutes.values()]).slice(0, count)
   } catch (error) {
     if ((error as Error).name === 'AbortError') throw error
+    // A Mapbox/API error is not proof that the device is offline. Reusing a
+    // stored mission here made online refreshes silently serve JSON routes
+    // whenever live generation failed. Only use the offline cache when the
+    // browser explicitly reports that there is no network connection.
+    if (typeof navigator === 'undefined' || navigator.onLine) throw error
     routes = shuffled(readJobJson().routes.flatMap((stored) => {
       const signature = jobRouteSignature(stored.pickupLabel, stored.destinationLabel)
       return stored.cityId === city.id && !excluded.has(signature) &&

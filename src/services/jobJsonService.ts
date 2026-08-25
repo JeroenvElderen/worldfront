@@ -17,9 +17,26 @@ export interface StoredJobRoute {
 
 interface JobJson { version: 1; routes: StoredJobRoute[] }
 
-/** Pickup and destination together identify a route, regardless of letter casing. */
+/** Pickup and destination labels identify an offer despite cosmetic text differences. */
 export const jobRouteSignature = (pickup: string, destination: string) =>
-  `${pickup.trim().toLocaleLowerCase()}→${destination.trim().toLocaleLowerCase()}`
+  `${normalizeRouteLabel(pickup)}→${normalizeRouteLabel(destination)}`
+
+const normalizeRouteLabel = (label: string) => label
+  .normalize('NFKC')
+  .trim()
+  .replace(/\s+/g, ' ')
+  .toLocaleLowerCase()
+
+/**
+ * Coordinates, rather than mutable POI labels, are the durable identity of a
+ * stored route. Five decimal places is precise to roughly one metre, while
+ * still absorbing insignificant floating-point differences from Mapbox.
+ */
+const storedRouteKey = (route: Pick<StoredJobRoute, 'cityId' | 'pickup' | 'destination'>) =>
+  `${route.cityId}:${route.pickup.map((part) => part.toFixed(5)).join(',')}→${route.destination.map((part) => part.toFixed(5)).join(',')}`
+
+const uniqueStoredRoutes = (routes: StoredJobRoute[]) =>
+  [...new Map(routes.map((route) => [storedRouteKey(route), route])).values()]
 
 const emptyJobJson = (): JobJson => ({ version: 1, routes: [] })
 
@@ -28,7 +45,7 @@ export function readJobJson(): JobJson {
   try {
     const parsed = JSON.parse(localStorage.getItem(JOB_JSON_STORAGE_KEY) ?? '') as Partial<JobJson>
     return parsed.version === 1 && Array.isArray(parsed.routes)
-      ? { version: 1, routes: parsed.routes }
+      ? { version: 1, routes: uniqueStoredRoutes(parsed.routes) }
       : emptyJobJson()
   } catch {
     return emptyJobJson()
@@ -42,11 +59,9 @@ export function readJobJson(): JobJson {
 export function addJobsToJobJson(jobs: TaxiJob[]) {
   if (typeof localStorage === 'undefined' || !jobs.length) return
   const jobJson = readJobJson()
-  const routes = new Map(jobJson.routes.map((route) => [jobRouteSignature(route.pickupLabel, route.destinationLabel), route]))
+  const routes = new Map(jobJson.routes.map((route) => [storedRouteKey(route), route]))
   for (const job of jobs) {
-    const signature = jobRouteSignature(job.pickupLabel, job.destinationLabel)
-    if (routes.has(signature)) continue
-    routes.set(signature, {
+    const route: StoredJobRoute = {
       cityId: job.cityId,
       pickup: job.pickup,
       destination: job.destination,
@@ -57,7 +72,10 @@ export function addJobsToJobJson(jobs: TaxiJob[]) {
       destinationLabel: job.destinationLabel,
       distanceKm: job.distanceKm,
       durationMinutes: job.durationMinutes,
-    })
+    }
+    const key = storedRouteKey(route)
+    if (routes.has(key)) continue
+    routes.set(key, route)
   }
   try {
     localStorage.setItem(JOB_JSON_STORAGE_KEY, JSON.stringify({ version: 1, routes: [...routes.values()] } satisfies JobJson))

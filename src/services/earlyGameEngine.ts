@@ -78,7 +78,7 @@ export function upgradeFareMultiplier(vehicle: Vehicle) {
   return 1 + (vehicle.upgrades?.length ?? 0) * .08
 }
 
-/** Staffed taxis surface their next request while available or completing a trip. */
+/** Staffed taxis keep two requests queued while available or completing a trip. */
 export function jobOfferCapacity(vehicles: Vehicle[], drivers: Driver[]) {
   return vehicles.reduce((capacity, vehicle) => {
     const driver = drivers.find((candidate) => candidate.id === vehicle.driverId)
@@ -87,7 +87,7 @@ export function jobOfferCapacity(vehicles: Vehicle[], drivers: Driver[]) {
       (vehicle.status === 'on-job' && driver?.status === 'driving')
     )
     if (!canQueueWork) return capacity
-    return capacity + ((vehicle.upgrades ?? []).includes('roof-sign') ? 2 : 1)
+    return capacity + ((vehicle.upgrades ?? []).includes('roof-sign') ? 3 : 2)
   }, 0)
 }
 

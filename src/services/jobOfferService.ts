@@ -3,6 +3,7 @@ import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 import { addJobsToJobJson, jobRouteSignature, readJobJson, type StoredJobRoute } from './jobJsonService'
+import { isInsideVillageTerritories, type VillageTerritoryCenter } from './territoryGeometry'
 
 export const MIN_JOB_DISTANCE_KM = 6
 /** Prefer nearby calls, but do not stop generating work after those routes are exhausted. */
@@ -192,9 +193,11 @@ export async function generateJobOffers(
   maxDistanceKm = BASE_JOB_DISTANCE_KM,
   signal?: AbortSignal,
   taxiPositions: Coordinates[] = [city.coordinates],
-  fareMultiplier = 1
+  fareMultiplier = 1,
+  territoryCenters: VillageTerritoryCenter[] = [{ id: city.id, coordinates: city.coordinates }],
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
   const excluded = new Set(excludedRoutes)
+  const isUnlocked = (coordinates: Coordinates) => isInsideVillageTerritories(coordinates, territoryCenters)
   let routes: Array<{ pickup: MapboxPlace; destination: MapboxPlace; distanceKm: number; signature: string; stored?: StoredJobRoute }>
   try {
     const places = await findMapboxPlaces(city, maxDistanceKm, signal)
@@ -204,6 +207,7 @@ export async function generateJobOffers(
       const signature = jobRouteSignature(pickup.name, destination.name)
       const pickupDistanceKm = Math.min(...taxiPositions.map((position) => distanceKmBetween(position, pickup.coordinates)))
       if (pickup.id !== destination.id &&
+        isUnlocked(pickup.coordinates) && isUnlocked(destination.coordinates) &&
         pickupDistanceKm <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, pickup.coordinates) <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, destination.coordinates) <= maxDistanceKm &&
@@ -228,6 +232,7 @@ export async function generateJobOffers(
     routes = shuffled(readJobJson().routes.flatMap((stored) => {
       const signature = jobRouteSignature(stored.pickupLabel, stored.destinationLabel)
       return stored.cityId === city.id && !excluded.has(signature) &&
+        isUnlocked(stored.pickup) && isUnlocked(stored.destination) &&
         taxiPositions.some((position) => distanceKmBetween(position, stored.pickup) <= maxDistanceKm) &&
         distanceKmBetween(city.coordinates, stored.pickup) <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, stored.destination) <= maxDistanceKm &&
@@ -245,6 +250,7 @@ export async function generateJobOffers(
       ? { pickupRoad: route.stored.pickupRoad ?? route.pickup.coordinates, destinationRoad: route.stored.destinationRoad ?? route.destination.coordinates, routeCoordinates: route.stored.routeCoordinates ?? [route.stored.pickup, route.stored.destination] }
       : await roadStops(route.pickup.coordinates, route.destination.coordinates, signal)
     if (!stops) continue
+    if (!isUnlocked(stops.pickupRoad) || !isUnlocked(stops.destinationRoad)) continue
     resolvedRoutes.push({ ...route, stops })
     if (resolvedRoutes.length >= count) break
   }

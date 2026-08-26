@@ -4,7 +4,9 @@ import type { Coordinates } from '../models/game'
 
 const EARTH_KM_PER_LATITUDE_DEGREE = 110.574
 export const VILLAGE_TERRITORY_RADIUS_KM = 6
-export const TAXI_DISCOVERY_RADIUS_KM = 2
+// Keep route discovery local without creating the excessive checkpoint and
+// save-data volume that a street-scale 100 m radius would require.
+export const TAXI_DISCOVERY_RADIUS_KM = 0.5
 
 export interface VillageTerritoryCenter { id: string; coordinates: Coordinates; source?: 'village' | 'taxi-discovery'; radiusKm?: number }
 type TerritoryGeometry =

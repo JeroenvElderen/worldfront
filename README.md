@@ -37,6 +37,8 @@ Vehicles are rendered as small map dots, with a consistent purple marker for
 every vehicle type and operating state.
 Active journeys follow a thin route line, and selecting a job highlights the
 road route the nearest available driver will take to its pickup and destination.
+Completed taxi journeys uncover a focused 500-meter corridor around the route,
+so expanding service territory requires meaningful travel through an area.
 
 ## Postal service
 
@@ -137,7 +139,7 @@ engineering, clean mobility, and infrastructure research, including fare,
 service-radius, fleet-capacity, maintenance, energy, resale, and station-network
 improvements.
 
-Fleet operations now track energy and driver fatigue. A taxi that runs low automatically drives to a fuel or charging station; a tired driver takes the taxi home to rest, with both recovery journeys shown on the map. Players can select day or night shifts in Fleet. The Company screen offers interest-bearing loans, while the dealership supports vehicle leasing and owned vehicles can be sold at a condition-adjusted value. The HUD shows an accelerated calendar and clock, advancing one game minute per real second. Recurring driver, lease, and loan payments are collected at the start of each game month. Timed city events create temporary fare and energy-use modifiers and are announced above the map.
+Fleet operations now track energy and driver fatigue. A taxi that runs low automatically drives to a fuel or charging station; a tired driver takes the taxi home to rest, with both recovery journeys shown on the map. Players can select day or night shifts in Fleet. The Company screen offers interest-bearing loans, while the dealership supports vehicle leasing and owned vehicles can be sold at a condition-adjusted value. The HUD shows an accelerated calendar and clock running at twice real time, so one game minute passes every 30 real seconds. Recurring driver, lease, and loan payments are collected at the start of each game month. Timed city events create temporary fare and energy-use modifiers and are announced above the map.
 
 Fatigued drivers now visibly follow a road route home instead of being moved
 directly to their destination. When home is more than 12 km away, the driver

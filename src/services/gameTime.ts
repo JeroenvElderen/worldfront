@@ -1,4 +1,7 @@
-export const REAL_MS_PER_GAME_MINUTE = 1_000
+// Run the calendar at 2x real time: one in-game minute passes every 30 seconds.
+// This keeps days meaningful while ensuring the player does not have to wait a
+// full real-world month for recurring payments and other calendar events.
+export const REAL_MS_PER_GAME_MINUTE = 30_000
 
 export const gameDateAt = (foundedAt: string, realNow = Date.now()) => {
   const realStart = new Date(foundedAt).getTime()

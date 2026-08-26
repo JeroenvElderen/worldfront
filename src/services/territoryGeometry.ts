@@ -6,6 +6,49 @@ const EARTH_KM_PER_LATITUDE_DEGREE = 110.574
 export const VILLAGE_TERRITORY_RADIUS_KM = 6
 
 export interface VillageTerritoryCenter { id: string; coordinates: Coordinates }
+type TerritoryGeometry =
+  | { type: 'Polygon'; coordinates: number[][][] }
+  | { type: 'MultiPolygon'; coordinates: number[][][][] }
+export type TerritoryFeature = {
+  type: 'Feature'
+  geometry: TerritoryGeometry
+  properties: { id: string; unlocked: true; source?: 'openstreetmap' }
+}
+
+const realBoundaryCache = new Map<string, Promise<TerritoryFeature | null>>()
+
+/**
+ * Resolve the administrative boundary containing a territory's coordinates.
+ * Nominatim returns the actual OpenStreetMap relation geometry when one exists;
+ * callers retain the generated territory as a fallback for unmapped places or
+ * when the boundary service is unavailable.
+ */
+export const realVillageTerritory = (id: string, [longitude, latitude]: Coordinates) => {
+  const cacheKey = `${longitude.toFixed(5)},${latitude.toFixed(5)}`
+  const cached = realBoundaryCache.get(cacheKey)
+  if (cached) return cached
+
+  const request = (async (): Promise<TerritoryFeature | null> => {
+    try {
+      const url = new URL('https://nominatim.openstreetmap.org/reverse')
+      url.searchParams.set('format', 'jsonv2')
+      url.searchParams.set('lat', String(latitude))
+      url.searchParams.set('lon', String(longitude))
+      url.searchParams.set('zoom', '14')
+      url.searchParams.set('addressdetails', '0')
+      url.searchParams.set('polygon_geojson', '1')
+      const response = await fetch(url, { headers: { 'Accept-Language': 'en' } })
+      if (!response.ok) return null
+      const geometry = (await response.json() as { geojson?: TerritoryGeometry }).geojson
+      if (!geometry || (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon')) return null
+      return { type: 'Feature', geometry, properties: { id, unlocked: true, source: 'openstreetmap' } }
+    } catch {
+      return null
+    }
+  })()
+  realBoundaryCache.set(cacheKey, request)
+  return request
+}
 
 const hash = (value: string) => {
   let result = 2166136261
@@ -29,7 +72,7 @@ const noise = (seed: number, index: number) => {
  * uneven sectors rather than a buffer, making expansion resemble neighboring
  * village borders instead of perfect station-radius circles.
  */
-export const villageTerritory = (id: string, center: Coordinates, radiusKm: number, color?: string, properties: Record<string, string | number> = {}) => {
+export const villageTerritory = (id: string, center: Coordinates, radiusKm: number): TerritoryFeature => {
   const seed = hash(id)
   const sectorCount = 18
   const [longitude, latitude] = center
@@ -45,10 +88,10 @@ export const villageTerritory = (id: string, center: Coordinates, radiusKm: numb
     ]
   })
   points.push(points[0])
-  return polygon([points], { id, unlocked: true, color, ...properties })
+  return polygon([points], { id, unlocked: true })
 }
 
-export const mergeVillageTerritories = (territories: ReturnType<typeof villageTerritory>[]) => {
+export const mergeVillageTerritories = (territories: TerritoryFeature[]) => {
   if (!territories.length) return null
   if (territories.length === 1) return territories[0]
   return union(featureCollection(territories)) ?? null
@@ -61,7 +104,7 @@ export const isInsideVillageTerritories = (coordinates: Coordinates, centers: Vi
     villageTerritory(center.id, center.coordinates, VILLAGE_TERRITORY_RADIUS_KM),
   ))
 
-/** A world overlay with the purchased territory cut out as transparent holes. */
+/** A red world overlay with the purchased territory cut out as transparent holes. */
 export const lockedTerritoryMask = (unlocked: ReturnType<typeof mergeVillageTerritories>) => {
   const worldRing: Coordinates[] = [[-179.9, -85], [179.9, -85], [179.9, 85], [-179.9, 85], [-179.9, -85]]
   if (!unlocked) return polygon([worldRing], { locked: true })

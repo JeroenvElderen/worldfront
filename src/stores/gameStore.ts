@@ -228,7 +228,9 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     const state = useGameStore.getState()
     const generationTaxi = jobGeneratingTaxis(state)
       .sort((left, right) => state.jobs.filter((job) => job.status === 'offered' && job.cityId === left.cityId).length - state.jobs.filter((job) => job.status === 'offered' && job.cityId === right.cityId).length)[0]
-    if (!(state.activeCityId ?? state.startingCityId) || state.jobsLoading || !generationTaxi || state.jobs.filter((job) => job.status === 'offered').length >= Math.min(MAX_JOB_OFFERS, availableJobOfferCapacity(state))) return
+    const offeredCount = state.jobs.filter((job) => job.status === 'offered').length
+    const targetOfferCount = Math.min(MAX_JOB_OFFERS, availableJobOfferCapacity(state))
+    if (!(state.activeCityId ?? state.startingCityId) || state.jobsLoading || !generationTaxi || offeredCount >= targetOfferCount) return
     const city = getCity(generationTaxi.cityId, state.customCities)
     if (!city) return
     set({ jobsLoading: true, jobsError: null })
@@ -238,7 +240,17 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
       const taxis = state.vehicles.filter((vehicle) => vehicle.type === 'taxi')
       const taxiPositions = jobGeneratingTaxis(state).filter((vehicle) => vehicle.cityId === city.id).map((vehicle) => taxiJobGenerationPosition(state, vehicle, city.coordinates))
       const maxDistanceKm = maxJobDistanceForFleet(level, taxis.length) * (hasResearch(state.completedResearch ?? [], 'predictive-demand') ? 1.25 : 1)
-      const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, (state.activeEvent?.fareMultiplier ?? 1) * cityDemandMultiplier(state.cityEconomies.find((economy) => economy.cityId === city.id)) * (state.worldCondition?.demandMultiplier ?? 1) * marketingDemandMultiplier(state.brandStrategy ?? defaultBrandStrategy) * fareMultiplier(state.brandStrategy?.fareStrategy ?? 'standard') * Math.max(.55, 1 - (state.competitors ?? []).filter((competitor) => competitor.relationship === 'rival').reduce((sum, competitor) => sum + competitor.marketShare, 0) / 200), unlockedTerritoryCenters(state))
+      const cityCapacity = availableJobOfferCapacity({
+        vehicles: state.vehicles.filter((vehicle) => vehicle.cityId === city.id),
+        drivers: state.drivers,
+      })
+      const cityOfferedCount = state.jobs.filter((job) => job.status === 'offered' && job.cityId === city.id).length
+      const offersToGenerate = Math.min(targetOfferCount - offeredCount, Math.max(0, cityCapacity - cityOfferedCount))
+      if (!offersToGenerate) {
+        set({ jobsLoading: false })
+        return
+      }
+      const generated = await generateJobOffers(searchArea, offersToGenerate, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, (state.activeEvent?.fareMultiplier ?? 1) * cityDemandMultiplier(state.cityEconomies.find((economy) => economy.cityId === city.id)) * (state.worldCondition?.demandMultiplier ?? 1) * marketingDemandMultiplier(state.brandStrategy ?? defaultBrandStrategy) * fareMultiplier(state.brandStrategy?.fareStrategy ?? 'standard') * Math.max(.55, 1 - (state.competitors ?? []).filter((competitor) => competitor.relationship === 'rival').reduce((sum, competitor) => sum + competitor.marketShare, 0) / 200), unlockedTerritoryCenters(state))
       set((latest) => {
         const openSlots = Math.max(0, availableJobOfferCapacity(latest) - latest.jobs.filter((job) => job.status === 'offered').length)
         const acceptedJobs = generated.jobs.slice(0, openSlots)

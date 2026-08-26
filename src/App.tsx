@@ -63,7 +63,7 @@ export default function App() {
   ).length
 
   /**
-   * Generate job offers when taxis are available.
+   * Keep the fleet-scaled job marketplace stocked while taxis are operational.
    */
   useEffect(() => {
     if (!company || !game.hasHydrated) return

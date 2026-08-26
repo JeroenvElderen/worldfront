@@ -2,7 +2,7 @@ import type { Company, TaxiJob, Vehicle } from '../models/game'
 import { taxiTripSpeedMultiplier } from '../data/taxis'
 import { addReputation, levelForReputation } from './companyProgression'
 
-export const MAX_JOB_OFFERS = 6
+export const MAX_JOB_OFFERS = 12
 export const JOB_OFFER_DURATION_MS = 5 * 60_000
 // Trips use an accelerated game clock so journeys complete at a playable pace.
 export const REAL_TIME_TRIP_SCALE = 0.06

@@ -55,8 +55,12 @@ export const mergeVillageTerritories = (territories: ReturnType<typeof villageTe
 export const lockedTerritoryMask = (unlocked: ReturnType<typeof mergeVillageTerritories>) => {
   const worldRing: Coordinates[] = [[-179.9, -85], [179.9, -85], [179.9, 85], [-179.9, 85], [-179.9, -85]]
   if (!unlocked) return polygon([worldRing], { locked: true })
+  // GeoJSON interior rings must wind in the opposite direction to their outer
+  // ring. Village territories wind counter-clockwise, just like worldRing, so
+  // passing them through unchanged makes Mapbox fill them instead of treating
+  // them as transparent unlocked areas.
   const holes = unlocked.geometry.type === 'Polygon'
-    ? unlocked.geometry.coordinates.map((ring: number[][]) => ring as Coordinates[])
-    : unlocked.geometry.coordinates.flatMap((part: number[][][]) => part.map((ring: number[][]) => ring as Coordinates[]))
+    ? [unlocked.geometry.coordinates[0].slice().reverse() as Coordinates[]]
+    : unlocked.geometry.coordinates.map((part: number[][][]) => part[0].slice().reverse() as Coordinates[])
   return polygon([worldRing, ...holes], { locked: true })
 }

@@ -6,13 +6,13 @@ import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, worldOverview } from '../data/cities'
 import { taxiModels } from '../data/taxis'
 import type { Branch, Coordinates, TaxiJob, TerritoryExpansion, Vehicle } from '../models/game'
-import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
+import { distanceKmBetween, getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
-import { lockedTerritoryMask, mergeVillageTerritories, realVillageTerritory, villageTerritory, VILLAGE_TERRITORY_RADIUS_KM } from '../services/territoryGeometry'
+import { lockedTerritoryMask, mergeVillageTerritories, realVillageTerritory, taxiDiscoveryTerritory, villageTerritory, VILLAGE_TERRITORY_RADIUS_KM } from '../services/territoryGeometry'
 import type { TerritoryFeature } from '../services/territoryGeometry'
 
-interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; territoryExpansions: TerritoryExpansion[]; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void }
+interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; territoryExpansions: TerritoryExpansion[]; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onDiscoverTaxiTerritory: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void }
 const token = mapboxAccessToken
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
@@ -98,12 +98,13 @@ const missionColor = (jobId: string) => {
   return `hsl(${hash % 360}, 100%, 60%)`
 }
 
-function GameMapView({ cityId, customCities, branches, territoryExpansions, vehicles, jobs, focusedJobId, placingStation, placingTerritory, onBuildStation, onExpandTerritory, onOpenJob }: GameMapProps) {
+function GameMapView({ cityId, customCities, branches, territoryExpansions, vehicles, jobs, focusedJobId, placingStation, placingTerritory, onBuildStation, onExpandTerritory, onDiscoverTaxiTerritory, onOpenJob }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const pickupJobIds = useRef(new Set<string>())
   const pickupHandlers = useRef(new Map<string, { enter: () => void; leave: () => void; click: (event: mapboxgl.MapMouseEvent) => void }>())
   const liveJobIds = useRef(new Set<string>())
+  const liveDiscoveryPositions = useRef(new Map<string, Coordinates>())
   const liveJobTimers = useRef(new Map<string, number>())
   const liveJobRunners = useRef(new Map<string, () => void>())
   const [mapRevision, setMapRevision] = useState(0)
@@ -116,7 +117,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
         const coordinates = station.coordinates ?? getCity(station.cityId, customCities)?.coordinates
         return coordinates ? [{ id: station.id, coordinates }] : []
       }),
-      ...territoryExpansions.map(({ id, coordinates }) => ({ id, coordinates })),
+      ...territoryExpansions.filter((area) => area.source !== 'taxi-discovery').map(({ id, coordinates }) => ({ id, coordinates })),
     ]
     void Promise.all(centers.map(async ({ id, coordinates }) => {
       const boundary = await realVillageTerritory(id, coordinates)
@@ -430,7 +431,9 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
       const data = featureCollection(features)
       const territories = [
         ...stationCoordinates.map(({ station, coordinates }) => realTerritories[station.id] ?? villageTerritory(station.id, coordinates, VILLAGE_TERRITORY_RADIUS_KM)),
-        ...territoryExpansions.map((expansion) => realTerritories[expansion.id] ?? villageTerritory(expansion.id, expansion.coordinates, VILLAGE_TERRITORY_RADIUS_KM)),
+        ...territoryExpansions.map((expansion) => expansion.source === 'taxi-discovery'
+          ? taxiDiscoveryTerritory(expansion.id, expansion.coordinates, expansion.radiusKm)
+          : realTerritories[expansion.id] ?? villageTerritory(expansion.id, expansion.coordinates, VILLAGE_TERRITORY_RADIUS_KM)),
       ]
       const unlockedTerritory = mergeVillageTerritories(territories)
       const coverageData = featureCollection(unlockedTerritory ? [unlockedTerritory] : [])
@@ -557,7 +560,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
       liveJobIds.current.add(job.id)
       const journey = getJobJourney(job, vehicle)
       let pickupRoute: RouteDetails = { coordinates: [start, jobPickup(job)], speedLimits: [] }
-      let passengerRoute: RouteDetails = { coordinates: job.routeCoordinates ?? [jobPickup(job), jobDestination(job)], speedLimits: [] }
+      const passengerRoute: RouteDetails = { coordinates: job.routeCoordinates ?? [jobPickup(job), jobDestination(job)], speedLimits: [] }
       if (token) {
         const fetchRoute = async (from: Coordinates, to: Coordinates) => {
           const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?annotations=maxspeed&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`)
@@ -566,11 +569,10 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
           const route = result.routes?.[0]
           return route && { coordinates: route.geometry.coordinates, speedLimits: route.legs.flatMap((leg) => leg.annotation?.maxspeed ?? []) }
         }
-        void Promise.all([fetchRoute(start, jobPickup(job)), fetchRoute(jobPickup(job), jobDestination(job))])
-          .then(([toPickup, toDestination]) => {
+        void fetchRoute(start, jobPickup(job))
+          .then((toPickup) => {
             if (!liveJobIds.current.has(job.id) || map.current !== instance) return
             pickupRoute = toPickup ?? pickupRoute
-            passengerRoute = toDestination ?? passengerRoute
           })
           .catch(() => undefined)
       }
@@ -592,6 +594,11 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
         const progress = routeMotion(route, elapsed, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130).progress
         const currentPosition = routePosition(route.coordinates, progress)
         ;(instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(point(currentPosition))
+        const lastDiscoveryPosition = liveDiscoveryPositions.current.get(vehicle.id)
+        if (!lastDiscoveryPosition || distanceKmBetween(lastDiscoveryPosition, currentPosition) >= .5) {
+          liveDiscoveryPositions.current.set(vehicle.id, currentPosition)
+          onDiscoverTaxiTerritory(currentPosition)
+        }
         const routeAhead = pickingUp
           ? [...remainingRoute(pickupRoute.coordinates, progress), ...passengerRoute.coordinates.slice(1)]
           : remainingRoute(passengerRoute.coordinates, progress)
@@ -633,7 +640,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
       if (instance.getLayer(routeSourceId)) instance.removeLayer(routeSourceId)
       if (instance.getSource(routeSourceId)) instance.removeSource(routeSourceId)
     }
-  }, [cityId, customCities, jobs, vehicles, mapRevision, onOpenJob])
+  }, [cityId, customCities, jobs, vehicles, mapRevision, onDiscoverTaxiTerritory, onOpenJob])
 
   // Recovery trips can begin long after Mapbox was constructed. Animate them
   // in their own synchronized effect so a newly tired driver drives away
@@ -832,8 +839,11 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
 export const GameMap = memo(GameMapView, (previous, next) =>
   previous.cityId === next.cityId &&
   previous.customCities === next.customCities &&
+  previous.branches === next.branches &&
+  previous.territoryExpansions === next.territoryExpansions &&
   previous.vehicles === next.vehicles &&
   previous.focusedJobId === next.focusedJobId &&
   previous.onOpenJob === next.onOpenJob &&
+  previous.onDiscoverTaxiTerritory === next.onDiscoverTaxiTerritory &&
   previous.jobs === next.jobs
 )

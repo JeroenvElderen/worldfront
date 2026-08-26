@@ -4,7 +4,7 @@ import { cities, countries, getCity } from '../data/cities'
 import { transportModels } from '../data/transport'
 import { getTaxiModel } from '../data/taxis'
 import { getPostVehicleModel } from '../data/postVehicles'
-import type { BrandStrategy, City, Company, Coordinates, DepotFacility, Difficulty, Driver, DriverCertification, ExteriorAccessory, FinancialTransaction, GameSave, RefuelStrategy, ResearchId, Specialization, TransactionCategory, TransportMode, Vehicle, VehicleUpgrade } from '../models/game'
+import type { BrandStrategy, City, Company, Coordinates, DepotFacility, Difficulty, Driver, DriverCertification, ExteriorAccessory, FinancialTransaction, GameSave, RefuelStrategy, ResearchId, Specialization, TaxiJob, TerritoryExpansion, TransactionCategory, TransportMode, Vehicle, VehicleUpgrade } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
 import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import { generateJobOffers } from '../services/jobOfferService'
@@ -18,10 +18,10 @@ import { canResearch, hasResearch, researchNodes } from '../services/research'
 import { calculateJobOutcome, createDriverCandidates, createGoals, energyMultiplier, jobOfferCapacity, pickupSpeedMultiplier, updateGoals, upgradeAppliesToVehicle, upgradeDetails, upgradeFareMultiplier, vehicleCanTakeJob, vehicleComfortScore } from '../services/earlyGameEngine'
 import { cityDemandMultiplier, createCityEconomy, HOTEL_PURCHASE_COST, hotelUpgradeCost, pendingHotelRevenue } from '../services/hotelEconomy'
 import { competitorGrowth, createCompetitors, createWorldCondition, defaultBrandStrategy, fareMultiplier, marketingDemandMultiplier } from '../services/worldSystems'
-import type { VillageTerritoryCenter } from '../services/territoryGeometry'
+import { TAXI_DISCOVERY_RADIUS_KM, type VillageTerritoryCenter } from '../services/territoryGeometry'
 
 export type Section = 'map' | 'jobs' | 'fleet' | 'hotels' | 'finance' | 'travel' | 'company'
-interface GameActions { initializeCompany: (city: City) => void; buildStation: (coordinates: Coordinates) => void; expandTerritory: (coordinates: Coordinates) => void; buyHotel: () => void; upgradeHotel: (hotelId: string) => void; collectHotelRevenue: (hotelId: string) => void; switchStation: (cityId: string) => void; unlockResearch: (researchId: ResearchId) => void; upgradeDepotFacility: (cityId: string, facility: DepotFacility) => void; pauseGame: () => void; resumeGame: () => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; financeTaxi: (modelId: string) => void; upgradeGarage: () => void; buyPostVehicle: (modelId: string) => void; startPostalRoute: (vehicleId: string) => void; buyRentalCar: (modelId: string) => void; startRental: (vehicleId: string) => void; buyCountryLicense: (countryCode: string) => void; openAgency: () => void; createTour: () => void; dispatchTour: (tourId: string, vehicleId: string) => void; buyTourBus: () => void; buyCoach: () => void; createCoachRoute: (toCityId: string) => void; dispatchCoach: (routeId: string, vehicleId: string) => void; buyTransportAsset: (mode: TransportMode) => void; createTransportRoute: (mode: TransportMode, toCityId: string) => void; dispatchTransport: (routeId: string, assetId: string) => void; setAutomation: (patch: Partial<GameSave['automation']>) => void; runAutomation: () => void; acceptContract: (contractId: string) => void; chooseSpecialization: (specialization: Specialization) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; hireDriver: (candidateId: string, vehicleId: string) => void; refreshDriverCandidates: () => void; serviceVehicle: (vehicleId: string, service: 'quick' | 'full' | 'preventative') => void; installUpgrade: (vehicleId: string, upgrade: VehicleUpgrade) => void; setRefuelStrategy: (vehicleId: string, strategy: RefuelStrategy) => void; refuelVehicle: (vehicleId: string) => void; claimGoal: (goalId: string) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; setDifficulty: (difficulty: Difficulty) => void; setBrandStrategy: (patch: Partial<BrandStrategy>) => void; launchMarketing: (campaign: BrandStrategy['marketingCampaign']) => void; partnerCompetitor: (competitorId: string) => void; acquireCompetitor: (competitorId: string) => void; trainDriver: (driverId: string, certification: DriverCertification) => void; resolveIncident: (incidentId: string) => void; setRouteTimetable: (kind: 'coach' | 'transport', routeId: string, departureHour: number, frequencyHours: number) => void; resetGame: () => void }
+interface GameActions { initializeCompany: (city: City) => void; buildStation: (coordinates: Coordinates) => void; expandTerritory: (coordinates: Coordinates) => void; discoverTaxiTerritory: (coordinates: Coordinates) => void; buyHotel: () => void; upgradeHotel: (hotelId: string) => void; collectHotelRevenue: (hotelId: string) => void; switchStation: (cityId: string) => void; unlockResearch: (researchId: ResearchId) => void; upgradeDepotFacility: (cityId: string, facility: DepotFacility) => void; pauseGame: () => void; resumeGame: () => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; financeTaxi: (modelId: string) => void; upgradeGarage: () => void; buyPostVehicle: (modelId: string) => void; startPostalRoute: (vehicleId: string) => void; buyRentalCar: (modelId: string) => void; startRental: (vehicleId: string) => void; buyCountryLicense: (countryCode: string) => void; openAgency: () => void; createTour: () => void; dispatchTour: (tourId: string, vehicleId: string) => void; buyTourBus: () => void; buyCoach: () => void; createCoachRoute: (toCityId: string) => void; dispatchCoach: (routeId: string, vehicleId: string) => void; buyTransportAsset: (mode: TransportMode) => void; createTransportRoute: (mode: TransportMode, toCityId: string) => void; dispatchTransport: (routeId: string, assetId: string) => void; setAutomation: (patch: Partial<GameSave['automation']>) => void; runAutomation: () => void; acceptContract: (contractId: string) => void; chooseSpecialization: (specialization: Specialization) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; hireDriver: (candidateId: string, vehicleId: string) => void; refreshDriverCandidates: () => void; serviceVehicle: (vehicleId: string, service: 'quick' | 'full' | 'preventative') => void; installUpgrade: (vehicleId: string, upgrade: VehicleUpgrade) => void; setRefuelStrategy: (vehicleId: string, strategy: RefuelStrategy) => void; refuelVehicle: (vehicleId: string) => void; claimGoal: (goalId: string) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; setDifficulty: (difficulty: Difficulty) => void; setBrandStrategy: (patch: Partial<BrandStrategy>) => void; launchMarketing: (campaign: BrandStrategy['marketingCampaign']) => void; partnerCompetitor: (competitorId: string) => void; acquireCompetitor: (competitorId: string) => void; trainDriver: (driverId: string, certification: DriverCertification) => void; resolveIncident: (incidentId: string) => void; setRouteTimetable: (kind: 'coach' | 'transport', routeId: string, departureHour: number, frequencyHours: number) => void; resetGame: () => void }
 interface GameState extends GameSave { activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
 
 const initialContracts = () => [
@@ -53,8 +53,30 @@ const hasFleetSlot = (state: Pick<GameState, 'company' | 'garageLevel' | 'vehicl
   Boolean(state.company && state.vehicles.length < fleetSlotCapacity(state.company.level, state.garageLevel ?? 0, state.branches) + researchFleetSlots(state))
 const unlockedTerritoryCenters = (state: Pick<GameState, 'branches' | 'territoryExpansions'>): VillageTerritoryCenter[] => [
   ...state.branches.flatMap((branch) => branch.coordinates ? [{ id: branch.id, coordinates: branch.coordinates }] : []),
-  ...(state.territoryExpansions ?? []).map(({ id, coordinates }) => ({ id, coordinates })),
+  ...(state.territoryExpansions ?? []).map(({ id, coordinates, source, radiusKm }) => ({ id, coordinates, source: source === 'taxi-discovery' ? source : 'village', radiusKm })),
 ]
+const discoveryCheckpoints = (job: TaxiJob, start?: Coordinates) => {
+  const route = [start, jobPickup(job), ...(job.routeCoordinates ?? [jobDestination(job)])].filter((point): point is Coordinates => Boolean(point))
+  const checkpoints: Coordinates[] = route.length ? [route[0]] : []
+  for (let index = 1; index < route.length; index += 1) {
+    const from = route[index - 1]
+    const to = route[index]
+    const steps = Math.max(1, Math.ceil(distanceKmBetween(from, to) / TAXI_DISCOVERY_RADIUS_KM))
+    for (let step = 1; step <= steps; step += 1) checkpoints.push([
+      from[0] + (to[0] - from[0]) * step / steps,
+      from[1] + (to[1] - from[1]) * step / steps,
+    ])
+  }
+  return checkpoints
+}
+const addTaxiDiscovery = (existing: TerritoryExpansion[], job: TaxiJob, start: Coordinates | undefined, discoveredAt: string) => {
+  const additions: TerritoryExpansion[] = []
+  for (const coordinates of discoveryCheckpoints(job, start)) {
+    const alreadyCovered = [...existing, ...additions].some((area) => area.source === 'taxi-discovery' && distanceKmBetween(area.coordinates, coordinates) < TAXI_DISCOVERY_RADIUS_KM * .75)
+    if (!alreadyCovered) additions.push({ id: crypto.randomUUID(), coordinates, purchasedAt: discoveredAt, source: 'taxi-discovery', radiusKm: TAXI_DISCOVERY_RADIUS_KM })
+  }
+  return additions.length ? [...existing, ...additions] : existing
+}
 const advanceContracts = (contracts: GameSave['contracts'], category: GameSave['contracts'][number]['category']) => contracts.map((contract) => {
   if (!contract.accepted || contract.completed || contract.category !== category) return contract
   const progress = Math.min(contract.target, contract.progress + 1)
@@ -96,12 +118,21 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     }
   }),
   expandTerritory: (coordinates) => set((state) => {
-    const sequence = (state.territoryExpansions ?? []).length + 1
+    const sequence = (state.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery').length + 1
     const cost = 5_000 * (sequence - 1)
     if (!state.company || state.company.cash < cost) return state
     const now = new Date().toISOString()
-    const expansion = { id: crypto.randomUUID(), coordinates, purchasedAt: now }
+    const expansion: TerritoryExpansion = { id: crypto.randomUUID(), coordinates, purchasedAt: now, source: 'purchase' }
     return { territoryExpansions: [...(state.territoryExpansions ?? []), expansion], company: { ...state.company, cash: state.company.cash - cost }, financialTransactions: addTransactions(state.financialTransactions, transaction('expansion', `Village territory ${sequence}`, -cost, undefined, now)), updatedAt: now }
+  }),
+  discoverTaxiTerritory: (coordinates) => set((state) => {
+    const territoryExpansions = state.territoryExpansions ?? []
+    // Animation reports a position every 50 ms. Persist only meaningful travel
+    // checkpoints so live discovery remains smooth without bloating the save.
+    if (territoryExpansions.some((area) => area.source === 'taxi-discovery' && distanceKmBetween(area.coordinates, coordinates) < .5)) return state
+    const now = new Date().toISOString()
+    const discovery: TerritoryExpansion = { id: crypto.randomUUID(), coordinates, purchasedAt: now, source: 'taxi-discovery', radiusKm: TAXI_DISCOVERY_RADIUS_KM }
+    return { territoryExpansions: [...territoryExpansions, discovery], updatedAt: now }
   }),
   buyHotel: () => set((state) => {
     const city = getCity(state.activeCityId ?? state.startingCityId, state.customCities)
@@ -168,7 +199,9 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     set({ jobsLoading: true, jobsError: null })
     try {
       const level = levelForReputation(state.company?.reputation ?? 0)
-      const searchArea = city
+      // Search from the roaming taxi rather than its original station so its
+      // newly discovered corridor can continue growing beyond village borders.
+      const searchArea = { ...city, coordinates: availableTaxi.position ?? city.coordinates }
       const taxis = state.vehicles.filter((vehicle) => vehicle.type === 'taxi')
       const taxiPositions = taxis.filter((vehicle) => vehicle.status === 'available' && vehicle.cityId === city.id).map((vehicle) => vehicle.position ?? city.coordinates)
       const maxDistanceKm = maxJobDistanceForFleet(level, taxis.length) * (hasResearch(state.completedResearch ?? [], 'predictive-demand') ? 1.25 : 1)
@@ -194,7 +227,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     set({ jobsLoading: true, jobsError: null })
     try {
       const level = levelForReputation(state.company?.reputation ?? 0)
-      const searchArea = city
+      const searchArea = { ...city, coordinates: availableTaxi.position ?? city.coordinates }
       const taxis = state.vehicles.filter((vehicle) => vehicle.type === 'taxi')
       const taxiPositions = taxis.filter((vehicle) => vehicle.status === 'available' && vehicle.cityId === city.id).map((vehicle) => vehicle.position ?? city.coordinates)
       const maxDistanceKm = maxJobDistanceForFleet(level, taxis.length) * (hasResearch(state.completedResearch ?? [], 'predictive-demand') ? 1.25 : 1)
@@ -228,8 +261,12 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
   declineJob: (jobId) => set((state) => ({ jobs: state.jobs.filter((job) => job.id !== jobId), focusedJobId: state.focusedJobId === jobId ? null : state.focusedJobId, updatedAt: new Date().toISOString() })),
   completeJob: (jobId) => set((state) => {
     if (!state.company) return state
+    const job = state.jobs.find((candidate) => candidate.id === jobId)
+    const vehicle = state.vehicles.find((candidate) => candidate.id === job?.assignedVehicleId)
     const result = completeJobState(state.company, state.jobs, state.vehicles, jobId)
-    return result ? { ...result, updatedAt: new Date().toISOString() } : state
+    if (!result || !job) return state
+    const updatedAt = new Date().toISOString()
+    return { ...result, territoryExpansions: addTaxiDiscovery(state.territoryExpansions ?? [], job, vehicle?.position, updatedAt), updatedAt }
   }),
   tickJobs: () => set((state) => {
     if (!state.company) return state
@@ -254,6 +291,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     let vehicles = result?.vehicles ?? reconciledVehicles
     let drivers = state.drivers
     let financialTransactions = state.financialTransactions ?? []
+    let territoryExpansions = state.territoryExpansions ?? []
     if (result) {
       for (const jobId of result.completedJobIds) {
         const job = state.jobs.find((candidate) => candidate.id === jobId)!
@@ -263,6 +301,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
         // enough for both journeys to finish, the service trip can settle in
         // this same tick instead of leaving the taxi unavailable after launch.
         const completedAt = getJobJourney(job, previousVehicle).arrivesAt
+        territoryExpansions = addTaxiDiscovery(territoryExpansions, job, previousVehicle.position, new Date(completedAt).toISOString())
         const outcome = calculateJobOutcome(job, previousVehicle, driver)
         const emptyDistanceKm = previousVehicle.position ? distanceKmBetween(previousVehicle.position, jobPickup(job)) : 0
         const journeyDistanceKm = emptyDistanceKm + job.distanceKm
@@ -434,7 +473,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
       const completed = result.completedJobIds.filter((jobId) => state.vehicles.find((vehicle) => vehicle.driverId === driver.id)?.id === state.jobs.find((job) => job.id === jobId)?.assignedVehicleId).length
       return completed ? { ...driver, experience: (driver.experience ?? 0) + completed * 10, completedTrips: (driver.completedTrips ?? 0) + completed, careerEarnings: (driver.careerEarnings ?? 0) + completed * 25, morale: Math.min(100, (driver.morale ?? 80) + 1) } : driver
     })
-    return { company, jobs: result?.jobs ?? jobs, vehicles, transportAssets, drivers, goals, contracts, driverCandidates, loans, financialTransactions, activeEvent, nextEventAt, nextOperatingPaymentAt, worldCondition, competitors, incidents, passengers, focusedJobId: result ? null : (jobs.some((job) => job.id === state.focusedJobId) ? state.focusedJobId : null), updatedAt: new Date().toISOString() }
+    return { company, jobs: result?.jobs ?? jobs, vehicles, transportAssets, drivers, goals, contracts, driverCandidates, loans, financialTransactions, territoryExpansions, activeEvent, nextEventAt, nextOperatingPaymentAt, worldCondition, competitors, incidents, passengers, focusedJobId: result ? null : (jobs.some((job) => job.id === state.focusedJobId) ? state.focusedJobId : null), updatedAt: new Date().toISOString() }
   }),
   buyTaxi: (modelId) => set((state) => {
     const model = getTaxiModel(modelId)

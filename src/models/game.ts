@@ -27,7 +27,7 @@ export interface Passenger { id: string; name: string; partySize: number; segmen
 export interface TaxiJob { id: string; cityId: string; pickup: Coordinates; destination: Coordinates; pickupRoad?: Coordinates; destinationRoad?: Coordinates; routeCoordinates?: Coordinates[]; pickupLabel: string; destinationLabel: string; passengerIds: string[]; fare: number; distanceKm: number; durationMinutes: number; category?: JobCategory; requiredUpgrade?: VehicleUpgrade; status: 'offered' | 'accepted' | 'complete'; offeredAt?: string; assignedVehicleId?: string; acceptedAt?: string; pickupTimeMultiplier?: number; satisfaction?: number; customerRating?: number; tip?: number; reputationEarned?: number }
 export type DepotFacility = 'parking' | 'workshop' | 'energy' | 'lounge'
 export interface DepotFacilities { parking: number; workshop: number; energy: number; lounge: number }
-export interface TerritoryExpansion { id: string; coordinates: Coordinates; purchasedAt: string }
+export interface TerritoryExpansion { id: string; coordinates: Coordinates; purchasedAt: string; source?: 'purchase' | 'taxi-discovery'; radiusKm?: number }
 export interface Branch { id: string; cityId: string; name: string; openedAt: string; coordinates?: Coordinates; managerName?: string; isHeadquarters?: boolean; depot?: DepotFacilities }
 export interface Hotel { id: string; cityId: string; name: string; level: number; rooms: number; purchasedAt: string; lastCollectedAt: string; lifetimeRevenue: number }
 export interface CityEconomy { cityId: string; population: number; tourism: number; business: number; prosperity: number; costIndex: number; trend: number }

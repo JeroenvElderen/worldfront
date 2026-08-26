@@ -1,11 +1,12 @@
 import { featureCollection, polygon } from '@turf/helpers'
-import { booleanPointInPolygon, union } from '@turf/turf'
+import { booleanPointInPolygon, circle, union } from '@turf/turf'
 import type { Coordinates } from '../models/game'
 
 const EARTH_KM_PER_LATITUDE_DEGREE = 110.574
 export const VILLAGE_TERRITORY_RADIUS_KM = 6
+export const TAXI_DISCOVERY_RADIUS_KM = 2
 
-export interface VillageTerritoryCenter { id: string; coordinates: Coordinates }
+export interface VillageTerritoryCenter { id: string; coordinates: Coordinates; source?: 'village' | 'taxi-discovery'; radiusKm?: number }
 type TerritoryGeometry =
   | { type: 'Polygon'; coordinates: number[][][] }
   | { type: 'MultiPolygon'; coordinates: number[][][][] }
@@ -91,6 +92,10 @@ export const villageTerritory = (id: string, center: Coordinates, radiusKm: numb
   return polygon([points], { id, unlocked: true })
 }
 
+/** A taxi permanently discovers a circular area around each travelled checkpoint. */
+export const taxiDiscoveryTerritory = (id: string, center: Coordinates, radiusKm = TAXI_DISCOVERY_RADIUS_KM): TerritoryFeature =>
+  circle(center, radiusKm, { steps: 24, units: 'kilometers', properties: { id, unlocked: true } }) as TerritoryFeature
+
 export const mergeVillageTerritories = (territories: TerritoryFeature[]) => {
   if (!territories.length) return null
   if (territories.length === 1) return territories[0]
@@ -111,8 +116,10 @@ export const isInsideVillageTerritories = (coordinates: Coordinates, centers: Vi
  */
 export const resolveVillageTerritories = async (centers: VillageTerritoryCenter[]) =>
   Promise.all(centers.map(async (center) =>
-    await realVillageTerritory(center.id, center.coordinates)
-      ?? villageTerritory(center.id, center.coordinates, VILLAGE_TERRITORY_RADIUS_KM)))
+    center.source === 'taxi-discovery'
+      ? taxiDiscoveryTerritory(center.id, center.coordinates, center.radiusKm)
+      : await realVillageTerritory(center.id, center.coordinates)
+        ?? villageTerritory(center.id, center.coordinates, VILLAGE_TERRITORY_RADIUS_KM)))
 
 /** True when a location belongs to one of the supplied map territory features. */
 export const isInsideTerritoryFeatures = (coordinates: Coordinates, territories: TerritoryFeature[]) =>

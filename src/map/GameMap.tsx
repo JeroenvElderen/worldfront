@@ -2,7 +2,6 @@ import { memo, useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { featureCollection, lineString, point } from '@turf/helpers'
-import { circle } from '@turf/turf'
 import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, worldOverview } from '../data/cities'
 import { taxiModels } from '../data/taxis'
@@ -10,6 +9,7 @@ import type { Branch, Coordinates, TaxiJob, Vehicle } from '../models/game'
 import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
+import { lockedTerritoryMask, mergeVillageTerritories, villageTerritory } from '../services/territoryGeometry'
 
 interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; serviceRadiusKm: number; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; placingStation: boolean; onBuildStation: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void }
 const token = mapboxAccessToken
@@ -407,13 +407,18 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
       })
       const features = stationCoordinates.map(({ station, coordinates }) => point(coordinates, { name: station.name }))
       const data = featureCollection(features)
-      const coverageData = featureCollection(stationCoordinates.map(({ coordinates }) => circle(coordinates, serviceRadiusKm, { steps: 64, units: 'kilometers' })))
+      const territories = stationCoordinates.map(({ station, coordinates }) => villageTerritory(station.id, coordinates, serviceRadiusKm))
+      const unlockedTerritory = mergeVillageTerritories(territories)
+      const coverageData = featureCollection(unlockedTerritory ? [unlockedTerritory] : [])
+      const lockedData = featureCollection([lockedTerritoryMask(unlockedTerritory)])
       const source = instance.getSource('depot-network') as mapboxgl.GeoJSONSource | undefined
       const coverageSource = instance.getSource('service-coverage') as mapboxgl.GeoJSONSource | undefined
-      if (source && coverageSource) { source.setData(data); coverageSource.setData(coverageData); return }
+      const lockedSource = instance.getSource('locked-territory') as mapboxgl.GeoJSONSource | undefined
+      if (source && coverageSource && lockedSource) { source.setData(data); coverageSource.setData(coverageData); lockedSource.setData(lockedData); return }
+      instance.addSource('locked-territory', { type: 'geojson', data: lockedData })
+      instance.addLayer({ id: 'locked-territory-fill', type: 'fill', source: 'locked-territory', paint: { 'fill-color': '#ef7777', 'fill-opacity': .24 } })
       instance.addSource('service-coverage', { type: 'geojson', data: coverageData })
-      instance.addLayer({ id: 'service-coverage-fill', type: 'fill', source: 'service-coverage', paint: { 'fill-color': '#22d3a7', 'fill-opacity': .08 } })
-      instance.addLayer({ id: 'service-coverage-line', type: 'line', source: 'service-coverage', paint: { 'line-color': '#5eead4', 'line-width': 1.5, 'line-opacity': .65, 'line-dasharray': [3, 2] } })
+      instance.addLayer({ id: 'service-coverage-line', type: 'line', source: 'service-coverage', paint: { 'line-color': '#5eead4', 'line-width': 2, 'line-opacity': .85 } })
       instance.addSource('depot-network', { type: 'geojson', data })
       instance.addLayer({ id: 'depot-network-halo', type: 'circle', source: 'depot-network', paint: { 'circle-radius': 13, 'circle-color': '#f59e0b', 'circle-opacity': .18 } })
       instance.addLayer({ id: 'depot-network', type: 'circle', source: 'depot-network', paint: { 'circle-radius': 6, 'circle-color': '#fbbf24', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } })

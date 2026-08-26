@@ -15,7 +15,7 @@ import { createPostalRoute } from '../services/postalEngine'
 import { createRentalJourney } from '../services/rentalEngine'
 import { maintenanceCost, vehicleMarketValue } from '../services/vehicleEconomics'
 import { canResearch, hasResearch, researchNodes } from '../services/research'
-import { calculateJobOutcome, createDriverCandidates, createGoals, energyMultiplier, jobCategoriesForFleet, jobOfferCapacity, pickupSpeedMultiplier, updateGoals, upgradeAppliesToVehicle, upgradeDetails, vehicleCanTakeJob, vehicleComfortScore } from '../services/earlyGameEngine'
+import { calculateJobOutcome, createDriverCandidates, createGoals, energyMultiplier, jobOfferCapacity, pickupSpeedMultiplier, updateGoals, upgradeAppliesToVehicle, upgradeDetails, upgradeFareMultiplier, vehicleCanTakeJob, vehicleComfortScore } from '../services/earlyGameEngine'
 import { cityDemandMultiplier, createCityEconomy, HOTEL_PURCHASE_COST, hotelUpgradeCost, pendingHotelRevenue } from '../services/hotelEconomy'
 import { competitorGrowth, createCompetitors, createWorldCondition, defaultBrandStrategy, fareMultiplier, marketingDemandMultiplier } from '../services/worldSystems'
 
@@ -159,8 +159,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
       const taxis = state.vehicles.filter((vehicle) => vehicle.type === 'taxi')
       const taxiPositions = taxis.filter((vehicle) => vehicle.status === 'available' && vehicle.cityId === city.id).map((vehicle) => vehicle.position ?? city.coordinates)
       const maxDistanceKm = maxJobDistanceForFleet(level, taxis.length) * (hasResearch(state.completedResearch ?? [], 'predictive-demand') ? 1.25 : 1)
-      const availableCategories = jobCategoriesForFleet(state.vehicles.filter((vehicle) => vehicle.cityId === city.id), state.drivers)
-      const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, (state.activeEvent?.fareMultiplier ?? 1) * cityDemandMultiplier(state.cityEconomies.find((economy) => economy.cityId === city.id)) * (state.worldCondition?.demandMultiplier ?? 1) * marketingDemandMultiplier(state.brandStrategy ?? defaultBrandStrategy) * fareMultiplier(state.brandStrategy?.fareStrategy ?? 'standard') * Math.max(.55, 1 - (state.competitors ?? []).filter((competitor) => competitor.relationship === 'rival').reduce((sum, competitor) => sum + competitor.marketShare, 0) / 200), availableCategories)
+      const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, (state.activeEvent?.fareMultiplier ?? 1) * cityDemandMultiplier(state.cityEconomies.find((economy) => economy.cityId === city.id)) * (state.worldCondition?.demandMultiplier ?? 1) * marketingDemandMultiplier(state.brandStrategy ?? defaultBrandStrategy) * fareMultiplier(state.brandStrategy?.fareStrategy ?? 'standard') * Math.max(.55, 1 - (state.competitors ?? []).filter((competitor) => competitor.relationship === 'rival').reduce((sum, competitor) => sum + competitor.marketShare, 0) / 200))
       set((latest) => {
         const openSlots = Math.max(0, availableJobOfferCapacity(latest) - latest.jobs.filter((job) => job.status === 'offered').length)
         const acceptedJobs = generated.jobs.slice(0, openSlots)
@@ -209,7 +208,8 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     const driver = state.drivers.find((candidate) => candidate.id === driverId)
     if (driver?.trait === 'unreliable' && Math.random() < .12) return { drivers: state.drivers.map((candidate) => candidate.id === driverId ? { ...candidate, status: 'off-duty' as const, missedShiftUntil: new Date(Date.now() + 60_000).toISOString() } : candidate), updatedAt: new Date().toISOString() }
     const drivers = state.drivers.map((candidate) => candidate.id === driverId ? { ...candidate, status: 'driving' as const } : candidate)
-    const jobs = result.jobs.map((job) => job.id === jobId ? { ...job, pickupTimeMultiplier: pickupSpeedMultiplier(driver), durationMinutes: (driver?.trait === 'careful' ? job.durationMinutes * 1.05 : job.durationMinutes) / (state.worldCondition?.speedMultiplier ?? 1), fare: Math.round(job.fare * ((result.vehicles.find((vehicle) => vehicle.id === assignedVehicleId)?.upgrades ?? []).includes('meter-pro') ? 1.08 : 1) * (hasResearch(state.completedResearch ?? [], 'smart-dispatch') ? 1.08 : 1) * 100) / 100 } : job)
+    const assignedVehicle = result.vehicles.find((vehicle) => vehicle.id === assignedVehicleId)
+    const jobs = result.jobs.map((job) => job.id === jobId ? { ...job, pickupTimeMultiplier: pickupSpeedMultiplier(driver), durationMinutes: (driver?.trait === 'careful' ? job.durationMinutes * 1.05 : job.durationMinutes) / (state.worldCondition?.speedMultiplier ?? 1), fare: Math.round(job.fare * (assignedVehicle ? upgradeFareMultiplier(assignedVehicle) : 1) * (hasResearch(state.completedResearch ?? [], 'smart-dispatch') ? 1.08 : 1) * 100) / 100 } : job)
     return { ...result, jobs: fitOffersToAvailableTaxis(jobs, availableJobOfferCapacity({ vehicles: result.vehicles, drivers })), drivers, focusedJobId: jobId, updatedAt: new Date().toISOString(), activeSection: 'map' }
   }),
   declineJob: (jobId) => set((state) => ({ jobs: state.jobs.filter((job) => job.id !== jobId), focusedJobId: state.focusedJobId === jobId ? null : state.focusedJobId, updatedAt: new Date().toISOString() })),

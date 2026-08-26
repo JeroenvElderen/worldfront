@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Driver, Passenger, TaxiJob, Vehicle } from '../../models/game'
 import { distanceKmBetween, jobOfferExpiresAt, jobPickup } from '../../services/jobEngine'
-import { categoryDetails, vehicleCanTakeJob } from '../../services/earlyGameEngine'
+import { vehicleCanTakeJob } from '../../services/earlyGameEngine'
 import { licensePlateForVehicle, vehicleMakeAndModel } from '../../services/vehicleIdentity'
 import { JobRoutePreview } from './JobRoutePreview'
 import { useCurrency } from './CurrencyContext'
@@ -36,22 +36,19 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, driver
   const money = new Intl.NumberFormat(locale, { style: 'currency', currency, minimumFractionDigits: 2 })
   const [now, setNow] = useState(Date.now())
   const [view, setView] = useState<JobView>('offered')
-  const [categoryFilter, setCategoryFilter] = useState('all')
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1_000)
     return () => window.clearInterval(interval)
   }, [])
 
-  const visibleJobs = jobs.filter((job) => job.status === view && (categoryFilter === 'all' || (job.category ?? 'standard') === categoryFilter))
-  const availableCategories = [...new Set(jobs.map((job) => job.category ?? 'standard'))]
+  const visibleJobs = jobs.filter((job) => job.status === view)
 
   return <section className="section-sheet jobs-sheet game-panel" aria-labelledby="jobs-title" aria-live="polite">
     <div className="sheet-handle" />
     <button className="sheet-close" onClick={onClose} aria-label="Close jobs">×</button>
     <header className="jobs-heading">
       <div><h2 id="jobs-title">Jobs</h2><p>Choose a job to assign to a taxi</p></div>
-      <label className="job-filter"><span aria-hidden="true">⌯</span><select aria-label="Filter jobs by category" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">All types</option>{availableCategories.map((category) => <option value={category} key={category}>{categoryDetails[category].label}</option>)}</select></label>
     </header>
     <nav className="job-tabs" aria-label="Job status">
       {viewDetails.map((item) => <button type="button" key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}>
@@ -71,15 +68,13 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, driver
         })
         .map((vehicle) => ({ vehicle, distance: vehicle.position ? distanceKmBetween(vehicle.position, jobPickup(job)) : Infinity }))
         .sort((left, right) => left.distance - right.distance)[0]
-      const category = categoryDetails[job.category ?? 'standard']
-      
       return <article className={`job-card job-board-card ${job.id === focusedJobId ? 'focused' : ''}`} key={job.id}>
         <div className="job-route-column">
           <JobRoutePreview job={job} onOpen={() => onViewMap(job.id)} />
           <div className="job-trip-meta"><span><i aria-hidden="true">⌁</i>{job.distanceKm.toFixed(1)} km</span><span><i aria-hidden="true">◷</i>{Math.round(job.durationMinutes)} min</span></div>
         </div>
         <div className="job-offer-column">
-          <span className="job-category">{category.label} <b>♟ {passenger?.partySize ?? 1}</b></span>
+          <span className="job-category">♟ {passenger?.partySize ?? 1} passenger{passenger?.partySize === 1 ? '' : 's'}</span>
           <strong className="job-fare">{money.format(job.fare)}</strong>
           <small>{view === 'complete' ? 'Final fare' : 'Estimated fare'}</small>
           {taxi && <div className="job-vehicle"><span aria-hidden="true">🚕</span><div><small>{view === 'offered' ? 'NEXT VEHICLE' : 'ASSIGNED VEHICLE'}</small><strong>{vehicleMakeAndModel(taxi.vehicle)}</strong></div><b>{licensePlateForVehicle(taxi.vehicle)}</b></div>}

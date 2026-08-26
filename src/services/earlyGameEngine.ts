@@ -1,4 +1,4 @@
-import type { CompanyGoal, Driver, DriverCandidate, DriverTrait, GoalMetric, JobCategory, TaxiJob, Vehicle, VehicleUpgrade } from '../models/game'
+import type { CompanyGoal, Driver, DriverCandidate, DriverTrait, GoalMetric, TaxiJob, Vehicle, VehicleUpgrade } from '../models/game'
 import { distanceKmBetween, getJobJourney } from './jobEngine'
 
 export const driverTraitDetails: Record<DriverTrait, { label: string; description: string }> = {
@@ -15,12 +15,12 @@ export const upgradeDetails: Record<VehicleUpgrade, { label: string; description
   'premium-seats': { label: 'Premium seats', description: 'Improves passenger satisfaction.', price: 1_400 },
   wifi: { label: 'Passenger Wi-Fi', description: 'Adds comfort and earns stronger business-passenger tips.', price: 950 },
   'air-conditioning': { label: 'Air conditioning', description: 'Keeps passengers comfortable and improves satisfaction.', price: 1_250 },
-  'luggage-capacity': { label: 'Luggage capacity', description: 'Unlocks premium airport transfers.', price: 1_100 },
-  'wheelchair-access': { label: 'Wheelchair access', description: 'Unlocks accessible passenger transfers.', price: 2_800 },
-  'child-seats': { label: 'Child seats', description: 'Unlocks family transfers and improves family satisfaction.', price: 600 },
+  'luggage-capacity': { label: 'Luggage capacity', description: 'Carries more bags and improves passenger comfort.', price: 1_100 },
+  'wheelchair-access': { label: 'Wheelchair access', description: 'Provides inclusive access and improves passenger comfort.', price: 2_800 },
+  'child-seats': { label: 'Child seats', description: 'Improves comfort and satisfaction for families.', price: 600 },
   'entertainment-system': { label: 'Entertainment system', description: 'Improves long-distance trips and tour revenue.', price: 1_600 },
-  'security-partition': { label: 'Security partition', description: 'Unlocks secure late-night work and improves safety.', price: 1_300 },
-  'luxury-interior': { label: 'Luxury interior', description: 'Unlocks the best premium fares and boosts tips and tours.', price: 3_800 },
+  'security-partition': { label: 'Security partition', description: 'Improves safety for drivers and passengers.', price: 1_300 },
+  'luxury-interior': { label: 'Luxury interior', description: 'Boosts passenger comfort, tips and tours.', price: 3_800 },
   'range-pack': { label: 'Range pack', description: 'Uses 15% less fuel or electricity.', price: 2_200 },
   'meter-pro': { label: 'Meter Pro', description: 'Adds 8% to taxi fares.', price: 1_800 },
   'roof-sign': { label: 'Smart roof sign', description: 'Keeps one extra passenger request visible while this taxi is available.', price: 700 },
@@ -68,38 +68,14 @@ export function updateGoals(goals: CompanyGoal[], metric: GoalMetric, amount: nu
   return goals.map((goal) => goal.metric !== metric || goal.claimed ? goal : { ...goal, progress: Math.min(goal.target, goal.progress + amount), completed: goal.progress + amount >= goal.target })
 }
 
-export const categoryDetails: Record<JobCategory, { label: string; icon: string; fare: number; requiredUpgrade?: VehicleUpgrade }> = {
-  standard: { label: 'Standard', icon: '🚕', fare: 1 }, airport: { label: 'Airport', icon: '✈️', fare: 1.2, requiredUpgrade: 'luggage-capacity' }, family: { label: 'Family', icon: '👨‍👩‍👧', fare: 1.1, requiredUpgrade: 'child-seats' }, executive: { label: 'Executive', icon: '💼', fare: 1.35, requiredUpgrade: 'luxury-interior' }, accessible: { label: 'Accessible', icon: '♿', fare: 1.25, requiredUpgrade: 'wheelchair-access' }, 'late-night': { label: 'Late night', icon: '🌙', fare: 1.2, requiredUpgrade: 'security-partition' }, 'long-distance': { label: 'Long distance', icon: '🛣️', fare: 1.15 }, courier: { label: 'Courier', icon: '📦', fare: 1.05 }, 'pet-friendly': { label: 'Pet friendly', icon: '🐾', fare: 1.1 },
-}
-
-export function categoryForRoute(pickup: string, destination: string, distanceKm: number, partySize: number, availableCategories: JobCategory[] = Object.keys(categoryDetails) as JobCategory[]): JobCategory {
-  const labels = `${pickup} ${destination}`.toLowerCase()
-  if (labels.includes('airport') && availableCategories.includes('airport')) return 'airport'
-  if (distanceKm >= 15 && availableCategories.includes('long-distance')) return 'long-distance'
-  if (partySize >= 3 && availableCategories.includes('family')) return 'family'
-  const pool: JobCategory[] = ['standard', 'executive', 'accessible', 'late-night', 'courier', 'pet-friendly']
-  const availablePool = pool.filter((category) => availableCategories.includes(category))
-  return availablePool[Math.floor(Math.random() * availablePool.length)] ?? 'standard'
-}
-
 export function vehicleCanTakeJob(vehicle: Vehicle, job: TaxiJob, partySize: number) {
   if (vehicle.capacity < partySize) return false
   return !job.requiredUpgrade || (vehicle.upgrades ?? []).includes(job.requiredUpgrade)
 }
 
-/** Categories that at least one currently dispatchable taxi and driver can serve. */
-export function jobCategoriesForFleet(vehicles: Vehicle[], drivers: Driver[]): JobCategory[] {
-  const taxis = vehicles.flatMap((vehicle) => {
-    const driver = drivers.find((candidate) => candidate.id === vehicle.driverId)
-    return vehicle.type === 'taxi' && vehicle.status === 'available' && driver?.status === 'available' ? [{ vehicle, driver }] : []
-  })
-  return (Object.keys(categoryDetails) as JobCategory[]).filter((category) => taxis.some(({ vehicle, driver }) => {
-    const requiredUpgrade = categoryDetails[category].requiredUpgrade
-    if (requiredUpgrade && !(vehicle.upgrades ?? []).includes(requiredUpgrade)) return false
-    if (category === 'accessible' && !(driver.certifications ?? []).includes('accessible')) return false
-    if (category === 'executive' && !(driver.certifications ?? []).includes('executive')) return false
-    return true
-  }))
+/** Every fitted taxi upgrade adds 8% to the fare quoted when that taxi is assigned. */
+export function upgradeFareMultiplier(vehicle: Vehicle) {
+  return 1 + (vehicle.upgrades?.length ?? 0) * .08
 }
 
 /** Available taxis normally surface one request; an equipped roof sign attracts one more. */

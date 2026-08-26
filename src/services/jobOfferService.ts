@@ -1,8 +1,7 @@
-import type { City, Coordinates, JobCategory, Passenger, TaxiJob } from '../models/game'
+import type { City, Coordinates, Passenger, TaxiJob } from '../models/game'
 import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
-import { categoryDetails, categoryForRoute } from './earlyGameEngine'
 import { addJobsToJobJson, jobRouteSignature, readJobJson, type StoredJobRoute } from './jobJsonService'
 
 export const MIN_JOB_DISTANCE_KM = 6
@@ -192,8 +191,7 @@ export async function generateJobOffers(
   maxDistanceKm = BASE_JOB_DISTANCE_KM,
   signal?: AbortSignal,
   taxiPositions: Coordinates[] = [city.coordinates],
-  fareMultiplier = 1,
-  availableCategories?: JobCategory[]
+  fareMultiplier = 1
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
   const excluded = new Set(excludedRoutes)
   let routes: Array<{ pickup: MapboxPlace; destination: MapboxPlace; distanceKm: number; signature: string; stored?: StoredJobRoute }>
@@ -251,18 +249,15 @@ export async function generateJobOffers(
     partySize: 1 + Math.floor(Math.random() * 4),
   }))
   const offeredAt = new Date().toISOString()
-  const jobs = resolvedRoutes.map((route, index): TaxiJob => {
-    const category = categoryForRoute(route.pickup.name, route.destination.name, route.distanceKm, passengers[index].partySize, availableCategories)
-    const categoryInfo = categoryDetails[category]
-    return ({
+  const jobs = resolvedRoutes.map((route, index): TaxiJob => ({
     id: crypto.randomUUID(), cityId: city.id,
     pickup: route.pickup.coordinates, destination: route.destination.coordinates,
     pickupRoad: route.stops.pickupRoad, destinationRoad: route.stops.destinationRoad,
     routeCoordinates: route.stops.routeCoordinates,
     pickupLabel: route.pickup.name, destinationLabel: route.destination.name,
-    passengerIds: [passengers[index].id], fare: Math.round(taxiFareForDistance(route.distanceKm) * fareMultiplier * categoryInfo.fare * 100) / 100,
-    distanceKm: route.distanceKm, durationMinutes: route.stored?.durationMinutes ?? Math.max(5, Math.round(route.distanceKm * 3.2)), category, requiredUpgrade: categoryInfo.requiredUpgrade, status: 'offered', offeredAt,
-  })})
+    passengerIds: [passengers[index].id], fare: Math.round(taxiFareForDistance(route.distanceKm) * fareMultiplier * 100) / 100,
+    distanceKm: route.distanceKm, durationMinutes: route.stored?.durationMinutes ?? Math.max(5, Math.round(route.distanceKm * 3.2)), status: 'offered', offeredAt,
+  }))
 
   addJobsToJobJson(jobs)
 

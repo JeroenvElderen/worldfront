@@ -1,7 +1,4 @@
-import { memo, useEffect, useRef } from 'react'
-import mapboxgl from 'mapbox-gl'
-import { featureCollection, lineString, point } from '@turf/helpers'
-import { mapboxAccessToken } from '../../config/mapbox'
+import { memo, useMemo } from 'react'
 import type { TaxiJob } from '../../models/game'
 import { jobDestination, jobPickup } from '../../services/jobEngine'
 
@@ -11,183 +8,52 @@ interface JobRoutePreviewProps {
   onOpen: () => void
 }
 
-const fallbackStyle: mapboxgl.StyleSpecification = {
-  version: 8,
-  sources: {
-    openStreetMap: {
-      type: 'raster',
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-      tileSize: 256,
-      attribution: '© OpenStreetMap contributors',
-    },
-  },
-  layers: [
-    {
-      id: 'openStreetMap',
-      type: 'raster',
-      source: 'openStreetMap',
-    },
-  ],
+const PREVIEW_WIDTH = 320
+const PREVIEW_HEIGHT = 150
+const PREVIEW_PADDING = 22
+
+/**
+ * Job cards deliberately use a lightweight SVG overview rather than creating a
+ * Mapbox map for every offer. Mobile WebViews only provide a small number of
+ * WebGL contexts; the preview maps could evict the persistent game map's
+ * context as cards were added or removed, leaving its canvas black.
+ */
+const previewGeometry = (job: TaxiJob) => {
+  const pickup = jobPickup(job)
+  const destination = jobDestination(job)
+  const coordinates = job.routeCoordinates?.length && job.routeCoordinates.length > 1
+    ? job.routeCoordinates
+    : [pickup, destination]
+  const latitudeScale = Math.max(.2, Math.cos(((pickup[1] + destination[1]) / 2) * Math.PI / 180))
+  const projected = coordinates.map(([longitude, latitude]) => [longitude * latitudeScale, -latitude] as const)
+  const xs = projected.map(([x]) => x)
+  const ys = projected.map(([, y]) => y)
+  const minX = Math.min(...xs)
+  const maxX = Math.max(...xs)
+  const minY = Math.min(...ys)
+  const maxY = Math.max(...ys)
+  const availableWidth = PREVIEW_WIDTH - PREVIEW_PADDING * 2
+  const availableHeight = PREVIEW_HEIGHT - PREVIEW_PADDING * 2
+  const scale = Math.min(
+    availableWidth / Math.max(maxX - minX, .00001),
+    availableHeight / Math.max(maxY - minY, .00001),
+  )
+  const offsetX = (PREVIEW_WIDTH - (maxX - minX) * scale) / 2
+  const offsetY = (PREVIEW_HEIGHT - (maxY - minY) * scale) / 2
+  const points = projected.map(([x, y]) => [
+    offsetX + (x - minX) * scale,
+    offsetY + (y - minY) * scale,
+  ] as const)
+
+  return {
+    path: points.map(([x, y], index) => `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' '),
+    start: points[0],
+    end: points.at(-1)!,
+  }
 }
 
 function JobRoutePreviewView({ job, isRepeatJob, onOpen }: JobRoutePreviewProps) {
-  const container = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const mapContainer = container.current
-    if (!mapContainer) return
-
-    const pickup = jobPickup(job)
-    const destination = jobDestination(job)
-    const abortController = new AbortController()
-
-    if (mapboxAccessToken) {
-      mapboxgl.accessToken = mapboxAccessToken
-    }
-
-    const map = new mapboxgl.Map({
-      container: mapContainer,
-      style: mapboxAccessToken
-        ? 'mapbox://styles/mapbox/dark-v11'
-        : fallbackStyle,
-      center: [
-        (pickup[0] + destination[0]) / 2,
-        (pickup[1] + destination[1]) / 2,
-      ],
-      zoom: 10,
-      interactive: false,
-      attributionControl: false,
-      fadeDuration: 0,
-    })
-
-    // Keep the internal Mapbox canvas synchronized with
-    // the actual job preview container dimensions.
-    const resizeObserver = new ResizeObserver(() => {
-      map.resize()
-    })
-
-    resizeObserver.observe(mapContainer)
-
-    // The card/modal may still be completing its layout when
-    // Mapbox is initially constructed.
-    const firstResize = requestAnimationFrame(() => {
-      map.resize()
-
-      requestAnimationFrame(() => {
-        map.resize()
-      })
-    })
-
-    map.on('load', async () => {
-      map.resize()
-
-      let route: number[][] = job.routeCoordinates ?? [pickup, destination]
-
-      if (mapboxAccessToken) {
-        try {
-          const stops = `${pickup.join(',')};${destination.join(',')}`
-
-          const response = await fetch(
-            `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${stops}?geometries=geojson&overview=full&access_token=${mapboxAccessToken}`,
-            { signal: abortController.signal },
-          )
-
-          if (response.ok) {
-            const result = await response.json() as {
-              routes?: Array<{
-                geometry: {
-                  coordinates: number[][]
-                }
-              }>
-            }
-
-            route = result.routes?.[0]?.geometry.coordinates ?? route
-          }
-        } catch {
-          // Keep direct-line fallback.
-        }
-      }
-
-      if (!map.getStyle()) return
-
-      map.addSource('preview-route', {
-        type: 'geojson',
-        data: lineString(route),
-      })
-
-      map.addLayer({
-        id: 'preview-route-halo',
-        type: 'line',
-        source: 'preview-route',
-        paint: {
-          'line-color': '#062933',
-          'line-width': 7,
-          'line-opacity': 0.72,
-        },
-      })
-
-      map.addLayer({
-        id: 'preview-route',
-        type: 'line',
-        source: 'preview-route',
-        paint: {
-          'line-color': '#22dcc4',
-          'line-width': 3,
-        },
-      })
-
-      map.addSource('preview-stops', {
-        type: 'geojson',
-        data: featureCollection([
-          point(pickup, { stop: 'pickup' }),
-          point(destination, { stop: 'destination' }),
-        ]),
-      })
-
-      map.addLayer({
-        id: 'preview-stops',
-        type: 'circle',
-        source: 'preview-stops',
-        paint: {
-          'circle-radius': 5,
-          'circle-color': [
-            'match',
-            ['get', 'stop'],
-            'pickup',
-            '#22dcc4',
-            '#f5be48',
-          ],
-          'circle-stroke-width': 2,
-          'circle-stroke-color': '#eafffb',
-        },
-      })
-
-      const bounds = route.reduce(
-        (box, coordinate) =>
-          box.extend(coordinate as [number, number]),
-        new mapboxgl.LngLatBounds(
-          route[0] as [number, number],
-          route[0] as [number, number],
-        ),
-      )
-
-      // Important: resize BEFORE calculating fitBounds.
-      map.resize()
-
-      map.fitBounds(bounds, {
-        padding: 24,
-        duration: 0,
-        maxZoom: 13,
-      })
-    })
-
-    return () => {
-      cancelAnimationFrame(firstResize)
-      resizeObserver.disconnect()
-      abortController.abort()
-      map.remove()
-    }
-  }, [job])
+  const geometry = useMemo(() => previewGeometry(job), [job])
 
   return (
     <button
@@ -196,11 +62,28 @@ function JobRoutePreviewView({ job, isRepeatJob, onOpen }: JobRoutePreviewProps)
       onClick={onOpen}
       aria-label={`View route from ${job.pickupLabel} to ${job.destinationLabel} on the map`}
     >
-      <div
-        ref={container}
+      <svg
         className="job-route-preview-map"
+        viewBox={`0 0 ${PREVIEW_WIDTH} ${PREVIEW_HEIGHT}`}
+        preserveAspectRatio="none"
         aria-hidden="true"
-      />
+      >
+        <defs>
+          <pattern id={`route-grid-${job.id}`} width="28" height="28" patternUnits="userSpaceOnUse">
+            <path d="M 28 0 L 0 0 0 28" className="job-route-grid-line" />
+          </pattern>
+          <filter id={`route-glow-${job.id}`} x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="2.2" result="blur" />
+            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+        </defs>
+        <rect width="100%" height="100%" className="job-route-preview-background" />
+        <rect width="100%" height="100%" fill={`url(#route-grid-${job.id})`} />
+        <path d={geometry.path} className="job-route-preview-halo" />
+        <path d={geometry.path} className="job-route-preview-path" filter={`url(#route-glow-${job.id})`} />
+        <circle cx={geometry.start[0]} cy={geometry.start[1]} r="6" className="job-route-preview-stop pickup" />
+        <circle cx={geometry.end[0]} cy={geometry.end[1]} r="6" className="job-route-preview-stop destination" />
+      </svg>
 
       <span className="job-route-preview-label">
         View route <b aria-hidden="true">↗</b>

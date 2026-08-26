@@ -157,6 +157,13 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .job-route-column { position: relative; min-width: 0; min-height: 138px; }
 .job-route-preview { position: absolute; inset: 0; width: 100%; min-width: 0; overflow: hidden; padding: 0; border: 1px solid rgba(34, 220, 196, .25); border-radius: 12px; background: #082633; cursor: pointer; }
 .job-route-preview-map { position: absolute; inset: 0; transition: transform .25s ease; }
+.job-route-preview-background { fill: #082633; }
+.job-route-grid-line { fill: none; stroke: rgba(77, 154, 166, .14); stroke-width: 1; }
+.job-route-preview-halo { fill: none; stroke: #031923; stroke-width: 9; stroke-linecap: round; stroke-linejoin: round; opacity: .78; }
+.job-route-preview-path { fill: none; stroke: #22dcc4; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.job-route-preview-stop { stroke: #eafffb; stroke-width: 2; }
+.job-route-preview-stop.pickup { fill: #22dcc4; }
+.job-route-preview-stop.destination { fill: #f5be48; }
 .job-route-preview:hover .job-route-preview-map { transform: scale(1.035); }
 .job-route-preview::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 48%, rgba(2, 18, 28, .88)); pointer-events: none; }
 .job-route-preview-label { position: absolute; z-index: 1; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 6px; padding: 5px 7px; border: 1px solid rgba(73, 230, 210, .2); border-radius: 9px; background: rgba(2, 24, 34, .78); color: #dffff9; font-size: 8px; font-weight: 850; letter-spacing: .03em; backdrop-filter: blur(5px); }

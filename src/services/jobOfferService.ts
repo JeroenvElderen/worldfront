@@ -3,7 +3,7 @@ import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 import { addJobsToJobJson, jobRouteSignature, readJobJson, type StoredJobRoute } from './jobJsonService'
-import { isInsideVillageTerritories, type VillageTerritoryCenter } from './territoryGeometry'
+import { isInsideTerritoryFeatures, resolveVillageTerritories, type VillageTerritoryCenter } from './territoryGeometry'
 
 export const MIN_JOB_DISTANCE_KM = 6
 /** Prefer nearby calls, but do not stop generating work after those routes are exhausted. */
@@ -197,7 +197,11 @@ export async function generateJobOffers(
   territoryCenters: VillageTerritoryCenter[] = [{ id: city.id, coordinates: city.coordinates }],
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
   const excluded = new Set(excludedRoutes)
-  const isUnlocked = (coordinates: Coordinates) => isInsideVillageTerritories(coordinates, territoryCenters)
+  // Use the exact OSM/fallback polygons rendered by GameMap. Previously this
+  // used only synthetic polygons, allowing calls to appear in visibly locked
+  // land whenever Mapbox displayed a real administrative village boundary.
+  const ownedTerritories = await resolveVillageTerritories(territoryCenters)
+  const isUnlocked = (coordinates: Coordinates) => isInsideTerritoryFeatures(coordinates, ownedTerritories)
   let routes: Array<{ pickup: MapboxPlace; destination: MapboxPlace; distanceKm: number; signature: string; stored?: StoredJobRoute }>
   try {
     const places = await findMapboxPlaces(city, maxDistanceKm, signal)

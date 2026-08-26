@@ -1,13 +1,7 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { BottomNav } from './components/game/BottomNav'
-import { SectionSheet } from './components/game/SectionSheet'
 import { TopHud } from './components/game/TopHud'
-import { TaxiCallPopup } from './components/game/TaxiCallPopup'
-import { FinancialDashboard } from './components/game/FinancialDashboard'
-import { HotelDashboard } from './components/game/HotelDashboard'
-import { GameMap } from './map/GameMap'
-import { CitySetup } from './screens/CitySetup'
 import { useGameStore } from './stores/gameStore'
 import { getJobJourney, jobOfferExpiresAt } from './services/jobEngine'
 import { fleetSlotCapacity } from './services/companyProgression'
@@ -19,6 +13,13 @@ import { moneyFormatterForCity } from './services/localization'
 import { CurrencyProvider } from './components/game/CurrencyContext'
 
 const JOB_GENERATION_INTERVAL_MS = 5_000
+
+const GameMap = lazy(() => import('./map/GameMap').then(({ GameMap: component }) => ({ default: component })))
+const CitySetup = lazy(() => import('./screens/CitySetup').then(({ CitySetup: component }) => ({ default: component })))
+const TaxiCallPopup = lazy(() => import('./components/game/TaxiCallPopup').then(({ TaxiCallPopup: component }) => ({ default: component })))
+const SectionSheet = lazy(() => import('./components/game/SectionSheet').then(({ SectionSheet: component }) => ({ default: component })))
+const FinancialDashboard = lazy(() => import('./components/game/FinancialDashboard').then(({ FinancialDashboard: component }) => ({ default: component })))
+const HotelDashboard = lazy(() => import('./components/game/HotelDashboard').then(({ HotelDashboard: component }) => ({ default: component })))
 
 export default function App() {
   const game = useGameStore()
@@ -41,6 +42,17 @@ export default function App() {
       : game.company.cash < stationPackageCost
         ? `Save ${money.format(stationPackageCost)} to build another station`
         : 'Tap +, then place a station to unlock another territory'
+
+  const buildStation = game.buildStation
+  const expandTerritory = game.expandTerritory
+  const handleBuildStation = useCallback((coordinates: Parameters<typeof buildStation>[0]) => {
+    buildStation(coordinates)
+    setPlacingStation(false)
+  }, [buildStation])
+  const handleExpandTerritory = useCallback((coordinates: Parameters<typeof expandTerritory>[0]) => {
+    expandTerritory(coordinates)
+    setPlacingTerritory(false)
+  }, [expandTerritory])
 
   const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, runAutomation, hasHydrated } = game
 
@@ -295,7 +307,7 @@ export default function App() {
   return (
     <CurrencyProvider city={activeCity}>
     <div className="game-shell">
-      <GameMap
+      <Suspense fallback={<div className="loading">LOADING WORLD</div>}><GameMap
         cityId={game.activeCityId ?? game.startingCityId}
         customCities={game.customCities ?? []}
         branches={game.branches ?? []}
@@ -305,10 +317,10 @@ export default function App() {
         focusedJobId={game.focusedJobId}
         placingStation={placingStation}
         placingTerritory={placingTerritory}
-        onBuildStation={(coordinates) => { game.buildStation(coordinates); setPlacingStation(false) }}
-        onExpandTerritory={(coordinates) => { game.expandTerritory(coordinates); setPlacingTerritory(false) }}
+        onBuildStation={handleBuildStation}
+        onExpandTerritory={handleExpandTerritory}
         onOpenJob={game.openJob}
-      />
+      /></Suspense>
 
       {game.company ? (
         <>
@@ -326,7 +338,7 @@ export default function App() {
             </aside>
           )}
 
-          {game.activeSection === 'jobs' && (
+          <Suspense fallback={null}>{game.activeSection === 'jobs' && (
             <TaxiCallPopup
               focusedJobId={game.focusedJobId}
               vehicles={game.vehicles}
@@ -454,7 +466,7 @@ export default function App() {
               onCollect={game.collectHotelRevenue}
               onClose={() => game.setSection('map')}
             />
-          )}
+          )}</Suspense>
 
           <BottomNav
             active={game.activeSection}
@@ -463,9 +475,9 @@ export default function App() {
           />
         </>
       ) : (
-        <CitySetup
+        <Suspense fallback={<div className="loading">LOADING WORLD</div>}><CitySetup
           onStart={game.initializeCompany}
-        />
+        /></Suspense>
       )}
     </div>
     </CurrencyProvider>

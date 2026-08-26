@@ -8,6 +8,8 @@ const database = openDB('travel-empire', 1, { upgrade(db) { db.createObjectStore
 // shutdown). Zustand waits for getItem before it finishes hydration, so one
 // stuck request would otherwise leave the game on its splash screen forever.
 const DATABASE_TIMEOUT_MS = 4_000
+const DATABASE_WRITE_DELAY_MS = 250
+const pendingWrites = new Map<string, { value: string; timeout: number }>()
 
 const withTimeout = async <T>(operation: Promise<T>): Promise<T> => {
   let timeout: number | undefined
@@ -51,9 +53,20 @@ export const indexedDbStorage: StateStorage = {
     // Keep a synchronous backup so a broken IndexedDB database can never make
     // a player choose between starting the app and retaining their save.
     localBackup.set(name, value)
-    try { await withTimeout(database.then((db) => db.put('saves', value, name))) } catch { /* The backup is authoritative until IndexedDB recovers. */ }
+    const pending = pendingWrites.get(name)
+    if (pending) window.clearTimeout(pending.timeout)
+    const timeout = window.setTimeout(() => {
+      pendingWrites.delete(name)
+      void withTimeout(database.then((db) => db.put('saves', value, name))).catch(() => { /* The backup is authoritative until IndexedDB recovers. */ })
+    }, DATABASE_WRITE_DELAY_MS)
+    pendingWrites.set(name, { value, timeout })
   },
   async removeItem(name) {
+    const pending = pendingWrites.get(name)
+    if (pending) {
+      window.clearTimeout(pending.timeout)
+      pendingWrites.delete(name)
+    }
     localBackup.remove(name)
     try { await withTimeout(database.then((db) => db.delete('saves', name))) } catch { /* Nothing else to remove. */ }
   },

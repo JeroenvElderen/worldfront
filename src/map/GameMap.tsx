@@ -16,8 +16,17 @@ interface GameMapProps { cityId: string | null; customCities: import('../models/
 const token = mapboxAccessToken
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
-const routePosition = (coordinates: number[][], progress: number): Coordinates => {
+const routeLengthCache = new WeakMap<number[][], number[]>()
+const routeLengths = (coordinates: number[][]) => {
+  const cached = routeLengthCache.get(coordinates)
+  if (cached) return cached
   const lengths = coordinates.slice(1).map((coordinate, index) => Math.hypot(coordinate[0] - coordinates[index][0], coordinate[1] - coordinates[index][1]))
+  routeLengthCache.set(coordinates, lengths)
+  return lengths
+}
+
+const routePosition = (coordinates: number[][], progress: number): Coordinates => {
+  const lengths = routeLengths(coordinates)
   let target = progress * lengths.reduce((sum, length) => sum + length, 0)
   let segment = 0
   while (segment < lengths.length - 1 && target > lengths[segment]) target -= lengths[segment++]
@@ -29,7 +38,7 @@ const routePosition = (coordinates: number[][], progress: number): Coordinates =
 
 const remainingRoute = (coordinates: number[][], progress: number) => {
   if (coordinates.length < 2) return coordinates
-  const lengths = coordinates.slice(1).map((coordinate, index) => Math.hypot(coordinate[0] - coordinates[index][0], coordinate[1] - coordinates[index][1]))
+  const lengths = routeLengths(coordinates)
   let target = Math.max(0, Math.min(1, progress)) * lengths.reduce((sum, length) => sum + length, 0)
   let segment = 0
   while (segment < lengths.length - 1 && target > lengths[segment]) target -= lengths[segment++]
@@ -51,7 +60,7 @@ const speedLimitKmh = (limit: RouteSpeedLimit | undefined) => {
 }
 
 const routeMotion = (route: RouteDetails, elapsed: number, fallbackSpeedKmh: number, topSpeedKmh: number) => {
-  const lengths = route.coordinates.slice(1).map((coordinate, index) => Math.hypot(coordinate[0] - route.coordinates[index][0], coordinate[1] - route.coordinates[index][1]))
+  const lengths = routeLengths(route.coordinates)
   const speeds = lengths.map((_, index) => Math.min(topSpeedKmh, speedLimitKmh(route.speedLimits[index]) ?? fallbackSpeedKmh))
   const durations = lengths.map((length, index) => length / Math.max(1, speeds[index]))
   const totalDuration = durations.reduce((sum, duration) => sum + duration, 0)
@@ -846,6 +855,10 @@ export const GameMap = memo(GameMapView, (previous, next) =>
   previous.branches === next.branches &&
   previous.territoryExpansions === next.territoryExpansions &&
   previous.vehicles === next.vehicles &&
+  previous.placingStation === next.placingStation &&
+  previous.placingTerritory === next.placingTerritory &&
+  previous.onBuildStation === next.onBuildStation &&
+  previous.onExpandTerritory === next.onExpandTerritory &&
   previous.focusedJobId === next.focusedJobId &&
   previous.onOpenJob === next.onOpenJob &&
   previous.jobs === next.jobs

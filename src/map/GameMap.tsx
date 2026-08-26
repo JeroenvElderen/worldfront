@@ -94,28 +94,13 @@ const VEHICLE_MARKER_RADIUS = 4
 const VEHICLE_MARKER_STROKE_WIDTH = 1.5
 const ROUTE_GLOW_WIDTH = 10
 
-const applyPremiumMapArtDirection = (instance: mapboxgl.Map) => {
+const keepMapFlatAndBuildingFree = (instance: mapboxgl.Map) => {
   instance.getStyle().layers?.forEach((layer) => {
     const id = layer.id.toLowerCase()
-    if (layer.type === 'fill-extrusion') instance.setLayoutProperty(layer.id, 'visibility', 'none')
-    if (layer.type === 'symbol') {
-      const importantLabel = id.includes('place') || id.includes('settlement') || id.includes('country') || id.includes('water')
-      instance.setLayoutProperty(layer.id, 'visibility', importantLabel ? 'visible' : 'none')
-      if (importantLabel) {
-        instance.setPaintProperty(layer.id, 'text-color', '#8da9ad')
-        instance.setPaintProperty(layer.id, 'text-halo-color', '#071b25')
-        instance.setPaintProperty(layer.id, 'text-halo-width', 1.5)
-      }
+    if (layer.type === 'fill-extrusion' || id.includes('building')) {
+      instance.setLayoutProperty(layer.id, 'visibility', 'none')
     }
-    if (layer.type === 'line' && (id.includes('road') || id.includes('street') || id.includes('bridge'))) {
-      instance.setPaintProperty(layer.id, 'line-color', '#24434b')
-      instance.setPaintProperty(layer.id, 'line-opacity', id.includes('motorway') || id.includes('trunk') ? .48 : .18)
-    }
-    if (layer.type === 'background') instance.setPaintProperty(layer.id, 'background-color', '#071a23')
-    if (layer.type === 'fill' && id.includes('water')) instance.setPaintProperty(layer.id, 'fill-color', '#092b38')
-    if (layer.type === 'fill' && (id.includes('land') || id.includes('park'))) instance.setPaintProperty(layer.id, 'fill-color', '#102b2c')
   })
-  instance.setFog({ color: '#0b252d', 'high-color': '#102f35', 'horizon-blend': .04 })
 }
 // Android WebViews can throttle requestAnimationFrame when Mapbox has no
 // camera animation in progress. Drive every journey from a short timer so an
@@ -187,13 +172,15 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
     let mapLoaded = false
     const instance = new mapboxgl.Map({
       container: container.current,
-      style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle,
+      style: token ? 'mapbox://styles/mapbox/dark-v11' : fallbackStyle,
       center: selected?.coordinates ?? worldOverview.center,
       zoom: selected?.mapZoom ?? worldOverview.zoom,
-      pitch: 8,
+      pitch: 0,
       bearing: 0,
       attributionControl: false,
       pitchWithRotate: false,
+      dragRotate: false,
+      maxPitch: 0,
       // Avoid periodic network and render work when the already-cached map is
       // perfectly adequate for this mostly static management-game viewport.
       refreshExpiredTiles: false,
@@ -213,7 +200,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
     currentLiveJobTimers.clear()
     currentLiveJobRunners.clear()
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
-    instance.addControl(new mapboxgl.NavigationControl({ showCompass: true, visualizePitch: true }), 'bottom-right')
+    instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right')
     const canvas = instance.getCanvas()
     const handleContextLost = (event: Event) => {
       event.preventDefault()
@@ -253,7 +240,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
     instance.on('load', async () => {
       mapLoaded = true
       window.clearTimeout(styleLoadTimeout)
-      if (token && !usingFallbackStyle) applyPremiumMapArtDirection(instance)
+      keepMapFlatAndBuildingFree(instance)
       instance.addSource('company-base', { type: 'geojson', data: featureCollection(selected ? [point(selected.coordinates)] : []) })
       instance.addLayer({ id: 'base-halo', type: 'circle', source: 'company-base', paint: { 'circle-radius': 22, 'circle-color': '#22d3a7', 'circle-opacity': 0.22, 'circle-stroke-width': 1, 'circle-stroke-color': '#5eead4' } })
       instance.addLayer({ id: 'base', type: 'circle', source: 'company-base', paint: { 'circle-radius': 9, 'circle-color': '#0f766e', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } })

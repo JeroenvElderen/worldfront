@@ -1,8 +1,11 @@
 import { featureCollection, polygon } from '@turf/helpers'
-import { union } from '@turf/turf'
+import { booleanPointInPolygon, union } from '@turf/turf'
 import type { Coordinates } from '../models/game'
 
 const EARTH_KM_PER_LATITUDE_DEGREE = 110.574
+export const VILLAGE_TERRITORY_RADIUS_KM = 6
+
+export interface VillageTerritoryCenter { id: string; coordinates: Coordinates }
 
 const hash = (value: string) => {
   let result = 2166136261
@@ -50,6 +53,13 @@ export const mergeVillageTerritories = (territories: ReturnType<typeof villageTe
   if (territories.length === 1) return territories[0]
   return union(featureCollection(territories)) ?? null
 }
+
+/** True when a location belongs to at least one purchased village territory. */
+export const isInsideVillageTerritories = (coordinates: Coordinates, centers: VillageTerritoryCenter[]) =>
+  centers.some((center) => booleanPointInPolygon(
+    coordinates,
+    villageTerritory(center.id, center.coordinates, VILLAGE_TERRITORY_RADIUS_KM),
+  ))
 
 /** A red world overlay with the purchased territory cut out as transparent holes. */
 export const lockedTerritoryMask = (unlocked: ReturnType<typeof mergeVillageTerritories>) => {

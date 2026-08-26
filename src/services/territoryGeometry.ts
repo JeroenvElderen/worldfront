@@ -29,7 +29,7 @@ const noise = (seed: number, index: number) => {
  * uneven sectors rather than a buffer, making expansion resemble neighboring
  * village borders instead of perfect station-radius circles.
  */
-export const villageTerritory = (id: string, center: Coordinates, radiusKm: number) => {
+export const villageTerritory = (id: string, center: Coordinates, radiusKm: number, color?: string, properties: Record<string, string | number> = {}) => {
   const seed = hash(id)
   const sectorCount = 18
   const [longitude, latitude] = center
@@ -45,7 +45,7 @@ export const villageTerritory = (id: string, center: Coordinates, radiusKm: numb
     ]
   })
   points.push(points[0])
-  return polygon([points], { id, unlocked: true })
+  return polygon([points], { id, unlocked: true, color, ...properties })
 }
 
 export const mergeVillageTerritories = (territories: ReturnType<typeof villageTerritory>[]) => {
@@ -61,7 +61,7 @@ export const isInsideVillageTerritories = (coordinates: Coordinates, centers: Vi
     villageTerritory(center.id, center.coordinates, VILLAGE_TERRITORY_RADIUS_KM),
   ))
 
-/** A red world overlay with the purchased territory cut out as transparent holes. */
+/** A world overlay with the purchased territory cut out as transparent holes. */
 export const lockedTerritoryMask = (unlocked: ReturnType<typeof mergeVillageTerritories>) => {
   const worldRing: Coordinates[] = [[-179.9, -85], [179.9, -85], [179.9, 85], [-179.9, 85], [-179.9, -85]]
   if (!unlocked) return polygon([worldRing], { locked: true })

@@ -3,16 +3,11 @@ import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 import { addJobsToJobJson, jobRouteSignature, readJobJson, type StoredJobRoute } from './jobJsonService'
-import { isInsideTerritoryFeatures, resolveVillageTerritories, type VillageTerritoryCenter } from './territoryGeometry'
+import { isInsideTerritoryFeatures, resolveVillageTerritories, VILLAGE_TERRITORY_RADIUS_KM, type VillageTerritoryCenter } from './territoryGeometry'
 
 // Short local trips keep the board useful even when the player's first owned
 // village has a compact administrative boundary.
 export const MIN_JOB_DISTANCE_KM = 1
-/** Prefer nearby calls, but do not stop generating work after those routes are exhausted. */
-export const PREFERRED_PICKUP_DISTANCE_KM = 5
-/** Keep calls away from idle taxis so every accepted job starts with a pickup drive. */
-export const MIN_PICKUP_DISTANCE_KM = 0.25
-
 const passengerNames = [
   'Aoife Murphy', 'Cian Kelly', 'Niamh Byrne', 'Oisín Walsh', 'Saoirse Doyle', 'Fionn Ryan',
   'Ella O’Brien', 'Jack McCarthy', 'Maya Khan', 'Noah Chen', 'Sofia Rossi', 'Daniel Silva',
@@ -196,7 +191,6 @@ export async function generateJobOffers(
   excludedRoutes: string[],
   maxDistanceKm = BASE_JOB_DISTANCE_KM,
   signal?: AbortSignal,
-  taxiPositions: Coordinates[] = [city.coordinates],
   fareMultiplier = 1,
   territoryCenters: VillageTerritoryCenter[] = [{ id: city.id, coordinates: city.coordinates }],
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
@@ -206,31 +200,28 @@ export async function generateJobOffers(
   // land whenever Mapbox displayed a real administrative village boundary.
   const ownedTerritories = await resolveVillageTerritories(territoryCenters)
   const isUnlocked = (coordinates: Coordinates) => isInsideTerritoryFeatures(coordinates, ownedTerritories)
+  // The generation city is normally centred on an available taxi. Expand the
+  // place search far enough to include every owned territory instead of using
+  // that taxi's job-distance limit as an implicit pickup radius.
+  const ownedSearchRadiusKm = Math.max(maxDistanceKm, ...territoryCenters.map((center) =>
+    distanceKmBetween(city.coordinates, center.coordinates) +
+    (center.source === 'taxi-discovery' ? center.radiusKm ?? 0 : VILLAGE_TERRITORY_RADIUS_KM)))
   let routes: Array<{ pickup: MapboxPlace; destination: MapboxPlace; distanceKm: number; signature: string; stored?: StoredJobRoute }>
   try {
-    const places = await findMapboxPlaces(city, maxDistanceKm, signal)
-    const uniqueRoutes = new Map<string, (typeof routes)[number] & { pickupDistanceKm: number }>()
+    const places = await findMapboxPlaces(city, ownedSearchRadiusKm, signal)
+    const uniqueRoutes = new Map<string, (typeof routes)[number]>()
     for (const pickup of places) for (const destination of places) {
       const distanceKm = Math.round(distanceKmBetween(pickup.coordinates, destination.coordinates) * 10) / 10
       const signature = jobRouteSignature(pickup.name, destination.name)
-      const pickupDistanceKm = Math.min(...taxiPositions.map((position) => distanceKmBetween(position, pickup.coordinates)))
       if (pickup.id !== destination.id &&
         isUnlocked(pickup.coordinates) &&
         isUnlocked(destination.coordinates) &&
-        pickupDistanceKm >= MIN_PICKUP_DISTANCE_KM && pickupDistanceKm <= maxDistanceKm &&
-        distanceKmBetween(city.coordinates, pickup.coordinates) <= maxDistanceKm &&
-        distanceKmBetween(city.coordinates, destination.coordinates) <= maxDistanceKm &&
         distanceKm >= MIN_JOB_DISTANCE_KM && distanceKm <= maxDistanceKm &&
         !excluded.has(signature) && !uniqueRoutes.has(signature)) {
-        uniqueRoutes.set(signature, { pickup, destination, distanceKm, signature, pickupDistanceKm })
+        uniqueRoutes.set(signature, { pickup, destination, distanceKm, signature })
       }
     }
-    // Keep the old 5 km behaviour as a preference rather than a hard gate.
-    // Once nearby route signatures have been used, calls farther inside the
-    // unlocked service area can still keep an idle taxi working.
-    routes = shuffled([...uniqueRoutes.values()]).sort((left, right) =>
-      Number(left.pickupDistanceKm > PREFERRED_PICKUP_DISTANCE_KM) - Number(right.pickupDistanceKm > PREFERRED_PICKUP_DISTANCE_KM)
-      || left.pickupDistanceKm - right.pickupDistanceKm)
+    routes = shuffled([...uniqueRoutes.values()])
   } catch (error) {
     if ((error as Error).name === 'AbortError') throw error
     // A Mapbox/API error is not proof that the device is offline. Reusing a
@@ -243,17 +234,13 @@ export async function generateJobOffers(
       return stored.cityId === city.id && !excluded.has(signature) &&
         isUnlocked(stored.pickup) &&
         isUnlocked(stored.destination) &&
-        taxiPositions.every((position) => distanceKmBetween(position, stored.pickupRoad ?? stored.pickup) >= MIN_PICKUP_DISTANCE_KM) &&
-        taxiPositions.some((position) => distanceKmBetween(position, stored.pickupRoad ?? stored.pickup) <= maxDistanceKm) &&
-        distanceKmBetween(city.coordinates, stored.pickup) <= maxDistanceKm &&
-        distanceKmBetween(city.coordinates, stored.destination) <= maxDistanceKm &&
         stored.distanceKm >= MIN_JOB_DISTANCE_KM && stored.distanceKm <= maxDistanceKm
         ? [{ pickup: { id: signature, name: stored.pickupLabel, coordinates: stored.pickup }, destination: { id: signature, name: stored.destinationLabel, coordinates: stored.destination }, distanceKm: stored.distanceKm, signature, stored }]
         : []
     })).slice(0, count)
   }
 
-  if (!routes.length) throw new Error('No new routes were found inside the available taxis\' service area.')
+  if (!routes.length) throw new Error('No new routes were found inside the owned territory.')
 
   const resolvedRoutes: Array<(typeof routes)[number] & { stops: NonNullable<Awaited<ReturnType<typeof roadStops>>> }> = []
   for (const route of routes) {
@@ -265,9 +252,6 @@ export async function generateJobOffers(
     // nearby roads. The route between them may cross locked land; completing
     // that journey is what permanently explores its corridor.
     if (!isUnlocked(stops.pickupRoad) || !isUnlocked(stops.destinationRoad)) continue
-    // Directions can snap a POI onto a road beside a taxi. Check the actual
-    // curbside stop as well as the searched place before publishing the job.
-    if (taxiPositions.some((position) => distanceKmBetween(position, stops.pickupRoad) < MIN_PICKUP_DISTANCE_KM)) continue
     resolvedRoutes.push({ ...route, stops })
     if (resolvedRoutes.length >= count) break
   }

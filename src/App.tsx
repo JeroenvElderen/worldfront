@@ -23,14 +23,15 @@ export default function App() {
   const [placingStation, setPlacingStation] = useState(false)
   const [placingTerritory, setPlacingTerritory] = useState(false)
   const [showExpansionMenu, setShowExpansionMenu] = useState(false)
-  const territoryExpansionCost = 5_000 * (game.territoryExpansions?.length ?? 0)
+  const purchasedTerritories = (game.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery').length
+  const territoryExpansionCost = 5_000 * purchasedTerritories
   const stationPackageCost = Math.round(15_000 * (game.specialization === 'mobility' ? .9 : 1) * (hasResearch(game.completedResearch ?? [], 'prefab-depots') ? .8 : 1)) + getTaxiModel('toyota-corolla').price
   const researchFleetSlots = (hasResearch(game.completedResearch ?? [], 'autonomous-operations') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'global-network') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'regional-hubs') ? game.branches.length : 0)
   const stationFleetFull = game.vehicles.length >= fleetSlotCapacity(game.company?.level ?? 1, game.garageLevel ?? 0, game.branches) + researchFleetSlots
   const activeCity = getCity(game.activeCityId ?? game.startingCityId, game.customCities ?? [])
   const money = moneyFormatterForCity(activeCity)
   const territoryExpansionPrice = territoryExpansionCost === 0 ? 'Free' : money.format(territoryExpansionCost)
-  const territoryProgressMessage = 'Unlock neighboring village borders without building stations.'
+  const territoryProgressMessage = 'Taxi journeys permanently discover a 2 km corridor; villages unlock instantly.'
   const stationBuildMessage = !game.company || game.company.level < 2
     ? 'Building a separate station becomes available at level 2'
     : stationFleetFull
@@ -304,6 +305,7 @@ export default function App() {
         placingTerritory={placingTerritory}
         onBuildStation={(coordinates) => { game.buildStation(coordinates); setPlacingStation(false) }}
         onExpandTerritory={(coordinates) => { game.expandTerritory(coordinates); setPlacingTerritory(false) }}
+        onDiscoverTaxiTerritory={game.discoverTaxiTerritory}
         onOpenJob={game.openJob}
       />
 
@@ -311,7 +313,7 @@ export default function App() {
         <>
           <TopHud company={game.company} />
 
-          {game.activeSection === 'map' && !placingStation && !placingTerritory && <><aside className="territory-guide" aria-live="polite"><b>Village borders unlocked: {game.branches.length + (game.territoryExpansions?.length ?? 0)}</b><small>{territoryProgressMessage}</small></aside>{showExpansionMenu && <aside className="expansion-menu"><b>Expand your network</b><button disabled={game.company.cash < territoryExpansionCost} onClick={() => { setPlacingTerritory(true); setShowExpansionMenu(false) }}><span>◎</span><div><strong>Unlock village territory</strong><small>Choose a village border · {territoryExpansionPrice}</small></div></button><button disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => { setPlacingStation(true); setShowExpansionMenu(false) }} title={stationBuildMessage}><span>＋</span><div><strong>Build a station</strong><small>Start a separate service area · {money.format(stationPackageCost)}</small></div></button></aside>}<button className="station-add-button" onClick={() => setShowExpansionMenu((open) => !open)} aria-label="Territory expansion options" aria-expanded={showExpansionMenu}>＋</button></>}
+          {game.activeSection === 'map' && !placingStation && !placingTerritory && <><aside className="territory-guide" aria-live="polite"><b>Village borders unlocked: {game.branches.length + purchasedTerritories}</b><small>{territoryProgressMessage}</small></aside>{showExpansionMenu && <aside className="expansion-menu"><b>Expand your network</b><button disabled={game.company.cash < territoryExpansionCost} onClick={() => { setPlacingTerritory(true); setShowExpansionMenu(false) }}><span>◎</span><div><strong>Unlock village territory</strong><small>Choose a village border · {territoryExpansionPrice}</small></div></button><button disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => { setPlacingStation(true); setShowExpansionMenu(false) }} title={stationBuildMessage}><span>＋</span><div><strong>Build a station</strong><small>Start a separate service area · {money.format(stationPackageCost)}</small></div></button></aside>}<button className="station-add-button" onClick={() => setShowExpansionMenu((open) => !open)} aria-label="Territory expansion options" aria-expanded={showExpansionMenu}>＋</button></>}
           {placingStation && <aside className="depot-placement-banner"><span>⌖</span><div><b>Place Station {game.branches.length + 1}</b><small>Tap the map to build a station with one taxi for {money.format(stationPackageCost)}.</small></div><button onClick={() => setPlacingStation(false)}>Cancel</button></aside>}
           {placingTerritory && <aside className="depot-placement-banner"><span>◎</span><div><b>Unlock a village territory</b><small>Tap a village on the map to purchase its organic border for {territoryExpansionPrice.toLocaleLowerCase()}. No station will be built.</small></div><button onClick={() => setPlacingTerritory(false)}>Cancel</button></aside>}
 

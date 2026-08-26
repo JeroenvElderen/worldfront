@@ -49,12 +49,18 @@ const isCoordinates = (value: unknown): value is Coordinates =>
 async function roadStops(from: Coordinates, to: Coordinates, signal?: AbortSignal) {
   try {
     const coordinates = `${from.join(',')};${to.join(',')}`
-    const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?geometries=geojson&overview=full&access_token=${mapboxToken}`, { signal })
+    const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?alternatives=true&geometries=geojson&overview=full&access_token=${mapboxToken}`, { signal })
     if (!response.ok) return null
-    const result = await response.json() as { waypoints?: Array<{ location?: unknown }>; routes?: Array<{ geometry?: { coordinates?: unknown } }> }
+    const result = await response.json() as { waypoints?: Array<{ location?: unknown }>; routes?: Array<{ distance?: number; geometry?: { coordinates?: unknown } }> }
     const pickup = result.waypoints?.[0]?.location
     const destination = result.waypoints?.[1]?.location
-    const routeCoordinates = result.routes?.[0]?.geometry?.coordinates
+    const routes = (result.routes ?? []).filter((route) => typeof route.distance === 'number' && route.geometry)
+    const shortestDistance = Math.min(...routes.map((route) => route.distance!))
+    // Vary journeys without selecting implausible detours: only alternatives no
+    // more than 25% longer than the shortest route participate in the draw.
+    const reasonableRoutes = routes.filter((route) => route.distance! <= shortestDistance * 1.25)
+    const selectedRoute = reasonableRoutes[Math.floor(Math.random() * reasonableRoutes.length)] ?? routes[0]
+    const routeCoordinates = selectedRoute?.geometry?.coordinates
     if (!isCoordinates(pickup) || !isCoordinates(destination) ||
       !Array.isArray(routeCoordinates) || routeCoordinates.length < 2 || !routeCoordinates.every(isCoordinates)) return null
     return {
@@ -211,7 +217,7 @@ export async function generateJobOffers(
       const signature = jobRouteSignature(pickup.name, destination.name)
       const pickupDistanceKm = Math.min(...taxiPositions.map((position) => distanceKmBetween(position, pickup.coordinates)))
       if (pickup.id !== destination.id &&
-        isUnlocked(pickup.coordinates) && isUnlocked(destination.coordinates) &&
+        isUnlocked(pickup.coordinates) &&
         pickupDistanceKm <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, pickup.coordinates) <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, destination.coordinates) <= maxDistanceKm &&
@@ -236,7 +242,7 @@ export async function generateJobOffers(
     routes = shuffled(readJobJson().routes.flatMap((stored) => {
       const signature = jobRouteSignature(stored.pickupLabel, stored.destinationLabel)
       return stored.cityId === city.id && !excluded.has(signature) &&
-        isUnlocked(stored.pickup) && isUnlocked(stored.destination) &&
+        isUnlocked(stored.pickup) &&
         taxiPositions.some((position) => distanceKmBetween(position, stored.pickup) <= maxDistanceKm) &&
         distanceKmBetween(city.coordinates, stored.pickup) <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, stored.destination) <= maxDistanceKm &&
@@ -254,7 +260,9 @@ export async function generateJobOffers(
       ? { pickupRoad: route.stored.pickupRoad ?? route.pickup.coordinates, destinationRoad: route.stored.destinationRoad ?? route.destination.coordinates, routeCoordinates: route.stored.routeCoordinates ?? [route.stored.pickup, route.stored.destination] }
       : await roadStops(route.pickup.coordinates, route.destination.coordinates, signal)
     if (!stops) continue
-    if (!isUnlocked(stops.pickupRoad) || !isUnlocked(stops.destinationRoad)) continue
+    // Calls begin in discovered land, while their journeys may explore beyond it.
+    // Completion permanently claims a two-kilometre corridor for later calls.
+    if (!isUnlocked(stops.pickupRoad)) continue
     resolvedRoutes.push({ ...route, stops })
     if (resolvedRoutes.length >= count) break
   }

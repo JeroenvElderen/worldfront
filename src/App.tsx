@@ -13,7 +13,7 @@ import { moneyFormatterForCity } from './services/localization'
 import { CurrencyProvider } from './components/game/CurrencyContext'
 import { GameMap } from './map/GameMap'
 
-const JOB_GENERATION_INTERVAL_MS = 5_000
+const JOB_REFRESH_INTERVAL_MS = 60_000
 
 const CitySetup = lazy(() => import('./screens/CitySetup').then(({ CitySetup: component }) => ({ default: component })))
 const TaxiCallPopup = lazy(() => import('./components/game/TaxiCallPopup').then(({ TaxiCallPopup: component }) => ({ default: component })))
@@ -266,10 +266,11 @@ export default function App() {
   }, [company, game.hasHydrated, pauseGame, resumeGame, tickJobs])
 
   /**
-   * A small foreground watchdog makes lifecycle recovery self-healing. Mobile
-   * WebViews can occasionally miss a timer or visibility event while Android
-   * restores the activity; re-running these idempotent actions repairs overdue
-   * journeys and replenishes offers without requiring a restart.
+   * Refresh the foreground marketplace every minute. Re-running these
+   * idempotent actions removes expired offers, settles overdue journeys, and
+   * fills every available offer slot so staffed taxis always have work waiting.
+   * The same pass also makes lifecycle recovery self-healing when a mobile
+   * WebView misses a timer while Android restores the activity.
    */
   useEffect(() => {
     if (!company || !game.hasHydrated) return
@@ -281,7 +282,7 @@ export default function App() {
     }
 
     recover()
-    const interval = window.setInterval(recover, JOB_GENERATION_INTERVAL_MS)
+    const interval = window.setInterval(recover, JOB_REFRESH_INTERVAL_MS)
     window.addEventListener('online', recover)
 
     return () => {

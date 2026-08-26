@@ -13,7 +13,7 @@ import { moneyFormatterForCity } from './services/localization'
 import { CurrencyProvider } from './components/game/CurrencyContext'
 import { GameMap } from './map/GameMap'
 
-const JOB_REFRESH_INTERVAL_MS = 60_000
+const JOB_REFRESH_INTERVAL_MS = 10_000
 
 const CitySetup = lazy(() => import('./screens/CitySetup').then(({ CitySetup: component }) => ({ default: component })))
 const TaxiCallPopup = lazy(() => import('./components/game/TaxiCallPopup').then(({ TaxiCallPopup: component }) => ({ default: component })))

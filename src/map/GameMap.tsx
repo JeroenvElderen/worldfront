@@ -159,6 +159,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
     const animationTimers = new Set<number>()
     const animationRunners = new Set<() => void>()
     let usingFallbackStyle = !token
+    let mapLoaded = false
     const instance = new mapboxgl.Map({
       container: container.current,
       style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle,
@@ -175,6 +176,11 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
       maxTileCacheSize: 24,
     })
     map.current = instance
+    const resizeObserver = new ResizeObserver(() => {
+      instance.resize()
+      instance.triggerRepaint()
+    })
+    resizeObserver.observe(container.current)
     pickupJobIds.current.clear()
     pickupHandlers.current.clear()
     currentLiveJobIds.clear()
@@ -190,6 +196,11 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
     const handleContextRestored = () => { instance.resize(); instance.triggerRepaint() }
     canvas.addEventListener('webglcontextlost', handleContextLost)
     canvas.addEventListener('webglcontextrestored', handleContextRestored)
+    const switchToFallbackStyle = () => {
+      if (map.current !== instance || usingFallbackStyle) return
+      usingFallbackStyle = true
+      instance.setStyle(fallbackStyle)
+    }
     instance.on('error', (event) => {
       if (map.current !== instance || usingFallbackStyle) return
       const message = event.error?.message?.toLowerCase() ?? ''
@@ -201,13 +212,23 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
       }
       const styleCannotLoad = message.includes('unauthorized') ||
         message.includes('access token') ||
+        message.includes('forbidden') ||
+        message.includes('401') ||
+        message.includes('403') ||
         message.includes('style') && (message.includes('404') || message.includes('not found') || message.includes('failed to load'))
       if (!styleCannotLoad) return
-      usingFallbackStyle = true
-      instance.setStyle(fallbackStyle)
+      switchToFallbackStyle()
     })
+    // A failed style request does not consistently emit a useful Mapbox error
+    // in Android WebViews. Do not leave the game on an empty canvas forever:
+    // if the initial Mapbox style cannot finish, retry with the raster style.
+    const styleLoadTimeout = window.setTimeout(() => {
+      if (!mapLoaded) switchToFallbackStyle()
+    }, 10_000)
     instance.on('load', async () => {
-      if (token) {
+      mapLoaded = true
+      window.clearTimeout(styleLoadTimeout)
+      if (token && !usingFallbackStyle) {
         instance.addSource('mapbox-dem', { type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1', tileSize: 512, maxzoom: 14 })
         instance.setTerrain({ source: 'mapbox-dem', exaggeration: 1.15 })
         if (instance.getSource('composite')) instance.addLayer({
@@ -398,6 +419,8 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
       currentLiveJobTimers.clear()
       currentLiveJobRunners.clear()
       currentLiveJobIds.clear()
+      window.clearTimeout(styleLoadTimeout)
+      resizeObserver.disconnect()
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('pageshow', handleVisibilityChange)
       window.removeEventListener('focus', handleVisibilityChange)
@@ -508,7 +531,9 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
         },
       })
     })
-    const visibleJobs = jobs.filter((job) => job.status === 'offered' || job.status === 'accepted')
+    // Available calls belong in the dispatch board. Only add their pickup and
+    // destination markers to the live map once the player accepts the job.
+    const visibleJobs = jobs.filter((job) => job.status === 'accepted')
     const visibleIds = new Set(visibleJobs.map((job) => job.id))
 
     for (const jobId of pickupJobIds.current) {

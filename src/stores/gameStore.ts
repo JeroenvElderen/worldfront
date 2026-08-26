@@ -275,7 +275,10 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     const drivers = state.drivers.map((candidate) => candidate.id === driverId ? { ...candidate, status: 'driving' as const } : candidate)
     const assignedVehicle = result.vehicles.find((vehicle) => vehicle.id === assignedVehicleId)
     const jobs = result.jobs.map((job) => job.id === jobId ? { ...job, pickupTimeMultiplier: pickupSpeedMultiplier(driver), durationMinutes: (driver?.trait === 'careful' ? job.durationMinutes * 1.05 : job.durationMinutes) / (state.worldCondition?.speedMultiplier ?? 1), fare: Math.round(job.fare * (assignedVehicle ? upgradeFareMultiplier(assignedVehicle) : 1) * (hasResearch(state.completedResearch ?? [], 'smart-dispatch') ? 1.08 : 1) * 100) / 100 } : job)
-    return { ...result, jobs: fitOffersToAvailableTaxis(jobs, availableJobOfferCapacity({ vehicles: result.vehicles, drivers })), drivers, focusedJobId: jobId, updatedAt: new Date().toISOString(), activeSection: 'map' }
+    // Viewing an offer draws a temporary preview line. Clear that focus when
+    // dispatching so the preview disappears at the decision point; the live
+    // accepted-job route remains responsible for journey progress.
+    return { ...result, jobs: fitOffersToAvailableTaxis(jobs, availableJobOfferCapacity({ vehicles: result.vehicles, drivers })), drivers, focusedJobId: null, updatedAt: new Date().toISOString(), activeSection: 'map' }
   }),
   declineJob: (jobId) => set((state) => ({ jobs: state.jobs.filter((job) => job.id !== jobId), focusedJobId: state.focusedJobId === jobId ? null : state.focusedJobId, updatedAt: new Date().toISOString() })),
   completeJob: (jobId) => set((state) => {

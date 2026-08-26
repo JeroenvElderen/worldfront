@@ -53,7 +53,14 @@ const hasFleetSlot = (state: Pick<GameState, 'company' | 'garageLevel' | 'vehicl
   Boolean(state.company && state.vehicles.length < fleetSlotCapacity(state.company.level, state.garageLevel ?? 0, state.branches) + researchFleetSlots(state))
 const unlockedTerritoryCenters = (state: Pick<GameState, 'branches' | 'territoryExpansions'>): VillageTerritoryCenter[] => [
   ...state.branches.flatMap((branch) => branch.coordinates ? [{ id: branch.id, coordinates: branch.coordinates }] : []),
-  ...(state.territoryExpansions ?? []).map(({ id, coordinates, source, radiusKm }) => ({ id, coordinates, source: source === 'taxi-discovery' ? source : 'village', radiusKm })),
+  // Live taxi discoveries are owned service coverage too: they can generate
+  // work, while route validation still prevents journeys through locked land.
+  ...(state.territoryExpansions ?? []).map(({ id, coordinates, source, radiusKm }) => ({
+    id,
+    coordinates,
+    source: source === 'taxi-discovery' ? source : 'village',
+    radiusKm,
+  })),
 ]
 const discoveryCheckpoints = (job: TaxiJob, start?: Coordinates) => {
   const route = [start, jobPickup(job), ...(job.routeCoordinates ?? [jobDestination(job)])].filter((point): point is Coordinates => Boolean(point))
@@ -199,8 +206,8 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     set({ jobsLoading: true, jobsError: null })
     try {
       const level = levelForReputation(state.company?.reputation ?? 0)
-      // Search from the roaming taxi rather than its original station so its
-      // newly discovered corridor can continue growing beyond village borders.
+      // Search from the taxi so newly explored coverage can produce work even
+      // after the vehicle has travelled beyond its original station's area.
       const searchArea = { ...city, coordinates: availableTaxi.position ?? city.coordinates }
       const taxis = state.vehicles.filter((vehicle) => vehicle.type === 'taxi')
       const taxiPositions = taxis.filter((vehicle) => vehicle.status === 'available' && vehicle.cityId === city.id).map((vehicle) => vehicle.position ?? city.coordinates)

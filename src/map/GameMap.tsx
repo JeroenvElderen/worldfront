@@ -9,7 +9,7 @@ import type { Branch, Coordinates, TaxiJob, TerritoryExpansion, Vehicle } from '
 import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
-import { lockedTerritoryMask, mergeVillageTerritories, villageTerritory, VILLAGE_TERRITORY_RADIUS_KM } from '../services/territoryGeometry'
+import { isInsideVillageTerritories, lockedTerritoryMask, mergeVillageTerritories, villageTerritory, VILLAGE_TERRITORY_RADIUS_KM } from '../services/territoryGeometry'
 
 interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; territoryExpansions: TerritoryExpansion[]; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void }
 const token = mapboxAccessToken
@@ -97,6 +97,27 @@ const missionColor = (jobId: string) => {
   return `hsl(${hash % 360}, 100%, 60%)`
 }
 
+const TERRITORY_COLORS = ['#22c55e', '#38bdf8', '#a78bfa', '#f59e0b', '#f472b6', '#2dd4bf'] as const
+const territoryColor = (id: string) => {
+  const hash = [...id].reduce((value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0, 0)
+  return TERRITORY_COLORS[hash % TERRITORY_COLORS.length]
+}
+
+const neighboringTerritoryCenters = (centers: Array<{ id: string; coordinates: Coordinates }>) => {
+  const candidates = new Map<string, { id: string; coordinates: Coordinates }>()
+  centers.forEach(({ coordinates: [longitude, latitude] }) => {
+    const latitudeStep = VILLAGE_TERRITORY_RADIUS_KM * 1.55 / 110.574
+    const longitudeStep = VILLAGE_TERRITORY_RADIUS_KM * 1.55 /
+      (111.32 * Math.max(.15, Math.cos(latitude * Math.PI / 180)))
+    Array.from({ length: 6 }, (_, index) => index * Math.PI / 3).forEach((angle) => {
+      const coordinates: Coordinates = [longitude + Math.cos(angle) * longitudeStep, latitude + Math.sin(angle) * latitudeStep]
+      const id = `locked-${coordinates[0].toFixed(5)}-${coordinates[1].toFixed(5)}`
+      if (!isInsideVillageTerritories(coordinates, centers)) candidates.set(id, { id, coordinates })
+    })
+  })
+  return [...candidates.values()]
+}
+
 function GameMapView({ cityId, customCities, branches, territoryExpansions, vehicles, jobs, focusedJobId, placingStation, placingTerritory, onBuildStation, onExpandTerritory, onOpenJob }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
@@ -113,7 +134,15 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
     const handlePlacement = (event: mapboxgl.MapMouseEvent) => {
       const coordinates: Coordinates = [event.lngLat.lng, event.lngLat.lat]
       if (placingStation) onBuildStation(coordinates)
-      else if (placingTerritory) onExpandTerritory(coordinates)
+      else if (placingTerritory) {
+        const lockedVillage = instance.getLayer('locked-villages-fill')
+          ? instance.queryRenderedFeatures(event.point, { layers: ['locked-villages-fill'] })[0]
+          : undefined
+        const center = lockedVillage?.properties
+          ? [Number(lockedVillage.properties.centerLongitude), Number(lockedVillage.properties.centerLatitude)] as Coordinates
+          : null
+        if (center?.every(Number.isFinite)) onExpandTerritory(center)
+      }
     }
     instance.on('click', handlePlacement)
     return () => { instance.off('click', handlePlacement); instance.getCanvas().classList.remove('placing-depot') }
@@ -412,17 +441,34 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
         ...stationCoordinates.map(({ station, coordinates }) => villageTerritory(station.id, coordinates, VILLAGE_TERRITORY_RADIUS_KM)),
         ...territoryExpansions.map((expansion) => villageTerritory(expansion.id, expansion.coordinates, VILLAGE_TERRITORY_RADIUS_KM)),
       ]
+      const territoryCenters = [
+        ...stationCoordinates.map(({ station, coordinates }) => ({ id: station.id, coordinates })),
+        ...territoryExpansions.map(({ id, coordinates }) => ({ id, coordinates })),
+      ]
+      const lockedVillages = neighboringTerritoryCenters(territoryCenters).map(({ id, coordinates }) =>
+        villageTerritory(id, coordinates, VILLAGE_TERRITORY_RADIUS_KM, territoryColor(id), {
+          centerLongitude: coordinates[0], centerLatitude: coordinates[1],
+        }))
       const unlockedTerritory = mergeVillageTerritories(territories)
-      const coverageData = featureCollection(unlockedTerritory ? [unlockedTerritory] : [])
+      // Keep the individual polygons for rendering so adjacent villages retain
+      // their own identity and color. The merged geometry is only needed to cut
+      // all purchased areas out of the locked-world overlay.
+      const coverageData = featureCollection(territories)
+      const lockedVillagesData = featureCollection(lockedVillages)
       const lockedData = featureCollection([lockedTerritoryMask(unlockedTerritory)])
       const source = instance.getSource('depot-network') as mapboxgl.GeoJSONSource | undefined
       const coverageSource = instance.getSource('service-coverage') as mapboxgl.GeoJSONSource | undefined
       const lockedSource = instance.getSource('locked-territory') as mapboxgl.GeoJSONSource | undefined
-      if (source && coverageSource && lockedSource) { source.setData(data); coverageSource.setData(coverageData); lockedSource.setData(lockedData); return }
+      const lockedVillagesSource = instance.getSource('locked-villages') as mapboxgl.GeoJSONSource | undefined
+      if (source && coverageSource && lockedSource && lockedVillagesSource) { source.setData(data); coverageSource.setData(coverageData); lockedSource.setData(lockedData); lockedVillagesSource.setData(lockedVillagesData); return }
       instance.addSource('locked-territory', { type: 'geojson', data: lockedData })
-      instance.addLayer({ id: 'locked-territory-fill', type: 'fill', source: 'locked-territory', paint: { 'fill-color': '#ef7777', 'fill-opacity': .24 } })
+      instance.addLayer({ id: 'locked-territory-fill', type: 'fill', source: 'locked-territory', paint: { 'fill-color': '#334155', 'fill-opacity': .2 } })
       instance.addSource('service-coverage', { type: 'geojson', data: coverageData })
-      instance.addLayer({ id: 'service-coverage-line', type: 'line', source: 'service-coverage', paint: { 'line-color': '#5eead4', 'line-width': 2, 'line-opacity': .85 } })
+      instance.addLayer({ id: 'service-coverage-fill', type: 'fill', source: 'service-coverage', paint: { 'fill-color': '#5eead4', 'fill-opacity': .16 } })
+      instance.addLayer({ id: 'service-coverage-line', type: 'line', source: 'service-coverage', paint: { 'line-color': '#5eead4', 'line-width': 2.5, 'line-opacity': .95 } })
+      instance.addSource('locked-villages', { type: 'geojson', data: lockedVillagesData })
+      instance.addLayer({ id: 'locked-villages-fill', type: 'fill', source: 'locked-villages', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': .3 } })
+      instance.addLayer({ id: 'locked-villages-line', type: 'line', source: 'locked-villages', paint: { 'line-color': ['get', 'color'], 'line-width': 2, 'line-opacity': .85 } })
       instance.addSource('depot-network', { type: 'geojson', data })
       instance.addLayer({ id: 'depot-network-halo', type: 'circle', source: 'depot-network', paint: { 'circle-radius': 13, 'circle-color': '#f59e0b', 'circle-opacity': .18 } })
       instance.addLayer({ id: 'depot-network', type: 'circle', source: 'depot-network', paint: { 'circle-radius': 6, 'circle-color': '#fbbf24', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } })

@@ -57,6 +57,7 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, driver
     </nav>
     <div className="job-list">{visibleJobs.length ? visibleJobs.map((job) => {
       const passenger = passengers.find((candidate) => job.passengerIds.includes(candidate.id))
+      const isRepeatJob = (passenger?.trips ?? 0) > (job.status === 'complete' ? 1 : 0)
       const assignedTaxi = vehicles.find((vehicle) => vehicle.id === job.assignedVehicleId)
       const taxi = assignedTaxi ? { vehicle: assignedTaxi, distance: 0 } : vehicles
         .filter((vehicle) => {
@@ -70,7 +71,7 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, driver
         .sort((left, right) => left.distance - right.distance)[0]
       return <article className={`job-card job-board-card ${job.id === focusedJobId ? 'focused' : ''}`} key={job.id}>
         <div className="job-route-column">
-          <JobRoutePreview job={job} onOpen={() => onViewMap(job.id)} />
+          <JobRoutePreview job={job} isRepeatJob={isRepeatJob} onOpen={() => onViewMap(job.id)} />
           <div className="job-trip-meta"><span><i aria-hidden="true">⌁</i>{job.distanceKm.toFixed(1)} km</span><span><i aria-hidden="true">◷</i>{Math.round(job.durationMinutes)} min</span></div>
         </div>
         <div className="job-offer-column">

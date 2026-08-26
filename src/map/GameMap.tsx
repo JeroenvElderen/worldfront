@@ -506,7 +506,9 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
       instance.addSource('locked-territory', { type: 'geojson', data: lockedData })
       instance.addLayer({ id: 'locked-territory-fill', type: 'fill', source: 'locked-territory', paint: { 'fill-color': '#ef7777', 'fill-opacity': .24 } })
       instance.addSource('service-coverage', { type: 'geojson', data: coverageData })
-      instance.addLayer({ id: 'service-coverage-fill', type: 'fill', source: 'service-coverage', paint: { 'fill-color': '#19cdb3', 'fill-opacity': .08 } })
+      // Owned and explored land is revealed by the transparent hole in the
+      // locked-territory mask; keep only its border instead of tinting the map.
+      instance.addLayer({ id: 'service-coverage-fill', type: 'fill', source: 'service-coverage', paint: { 'fill-color': '#19cdb3', 'fill-opacity': 0 } })
       instance.addLayer({ id: 'service-coverage-line', type: 'line', source: 'service-coverage', paint: { 'line-color': '#5eead4', 'line-width': 2, 'line-opacity': .85 } })
       instance.addSource('depot-network', { type: 'geojson', data })
       instance.addLayer({ id: 'depot-network-halo', type: 'circle', source: 'depot-network', paint: { 'circle-radius': 13, 'circle-color': '#f59e0b', 'circle-opacity': .18 } })

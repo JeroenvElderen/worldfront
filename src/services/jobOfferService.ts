@@ -216,7 +216,6 @@ export async function generateJobOffers(
       const pickupDistanceKm = Math.min(...taxiPositions.map((position) => distanceKmBetween(position, pickup.coordinates)))
       if (pickup.id !== destination.id &&
         isUnlocked(pickup.coordinates) &&
-        isUnlocked(destination.coordinates) &&
         pickupDistanceKm >= MIN_PICKUP_DISTANCE_KM && pickupDistanceKm <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, pickup.coordinates) <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, destination.coordinates) <= maxDistanceKm &&
@@ -242,7 +241,6 @@ export async function generateJobOffers(
       const signature = jobRouteSignature(stored.pickupLabel, stored.destinationLabel)
       return stored.cityId === city.id && !excluded.has(signature) &&
         isUnlocked(stored.pickup) &&
-        isUnlocked(stored.destination) &&
         taxiPositions.every((position) => distanceKmBetween(position, stored.pickupRoad ?? stored.pickup) >= MIN_PICKUP_DISTANCE_KM) &&
         taxiPositions.some((position) => distanceKmBetween(position, stored.pickupRoad ?? stored.pickup) <= maxDistanceKm) &&
         distanceKmBetween(city.coordinates, stored.pickup) <= maxDistanceKm &&
@@ -261,11 +259,10 @@ export async function generateJobOffers(
       ? { pickupRoad: route.stored.pickupRoad ?? route.pickup.coordinates, destinationRoad: route.stored.destinationRoad ?? route.destination.coordinates, routeCoordinates: route.stored.routeCoordinates ?? [route.stored.pickup, route.stored.destination] }
       : await roadStops(route.pickup.coordinates, route.destination.coordinates, signal)
     if (!stops) continue
-    // Mapbox can snap either stop onto a different side of a border and a road
-    // route can leave the owned area even when both searched POIs are inside it.
-    // Reject both cases so dispatch never sends a taxi through locked land.
-    if (!isUnlocked(stops.pickupRoad) || !isUnlocked(stops.destinationRoad) ||
-      !stops.routeCoordinates.every(isUnlocked)) continue
+    // Calls must begin inside owned territory, including after Mapbox snaps the
+    // pickup onto a nearby road. The destination and route may cross locked land:
+    // completing that journey is what permanently explores its corridor.
+    if (!isUnlocked(stops.pickupRoad)) continue
     // Directions can snap a POI onto a road beside a taxi. Check the actual
     // curbside stop as well as the searched place before publishing the job.
     if (taxiPositions.some((position) => distanceKmBetween(position, stops.pickupRoad) < MIN_PICKUP_DISTANCE_KM)) continue

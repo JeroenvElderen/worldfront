@@ -350,6 +350,11 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
           const progress = motion.progress
           const currentPosition = routePosition(activeRoute.coordinates, progress)
           ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(currentPosition))
+          const lastDiscoveryPosition = liveDiscoveryPositions.current.get(vehicle.id)
+          if (!lastDiscoveryPosition || distanceKmBetween(lastDiscoveryPosition, currentPosition) >= .5) {
+            liveDiscoveryPositions.current.set(vehicle.id, currentPosition)
+            onDiscoverTaxiTerritory(currentPosition)
+          }
           const routeAhead = pickingUp
             ? [...remainingRoute(pickupRoute.coordinates, progress), ...passengerRoute.coordinates.slice(1)]
             : remainingRoute(passengerRoute.coordinates, progress)

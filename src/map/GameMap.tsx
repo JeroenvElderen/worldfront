@@ -446,7 +446,16 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
       const source = instance.getSource('depot-network') as mapboxgl.GeoJSONSource | undefined
       const coverageSource = instance.getSource('service-coverage') as mapboxgl.GeoJSONSource | undefined
       const lockedSource = instance.getSource('locked-territory') as mapboxgl.GeoJSONSource | undefined
-      if (source && coverageSource && lockedSource) { source.setData(data); coverageSource.setData(coverageData); lockedSource.setData(lockedData); return }
+      if (source && coverageSource && lockedSource) {
+        source.setData(data)
+        coverageSource.setData(coverageData)
+        lockedSource.setData(lockedData)
+        // Android WebViews can leave GeoJSON changes queued while the map is
+        // otherwise idle. Wake Mapbox immediately so taxi discoveries become
+        // visible during the journey instead of only after the map is reopened.
+        instance.triggerRepaint()
+        return
+      }
       instance.addSource('locked-territory', { type: 'geojson', data: lockedData })
       instance.addLayer({ id: 'locked-territory-fill', type: 'fill', source: 'locked-territory', paint: { 'fill-color': '#ef7777', 'fill-opacity': .24 } })
       instance.addSource('service-coverage', { type: 'geojson', data: coverageData })
@@ -455,6 +464,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
       instance.addLayer({ id: 'depot-network-halo', type: 'circle', source: 'depot-network', paint: { 'circle-radius': 13, 'circle-color': '#f59e0b', 'circle-opacity': .18 } })
       instance.addLayer({ id: 'depot-network', type: 'circle', source: 'depot-network', paint: { 'circle-radius': 6, 'circle-color': '#fbbf24', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } })
       instance.addLayer({ id: 'depot-network-label', type: 'symbol', source: 'depot-network', minzoom: 8, layout: { 'text-field': ['get', 'name'], 'text-size': 10, 'text-offset': [0, 1.4], 'text-anchor': 'top', 'text-allow-overlap': false }, paint: { 'text-color': '#ffffff', 'text-halo-color': '#10201f', 'text-halo-width': 2 } })
+      instance.triggerRepaint()
     }
     if (instance.isStyleLoaded()) updateDepots()
     else instance.once('load', updateDepots)

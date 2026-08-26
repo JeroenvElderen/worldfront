@@ -72,18 +72,34 @@ export const categoryDetails: Record<JobCategory, { label: string; icon: string;
   standard: { label: 'Standard', icon: '🚕', fare: 1 }, airport: { label: 'Airport', icon: '✈️', fare: 1.2, requiredUpgrade: 'luggage-capacity' }, family: { label: 'Family', icon: '👨‍👩‍👧', fare: 1.1, requiredUpgrade: 'child-seats' }, executive: { label: 'Executive', icon: '💼', fare: 1.35, requiredUpgrade: 'luxury-interior' }, accessible: { label: 'Accessible', icon: '♿', fare: 1.25, requiredUpgrade: 'wheelchair-access' }, 'late-night': { label: 'Late night', icon: '🌙', fare: 1.2, requiredUpgrade: 'security-partition' }, 'long-distance': { label: 'Long distance', icon: '🛣️', fare: 1.15 }, courier: { label: 'Courier', icon: '📦', fare: 1.05 }, 'pet-friendly': { label: 'Pet friendly', icon: '🐾', fare: 1.1 },
 }
 
-export function categoryForRoute(pickup: string, destination: string, distanceKm: number, partySize: number): JobCategory {
+export function categoryForRoute(pickup: string, destination: string, distanceKm: number, partySize: number, availableCategories: JobCategory[] = Object.keys(categoryDetails) as JobCategory[]): JobCategory {
   const labels = `${pickup} ${destination}`.toLowerCase()
-  if (labels.includes('airport')) return 'airport'
-  if (distanceKm >= 15) return 'long-distance'
-  if (partySize >= 3) return 'family'
+  if (labels.includes('airport') && availableCategories.includes('airport')) return 'airport'
+  if (distanceKm >= 15 && availableCategories.includes('long-distance')) return 'long-distance'
+  if (partySize >= 3 && availableCategories.includes('family')) return 'family'
   const pool: JobCategory[] = ['standard', 'executive', 'accessible', 'late-night', 'courier', 'pet-friendly']
-  return pool[Math.floor(Math.random() * pool.length)]
+  const availablePool = pool.filter((category) => availableCategories.includes(category))
+  return availablePool[Math.floor(Math.random() * availablePool.length)] ?? 'standard'
 }
 
 export function vehicleCanTakeJob(vehicle: Vehicle, job: TaxiJob, partySize: number) {
   if (vehicle.capacity < partySize) return false
   return !job.requiredUpgrade || (vehicle.upgrades ?? []).includes(job.requiredUpgrade)
+}
+
+/** Categories that at least one currently dispatchable taxi and driver can serve. */
+export function jobCategoriesForFleet(vehicles: Vehicle[], drivers: Driver[]): JobCategory[] {
+  const taxis = vehicles.flatMap((vehicle) => {
+    const driver = drivers.find((candidate) => candidate.id === vehicle.driverId)
+    return vehicle.type === 'taxi' && vehicle.status === 'available' && driver?.status === 'available' ? [{ vehicle, driver }] : []
+  })
+  return (Object.keys(categoryDetails) as JobCategory[]).filter((category) => taxis.some(({ vehicle, driver }) => {
+    const requiredUpgrade = categoryDetails[category].requiredUpgrade
+    if (requiredUpgrade && !(vehicle.upgrades ?? []).includes(requiredUpgrade)) return false
+    if (category === 'accessible' && !(driver.certifications ?? []).includes('accessible')) return false
+    if (category === 'executive' && !(driver.certifications ?? []).includes('executive')) return false
+    return true
+  }))
 }
 
 /** Available taxis normally surface one request; an equipped roof sign attracts one more. */

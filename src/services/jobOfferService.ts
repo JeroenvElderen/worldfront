@@ -1,4 +1,4 @@
-import type { City, Coordinates, Passenger, TaxiJob } from '../models/game'
+import type { City, Coordinates, JobCategory, Passenger, TaxiJob } from '../models/game'
 import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
@@ -192,7 +192,8 @@ export async function generateJobOffers(
   maxDistanceKm = BASE_JOB_DISTANCE_KM,
   signal?: AbortSignal,
   taxiPositions: Coordinates[] = [city.coordinates],
-  fareMultiplier = 1
+  fareMultiplier = 1,
+  availableCategories?: JobCategory[]
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
   const excluded = new Set(excludedRoutes)
   let routes: Array<{ pickup: MapboxPlace; destination: MapboxPlace; distanceKm: number; signature: string; stored?: StoredJobRoute }>
@@ -251,7 +252,7 @@ export async function generateJobOffers(
   }))
   const offeredAt = new Date().toISOString()
   const jobs = resolvedRoutes.map((route, index): TaxiJob => {
-    const category = categoryForRoute(route.pickup.name, route.destination.name, route.distanceKm, passengers[index].partySize)
+    const category = categoryForRoute(route.pickup.name, route.destination.name, route.distanceKm, passengers[index].partySize, availableCategories)
     const categoryInfo = categoryDetails[category]
     return ({
     id: crypto.randomUUID(), cityId: city.id,

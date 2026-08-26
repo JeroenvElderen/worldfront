@@ -104,6 +104,20 @@ export const isInsideVillageTerritories = (coordinates: Coordinates, centers: Vi
     villageTerritory(center.id, center.coordinates, VILLAGE_TERRITORY_RADIUS_KM),
   ))
 
+/**
+ * Resolve the same territory features displayed by the map. Job generation must
+ * use these rather than only the generated fallbacks, otherwise an OSM village
+ * border can be visible while offers are tested against a different polygon.
+ */
+export const resolveVillageTerritories = async (centers: VillageTerritoryCenter[]) =>
+  Promise.all(centers.map(async (center) =>
+    await realVillageTerritory(center.id, center.coordinates)
+      ?? villageTerritory(center.id, center.coordinates, VILLAGE_TERRITORY_RADIUS_KM)))
+
+/** True when a location belongs to one of the supplied map territory features. */
+export const isInsideTerritoryFeatures = (coordinates: Coordinates, territories: TerritoryFeature[]) =>
+  territories.some((territory) => booleanPointInPolygon(coordinates, territory))
+
 /** A red world overlay with the purchased territory cut out as transparent holes. */
 export const lockedTerritoryMask = (unlocked: ReturnType<typeof mergeVillageTerritories>) => {
   const worldRing: Coordinates[] = [[-179.9, -85], [179.9, -85], [179.9, 85], [-179.9, 85], [-179.9, -85]]

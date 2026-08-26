@@ -5,7 +5,8 @@ import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 import { addJobsToJobJson, jobRouteSignature, readJobJson, type StoredJobRoute } from './jobJsonService'
 
 export const MIN_JOB_DISTANCE_KM = 6
-export const MAX_PICKUP_DISTANCE_KM = 5
+/** Prefer nearby calls, but do not stop generating work after those routes are exhausted. */
+export const PREFERRED_PICKUP_DISTANCE_KM = 5
 
 const passengerNames = [
   'Aoife Murphy', 'Cian Kelly', 'Niamh Byrne', 'Oisín Walsh', 'Saoirse Doyle', 'Fionn Ryan',
@@ -197,20 +198,26 @@ export async function generateJobOffers(
   let routes: Array<{ pickup: MapboxPlace; destination: MapboxPlace; distanceKm: number; signature: string; stored?: StoredJobRoute }>
   try {
     const places = await findMapboxPlaces(city, maxDistanceKm, signal)
-    const uniqueRoutes = new Map<string, (typeof routes)[number]>()
+    const uniqueRoutes = new Map<string, (typeof routes)[number] & { pickupDistanceKm: number }>()
     for (const pickup of places) for (const destination of places) {
       const distanceKm = Math.round(distanceKmBetween(pickup.coordinates, destination.coordinates) * 10) / 10
       const signature = jobRouteSignature(pickup.name, destination.name)
+      const pickupDistanceKm = Math.min(...taxiPositions.map((position) => distanceKmBetween(position, pickup.coordinates)))
       if (pickup.id !== destination.id &&
-        taxiPositions.some((position) => distanceKmBetween(position, pickup.coordinates) <= MAX_PICKUP_DISTANCE_KM) &&
+        pickupDistanceKm <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, pickup.coordinates) <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, destination.coordinates) <= maxDistanceKm &&
         distanceKm >= MIN_JOB_DISTANCE_KM && distanceKm <= maxDistanceKm &&
         !excluded.has(signature) && !uniqueRoutes.has(signature)) {
-        uniqueRoutes.set(signature, { pickup, destination, distanceKm, signature })
+        uniqueRoutes.set(signature, { pickup, destination, distanceKm, signature, pickupDistanceKm })
       }
     }
-    routes = shuffled([...uniqueRoutes.values()])
+    // Keep the old 5 km behaviour as a preference rather than a hard gate.
+    // Once nearby route signatures have been used, calls farther inside the
+    // unlocked service area can still keep an idle taxi working.
+    routes = shuffled([...uniqueRoutes.values()]).sort((left, right) =>
+      Number(left.pickupDistanceKm > PREFERRED_PICKUP_DISTANCE_KM) - Number(right.pickupDistanceKm > PREFERRED_PICKUP_DISTANCE_KM)
+      || left.pickupDistanceKm - right.pickupDistanceKm)
   } catch (error) {
     if ((error as Error).name === 'AbortError') throw error
     // A Mapbox/API error is not proof that the device is offline. Reusing a
@@ -221,7 +228,7 @@ export async function generateJobOffers(
     routes = shuffled(readJobJson().routes.flatMap((stored) => {
       const signature = jobRouteSignature(stored.pickupLabel, stored.destinationLabel)
       return stored.cityId === city.id && !excluded.has(signature) &&
-        taxiPositions.some((position) => distanceKmBetween(position, stored.pickup) <= MAX_PICKUP_DISTANCE_KM) &&
+        taxiPositions.some((position) => distanceKmBetween(position, stored.pickup) <= maxDistanceKm) &&
         distanceKmBetween(city.coordinates, stored.pickup) <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, stored.destination) <= maxDistanceKm &&
         stored.distanceKm >= MIN_JOB_DISTANCE_KM && stored.distanceKm <= maxDistanceKm
@@ -230,7 +237,7 @@ export async function generateJobOffers(
     })).slice(0, count)
   }
 
-  if (!routes.length) throw new Error(`No new routes have a pickup within ${MAX_PICKUP_DISTANCE_KM} km of an available taxi. Try again after a taxi has moved.`)
+  if (!routes.length) throw new Error('No new routes were found inside the available taxis\' service area.')
 
   const resolvedRoutes: Array<(typeof routes)[number] & { stops: NonNullable<Awaited<ReturnType<typeof roadStops>>> }> = []
   for (const route of routes) {

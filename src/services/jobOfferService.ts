@@ -10,6 +10,8 @@ import { isInsideTerritoryFeatures, resolveVillageTerritories, type VillageTerri
 export const MIN_JOB_DISTANCE_KM = 1
 /** Prefer nearby calls, but do not stop generating work after those routes are exhausted. */
 export const PREFERRED_PICKUP_DISTANCE_KM = 5
+/** Keep calls away from idle taxis so every accepted job starts with a pickup drive. */
+export const MIN_PICKUP_DISTANCE_KM = 0.25
 
 const passengerNames = [
   'Aoife Murphy', 'Cian Kelly', 'Niamh Byrne', 'Oisín Walsh', 'Saoirse Doyle', 'Fionn Ryan',
@@ -40,7 +42,9 @@ export const placeSearches = [
   'stadium', 'sports centre', 'cinema', 'theatre', 'nightclub', 'government office',
 ]
 const RANDOM_LOCATIONS_PER_BOX = 12
-const MAPBOX_REQUEST_INTERVAL_MS = 250
+// Searchbox queries are independent. A small worker pool avoids the old
+// quarter-second delay after every category without flooding the API.
+const MAPBOX_REQUEST_CONCURRENCY = 6
 interface PlaceCacheEntry { loadedRadiusKm: number; places: MapboxPlace[]; pending?: Promise<void> }
 const placeCache = new Map<string, PlaceCacheEntry>()
 
@@ -112,23 +116,15 @@ const randomMapLocations = (city: City, boxes: BoundingBox[], previousRadiusKm: 
     }
   }).filter((place): place is MapboxPlace => place !== null))
 
-const wait = (milliseconds: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
-  const onAbort = () => {
-    clearTimeout(timeout)
-    reject(signal?.reason ?? new DOMException('The operation was aborted.', 'AbortError'))
-  }
-  const timeout = setTimeout(() => {
-    signal?.removeEventListener('abort', onAbort)
-    resolve()
-  }, milliseconds)
-  signal?.addEventListener('abort', onAbort, { once: true })
-})
-
 async function fetchMapboxPlaces(city: City, previousRadiusKm: number, radiusKm: number, signal?: AbortSignal): Promise<MapboxPlace[]> {
-  const responses: Array<{ features?: MapboxFeature[] }> = []
   const boxes = boxesForNewArea(city.coordinates, previousRadiusKm, radiusKm)
-  for (const box of boxes) {
-    for (const search of placeSearches) {
+  const searches = boxes.flatMap((box) => placeSearches.map((search) => ({ box, search })))
+  const responses: Array<{ features?: MapboxFeature[] }> = new Array(searches.length)
+  let nextSearch = 0
+  const workers = Array.from({ length: Math.min(MAPBOX_REQUEST_CONCURRENCY, searches.length) }, async () => {
+    while (nextSearch < searches.length) {
+      const index = nextSearch++
+      const { box, search } = searches[index]
       const url = new URL('https://api.mapbox.com/search/searchbox/v1/forward')
       url.searchParams.set('q', search)
       url.searchParams.set('access_token', mapboxToken)
@@ -141,10 +137,10 @@ async function fetchMapboxPlaces(city: City, previousRadiusKm: number, radiusKm:
       if (!response.ok) throw new Error(`Mapbox place search returned ${response.status}.`)
       const contentType = response.headers.get('content-type') ?? ''
       if (!contentType.toLocaleLowerCase().includes('application/json')) throw new Error('Mapbox place search returned an invalid response.')
-      responses.push(await response.json() as { features?: MapboxFeature[] })
-      await wait(MAPBOX_REQUEST_INTERVAL_MS, signal)
+      responses[index] = await response.json() as { features?: MapboxFeature[] }
     }
-  }
+  })
+  await Promise.all(workers)
 
   const indexedPlaces = responses.flatMap(({ features = [] }) => features.flatMap((feature): MapboxPlace[] => {
     const id = feature.properties?.mapbox_id
@@ -221,7 +217,7 @@ export async function generateJobOffers(
       if (pickup.id !== destination.id &&
         isUnlocked(pickup.coordinates) &&
         isUnlocked(destination.coordinates) &&
-        pickupDistanceKm <= maxDistanceKm &&
+        pickupDistanceKm >= MIN_PICKUP_DISTANCE_KM && pickupDistanceKm <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, pickup.coordinates) <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, destination.coordinates) <= maxDistanceKm &&
         distanceKm >= MIN_JOB_DISTANCE_KM && distanceKm <= maxDistanceKm &&
@@ -247,7 +243,8 @@ export async function generateJobOffers(
       return stored.cityId === city.id && !excluded.has(signature) &&
         isUnlocked(stored.pickup) &&
         isUnlocked(stored.destination) &&
-        taxiPositions.some((position) => distanceKmBetween(position, stored.pickup) <= maxDistanceKm) &&
+        taxiPositions.every((position) => distanceKmBetween(position, stored.pickupRoad ?? stored.pickup) >= MIN_PICKUP_DISTANCE_KM) &&
+        taxiPositions.some((position) => distanceKmBetween(position, stored.pickupRoad ?? stored.pickup) <= maxDistanceKm) &&
         distanceKmBetween(city.coordinates, stored.pickup) <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, stored.destination) <= maxDistanceKm &&
         stored.distanceKm >= MIN_JOB_DISTANCE_KM && stored.distanceKm <= maxDistanceKm
@@ -269,6 +266,9 @@ export async function generateJobOffers(
     // Reject both cases so dispatch never sends a taxi through locked land.
     if (!isUnlocked(stops.pickupRoad) || !isUnlocked(stops.destinationRoad) ||
       !stops.routeCoordinates.every(isUnlocked)) continue
+    // Directions can snap a POI onto a road beside a taxi. Check the actual
+    // curbside stop as well as the searched place before publishing the job.
+    if (taxiPositions.some((position) => distanceKmBetween(position, stops.pickupRoad) < MIN_PICKUP_DISTANCE_KM)) continue
     resolvedRoutes.push({ ...route, stops })
     if (resolvedRoutes.length >= count) break
   }

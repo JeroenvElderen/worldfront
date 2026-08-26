@@ -78,11 +78,15 @@ export function upgradeFareMultiplier(vehicle: Vehicle) {
   return 1 + (vehicle.upgrades?.length ?? 0) * .08
 }
 
-/** Available taxis normally surface one request; an equipped roof sign attracts one more. */
+/** Staffed taxis surface their next request while available or completing a trip. */
 export function jobOfferCapacity(vehicles: Vehicle[], drivers: Driver[]) {
   return vehicles.reduce((capacity, vehicle) => {
-    const staffedAndAvailable = vehicle.type === 'taxi' && vehicle.status === 'available' && vehicle.driverId && drivers.some((driver) => driver.id === vehicle.driverId && driver.status === 'available')
-    if (!staffedAndAvailable) return capacity
+    const driver = drivers.find((candidate) => candidate.id === vehicle.driverId)
+    const canQueueWork = vehicle.type === 'taxi' && vehicle.driverId && (
+      (vehicle.status === 'available' && driver?.status === 'available') ||
+      (vehicle.status === 'on-job' && driver?.status === 'driving')
+    )
+    if (!canQueueWork) return capacity
     return capacity + ((vehicle.upgrades ?? []).includes('roof-sign') ? 2 : 1)
   }, 0)
 }

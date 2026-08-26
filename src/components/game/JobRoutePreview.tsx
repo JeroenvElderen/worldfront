@@ -7,6 +7,7 @@ import { jobDestination, jobPickup } from '../../services/jobEngine'
 
 interface JobRoutePreviewProps {
   job: TaxiJob
+  isRepeatJob: boolean
   onOpen: () => void
 }
 
@@ -29,7 +30,7 @@ const fallbackStyle: mapboxgl.StyleSpecification = {
   ],
 }
 
-function JobRoutePreviewView({ job, onOpen }: JobRoutePreviewProps) {
+function JobRoutePreviewView({ job, isRepeatJob, onOpen }: JobRoutePreviewProps) {
   const container = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -203,6 +204,10 @@ function JobRoutePreviewView({ job, onOpen }: JobRoutePreviewProps) {
 
       <span className="job-route-preview-label">
         View route <b aria-hidden="true">↗</b>
+      </span>
+
+      <span className={`job-repeat-badge ${isRepeatJob ? 'repeat' : 'new'}`}>
+        {isRepeatJob ? 'Repeat job' : 'New job'}
       </span>
     </button>
   )

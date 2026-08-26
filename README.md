@@ -27,10 +27,11 @@ The map is deliberately updated once per second while a taxi is moving instead
 of continuously rendering at the display frame rate. Journey timers and Mapbox
 rendering stop whenever the app is in the background, then journeys and other
 deadlines catch up from their saved timestamps as soon as it becomes visible
-again. New job offers are generated in response to an idle taxi rather
-than from a repeating 30-second timer. Tile-expiry refreshes and label fades are
-also disabled, and the tile cache is capped, which avoids recurring network,
-CPU, GPU, and memory work without changing game outcomes.
+again. New job offers are generated immediately in response to an idle taxi,
+and a once-per-minute foreground refresh removes expired calls and replenishes
+every available offer slot. Tile-expiry refreshes and label fades are also
+disabled, and the tile cache is capped, which avoids unnecessary network, CPU,
+GPU, and memory work without changing game outcomes.
 
 Vehicles are rendered as small map dots, with a consistent purple marker for
 every vehicle type and operating state.

@@ -4,10 +4,10 @@ import { addReputation, levelForReputation } from './companyProgression'
 
 export const MAX_JOB_OFFERS = 12
 export const JOB_OFFER_DURATION_MS = 5 * 60_000
-// One estimated journey minute lasts one real minute for the standard fleet.
-// Exclusive taxis keep their model-specific multiplier and therefore finish
-// the same route faster without accelerating the rest of the game clock.
-export const REAL_TIME_TRIP_SCALE = 1
+// Restore the accelerated journey clock used before standard taxi trips were
+// changed to real-time speed. One estimated trip minute takes 3.6 real seconds;
+// model-specific speed bonuses still apply on top of this shared game speed.
+export const REAL_TIME_TRIP_SCALE = 0.06
 export const SIMULATED_MINUTE_MS = 60_000 * REAL_TIME_TRIP_SCALE
 // Give the driver a brief dispatch window before the taxi pulls away.
 export const JOB_DISPATCH_DELAY_MS = 1_000

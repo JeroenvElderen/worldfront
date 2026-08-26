@@ -100,9 +100,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     const cost = 5_000 * (sequence - 1)
     if (!state.company || state.company.cash < cost) return state
     const now = new Date().toISOString()
-    // Coordinate-derived identity keeps the previewed locked border identical
-    // after purchase instead of regenerating its organic outline from a new id.
-    const expansion = { id: `locked-${coordinates[0].toFixed(5)}-${coordinates[1].toFixed(5)}`, coordinates, purchasedAt: now }
+    const expansion = { id: crypto.randomUUID(), coordinates, purchasedAt: now }
     return { territoryExpansions: [...(state.territoryExpansions ?? []), expansion], company: { ...state.company, cash: state.company.cash - cost }, financialTransactions: addTransactions(state.financialTransactions, transaction('expansion', `Village territory ${sequence}`, -cost, undefined, now)), updatedAt: now }
   }),
   buyHotel: () => set((state) => {

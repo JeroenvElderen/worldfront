@@ -37,6 +37,8 @@ Vehicles are rendered as small map dots, with a consistent purple marker for
 every vehicle type and operating state.
 Active journeys follow a thin route line, and selecting a job highlights the
 road route the nearest available driver will take to its pickup and destination.
+Completed taxi journeys uncover a focused 500-meter corridor around the route,
+so expanding service territory requires meaningful travel through an area.
 
 ## Postal service
 

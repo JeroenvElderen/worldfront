@@ -18,6 +18,8 @@ import { getCity } from './data/cities'
 import { moneyFormatterForCity } from './services/localization'
 import { CurrencyProvider } from './components/game/CurrencyContext'
 
+const JOB_GENERATION_INTERVAL_MS = 5_000
+
 export default function App() {
   const game = useGameStore()
   const [placingStation, setPlacingStation] = useState(false)
@@ -267,7 +269,7 @@ export default function App() {
     }
 
     recover()
-    const interval = window.setInterval(recover, 15_000)
+    const interval = window.setInterval(recover, JOB_GENERATION_INTERVAL_MS)
     window.addEventListener('online', recover)
 
     return () => {

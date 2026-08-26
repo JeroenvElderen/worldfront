@@ -38,6 +38,17 @@ const transaction = (category: TransactionCategory, description: string, amount:
 const addTransactions = (existing: FinancialTransaction[] | undefined, ...entries: FinancialTransaction[]) =>
   [...(existing ?? []), ...entries].slice(-500)
 const availableJobOfferCapacity = (state: Pick<GameState, 'vehicles' | 'drivers'>) => jobOfferCapacity(state.vehicles, state.drivers)
+const taxiJobGenerationPosition = (state: Pick<GameState, 'jobs'>, vehicle: Vehicle, fallback: Coordinates) => {
+  if (vehicle.status !== 'on-job') return vehicle.position ?? fallback
+  const currentJob = state.jobs.find((job) => job.status === 'accepted' && job.assignedVehicleId === vehicle.id)
+  return currentJob ? jobDestination(currentJob) : vehicle.position ?? fallback
+}
+const jobGeneratingTaxis = (state: Pick<GameState, 'vehicles' | 'drivers' | 'jobs'>) => state.vehicles.filter((vehicle) => {
+  if (vehicle.type !== 'taxi' || !vehicle.driverId) return false
+  const driver = state.drivers.find((candidate) => candidate.id === vehicle.driverId)
+  return (vehicle.status === 'available' && driver?.status === 'available') ||
+    (vehicle.status === 'on-job' && driver?.status === 'driving' && state.jobs.some((job) => job.status === 'accepted' && job.assignedVehicleId === vehicle.id))
+})
 const fitOffersToAvailableTaxis = (jobs: GameSave['jobs'], taxiCount: number) => {
   let offersKept = 0
   return jobs.filter((job) => job.status !== 'offered' || offersKept++ < taxiCount)
@@ -188,20 +199,19 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
   }),
   refreshJobs: async () => {
     const state = useGameStore.getState()
-    const availableTaxi = state.vehicles
-      .filter((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available' && vehicle.driverId)
+    const generationTaxi = jobGeneratingTaxis(state)
       .sort((left, right) => state.jobs.filter((job) => job.status === 'offered' && job.cityId === left.cityId).length - state.jobs.filter((job) => job.status === 'offered' && job.cityId === right.cityId).length)[0]
-    if (!(state.activeCityId ?? state.startingCityId) || state.jobsLoading || !availableTaxi) return
-    const city = getCity(availableTaxi.cityId, state.customCities)
+    if (!(state.activeCityId ?? state.startingCityId) || state.jobsLoading || !generationTaxi) return
+    const city = getCity(generationTaxi.cityId, state.customCities)
     if (!city) return
     set({ jobsLoading: true, jobsError: null })
     try {
       const level = levelForReputation(state.company?.reputation ?? 0)
       // Search from the taxi so newly explored coverage can produce work even
       // after the vehicle has travelled beyond its original station's area.
-      const searchArea = { ...city, coordinates: availableTaxi.position ?? city.coordinates }
+      const searchArea = { ...city, coordinates: taxiJobGenerationPosition(state, generationTaxi, city.coordinates) }
       const taxis = state.vehicles.filter((vehicle) => vehicle.type === 'taxi')
-      const taxiPositions = taxis.filter((vehicle) => vehicle.status === 'available' && vehicle.cityId === city.id).map((vehicle) => vehicle.position ?? city.coordinates)
+      const taxiPositions = jobGeneratingTaxis(state).filter((vehicle) => vehicle.cityId === city.id).map((vehicle) => taxiJobGenerationPosition(state, vehicle, city.coordinates))
       const maxDistanceKm = maxJobDistanceForFleet(level, taxis.length) * (hasResearch(state.completedResearch ?? [], 'predictive-demand') ? 1.25 : 1)
       const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, (state.activeEvent?.fareMultiplier ?? 1) * cityDemandMultiplier(state.cityEconomies.find((economy) => economy.cityId === city.id)) * (state.worldCondition?.demandMultiplier ?? 1) * marketingDemandMultiplier(state.brandStrategy ?? defaultBrandStrategy) * fareMultiplier(state.brandStrategy?.fareStrategy ?? 'standard') * Math.max(.55, 1 - (state.competitors ?? []).filter((competitor) => competitor.relationship === 'rival').reduce((sum, competitor) => sum + competitor.marketShare, 0) / 200), unlockedTerritoryCenters(state))
       set((latest) => {
@@ -216,18 +226,17 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
   },
   addRandomJob: async () => {
     const state = useGameStore.getState()
-    const availableTaxi = state.vehicles
-      .filter((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available' && vehicle.driverId)
+    const generationTaxi = jobGeneratingTaxis(state)
       .sort((left, right) => state.jobs.filter((job) => job.status === 'offered' && job.cityId === left.cityId).length - state.jobs.filter((job) => job.status === 'offered' && job.cityId === right.cityId).length)[0]
-    if (!(state.activeCityId ?? state.startingCityId) || state.jobsLoading || !availableTaxi || state.jobs.filter((job) => job.status === 'offered').length >= Math.min(MAX_JOB_OFFERS, availableJobOfferCapacity(state))) return
-    const city = getCity(availableTaxi.cityId, state.customCities)
+    if (!(state.activeCityId ?? state.startingCityId) || state.jobsLoading || !generationTaxi || state.jobs.filter((job) => job.status === 'offered').length >= Math.min(MAX_JOB_OFFERS, availableJobOfferCapacity(state))) return
+    const city = getCity(generationTaxi.cityId, state.customCities)
     if (!city) return
     set({ jobsLoading: true, jobsError: null })
     try {
       const level = levelForReputation(state.company?.reputation ?? 0)
-      const searchArea = { ...city, coordinates: availableTaxi.position ?? city.coordinates }
+      const searchArea = { ...city, coordinates: taxiJobGenerationPosition(state, generationTaxi, city.coordinates) }
       const taxis = state.vehicles.filter((vehicle) => vehicle.type === 'taxi')
-      const taxiPositions = taxis.filter((vehicle) => vehicle.status === 'available' && vehicle.cityId === city.id).map((vehicle) => vehicle.position ?? city.coordinates)
+      const taxiPositions = jobGeneratingTaxis(state).filter((vehicle) => vehicle.cityId === city.id).map((vehicle) => taxiJobGenerationPosition(state, vehicle, city.coordinates))
       const maxDistanceKm = maxJobDistanceForFleet(level, taxis.length) * (hasResearch(state.completedResearch ?? [], 'predictive-demand') ? 1.25 : 1)
       const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, taxiPositions, (state.activeEvent?.fareMultiplier ?? 1) * cityDemandMultiplier(state.cityEconomies.find((economy) => economy.cityId === city.id)) * (state.worldCondition?.demandMultiplier ?? 1) * marketingDemandMultiplier(state.brandStrategy ?? defaultBrandStrategy) * fareMultiplier(state.brandStrategy?.fareStrategy ?? 'standard') * Math.max(.55, 1 - (state.competitors ?? []).filter((competitor) => competitor.relationship === 'rival').reduce((sum, competitor) => sum + competitor.marketShare, 0) / 200), unlockedTerritoryCenters(state))
       set((latest) => {

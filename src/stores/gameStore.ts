@@ -53,7 +53,11 @@ const hasFleetSlot = (state: Pick<GameState, 'company' | 'garageLevel' | 'vehicl
   Boolean(state.company && state.vehicles.length < fleetSlotCapacity(state.company.level, state.garageLevel ?? 0, state.branches) + researchFleetSlots(state))
 const unlockedTerritoryCenters = (state: Pick<GameState, 'branches' | 'territoryExpansions'>): VillageTerritoryCenter[] => [
   ...state.branches.flatMap((branch) => branch.coordinates ? [{ id: branch.id, coordinates: branch.coordinates }] : []),
-  ...(state.territoryExpansions ?? []).map(({ id, coordinates, source, radiusKm }) => ({ id, coordinates, source: source === 'taxi-discovery' ? source : 'village', radiusKm })),
+  // Travel traces are a live map record, not permission to dispatch work
+  // outside territory bought by the player.
+  ...(state.territoryExpansions ?? [])
+    .filter((area) => area.source !== 'taxi-discovery')
+    .map(({ id, coordinates }) => ({ id, coordinates, source: 'village' })),
 ]
 const discoveryCheckpoints = (job: TaxiJob, start?: Coordinates) => {
   const route = [start, jobPickup(job), ...(job.routeCoordinates ?? [jobDestination(job)])].filter((point): point is Coordinates => Boolean(point))
@@ -199,9 +203,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     set({ jobsLoading: true, jobsError: null })
     try {
       const level = levelForReputation(state.company?.reputation ?? 0)
-      // Search from the roaming taxi rather than its original station so its
-      // newly discovered corridor can continue growing beyond village borders.
-      const searchArea = { ...city, coordinates: availableTaxi.position ?? city.coordinates }
+      const searchArea = city
       const taxis = state.vehicles.filter((vehicle) => vehicle.type === 'taxi')
       const taxiPositions = taxis.filter((vehicle) => vehicle.status === 'available' && vehicle.cityId === city.id).map((vehicle) => vehicle.position ?? city.coordinates)
       const maxDistanceKm = maxJobDistanceForFleet(level, taxis.length) * (hasResearch(state.completedResearch ?? [], 'predictive-demand') ? 1.25 : 1)
@@ -227,7 +229,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     set({ jobsLoading: true, jobsError: null })
     try {
       const level = levelForReputation(state.company?.reputation ?? 0)
-      const searchArea = { ...city, coordinates: availableTaxi.position ?? city.coordinates }
+      const searchArea = city
       const taxis = state.vehicles.filter((vehicle) => vehicle.type === 'taxi')
       const taxiPositions = taxis.filter((vehicle) => vehicle.status === 'available' && vehicle.cityId === city.id).map((vehicle) => vehicle.position ?? city.coordinates)
       const maxDistanceKm = maxJobDistanceForFleet(level, taxis.length) * (hasResearch(state.completedResearch ?? [], 'predictive-demand') ? 1.25 : 1)

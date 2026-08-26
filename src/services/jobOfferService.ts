@@ -5,7 +5,9 @@ import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 import { addJobsToJobJson, jobRouteSignature, readJobJson, type StoredJobRoute } from './jobJsonService'
 import { isInsideTerritoryFeatures, resolveVillageTerritories, type VillageTerritoryCenter } from './territoryGeometry'
 
-export const MIN_JOB_DISTANCE_KM = 6
+// Short local trips keep the board useful even when the player's first owned
+// village has a compact administrative boundary.
+export const MIN_JOB_DISTANCE_KM = 1
 /** Prefer nearby calls, but do not stop generating work after those routes are exhausted. */
 export const PREFERRED_PICKUP_DISTANCE_KM = 5
 
@@ -218,6 +220,7 @@ export async function generateJobOffers(
       const pickupDistanceKm = Math.min(...taxiPositions.map((position) => distanceKmBetween(position, pickup.coordinates)))
       if (pickup.id !== destination.id &&
         isUnlocked(pickup.coordinates) &&
+        isUnlocked(destination.coordinates) &&
         pickupDistanceKm <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, pickup.coordinates) <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, destination.coordinates) <= maxDistanceKm &&
@@ -243,6 +246,7 @@ export async function generateJobOffers(
       const signature = jobRouteSignature(stored.pickupLabel, stored.destinationLabel)
       return stored.cityId === city.id && !excluded.has(signature) &&
         isUnlocked(stored.pickup) &&
+        isUnlocked(stored.destination) &&
         taxiPositions.some((position) => distanceKmBetween(position, stored.pickup) <= maxDistanceKm) &&
         distanceKmBetween(city.coordinates, stored.pickup) <= maxDistanceKm &&
         distanceKmBetween(city.coordinates, stored.destination) <= maxDistanceKm &&
@@ -260,9 +264,11 @@ export async function generateJobOffers(
       ? { pickupRoad: route.stored.pickupRoad ?? route.pickup.coordinates, destinationRoad: route.stored.destinationRoad ?? route.destination.coordinates, routeCoordinates: route.stored.routeCoordinates ?? [route.stored.pickup, route.stored.destination] }
       : await roadStops(route.pickup.coordinates, route.destination.coordinates, signal)
     if (!stops) continue
-    // Calls begin in discovered land, while their journeys may explore beyond it.
-    // Completion permanently claims a two-kilometre corridor for later calls.
-    if (!isUnlocked(stops.pickupRoad)) continue
+    // Mapbox can snap either stop onto a different side of a border and a road
+    // route can leave the owned area even when both searched POIs are inside it.
+    // Reject both cases so dispatch never sends a taxi through locked land.
+    if (!isUnlocked(stops.pickupRoad) || !isUnlocked(stops.destinationRoad) ||
+      !stops.routeCoordinates.every(isUnlocked)) continue
     resolvedRoutes.push({ ...route, stops })
     if (resolvedRoutes.length >= count) break
   }

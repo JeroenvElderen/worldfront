@@ -102,6 +102,18 @@ export const mergeVillageTerritories = (territories: TerritoryFeature[]) => {
   return union(featureCollection(territories)) ?? null
 }
 
+/**
+ * Fold completed taxi discoveries into the owned territory geometry. The map
+ * renders only this combined result, never the individual discovery buffers.
+ */
+export const appendDiscoveriesToTerritory = (
+  ownedTerritories: TerritoryFeature[],
+  discoveries: Array<{ id: string; coordinates: Coordinates; radiusKm?: number }>,
+) => mergeVillageTerritories([
+  ...ownedTerritories,
+  ...discoveries.map((discovery) => taxiDiscoveryTerritory(discovery.id, discovery.coordinates, discovery.radiusKm)),
+])
+
 /** True when a location belongs to at least one purchased village territory. */
 export const isInsideVillageTerritories = (coordinates: Coordinates, centers: VillageTerritoryCenter[]) =>
   centers.some((center) => booleanPointInPolygon(

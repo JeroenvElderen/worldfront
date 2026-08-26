@@ -31,7 +31,7 @@ export default function App() {
   const activeCity = getCity(game.activeCityId ?? game.startingCityId, game.customCities ?? [])
   const money = moneyFormatterForCity(activeCity)
   const territoryExpansionPrice = territoryExpansionCost === 0 ? 'Free' : money.format(territoryExpansionCost)
-  const territoryProgressMessage = 'Taxi journeys permanently discover a 2 km corridor; villages unlock instantly.'
+  const territoryProgressMessage = 'Completed taxi journeys retrace their route and expand your territory border; villages unlock instantly.'
   const stationBuildMessage = !game.company || game.company.level < 2
     ? 'Building a separate station becomes available at level 2'
     : stationFleetFull
@@ -305,7 +305,6 @@ export default function App() {
         placingTerritory={placingTerritory}
         onBuildStation={(coordinates) => { game.buildStation(coordinates); setPlacingStation(false) }}
         onExpandTerritory={(coordinates) => { game.expandTerritory(coordinates); setPlacingTerritory(false) }}
-        onDiscoverTaxiTerritory={game.discoverTaxiTerritory}
         onOpenJob={game.openJob}
       />
 

@@ -5,13 +5,14 @@ import { featureCollection, lineString, point } from '@turf/helpers'
 import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, worldOverview } from '../data/cities'
 import { taxiModels } from '../data/taxis'
-import type { Branch, Coordinates, TaxiJob, Vehicle } from '../models/game'
+import type { Branch, Coordinates, TaxiJob, TerritoryExpansion, Vehicle } from '../models/game'
 import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
 import { lockedTerritoryMask, mergeVillageTerritories, villageTerritory } from '../services/territoryGeometry'
 
-interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; serviceRadiusKm: number; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; placingStation: boolean; onBuildStation: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void }
+interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; territoryExpansions: TerritoryExpansion[]; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void }
+const VILLAGE_TERRITORY_RADIUS_KM = 6
 const token = mapboxAccessToken
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
@@ -97,7 +98,7 @@ const missionColor = (jobId: string) => {
   return `hsl(${hash % 360}, 100%, 60%)`
 }
 
-function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles, jobs, focusedJobId, placingStation, onBuildStation, onOpenJob }: GameMapProps) {
+function GameMapView({ cityId, customCities, branches, territoryExpansions, vehicles, jobs, focusedJobId, placingStation, placingTerritory, onBuildStation, onExpandTerritory, onOpenJob }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const pickupJobIds = useRef(new Set<string>())
@@ -109,14 +110,15 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
   useEffect(() => {
     const instance = map.current
     if (!instance) return
-    instance.getCanvas().classList.toggle('placing-depot', placingStation)
+    instance.getCanvas().classList.toggle('placing-depot', placingStation || placingTerritory)
     const handlePlacement = (event: mapboxgl.MapMouseEvent) => {
-      if (!placingStation) return
-      onBuildStation([event.lngLat.lng, event.lngLat.lat])
+      const coordinates: Coordinates = [event.lngLat.lng, event.lngLat.lat]
+      if (placingStation) onBuildStation(coordinates)
+      else if (placingTerritory) onExpandTerritory(coordinates)
     }
     instance.on('click', handlePlacement)
     return () => { instance.off('click', handlePlacement); instance.getCanvas().classList.remove('placing-depot') }
-  }, [placingStation, onBuildStation])
+  }, [placingStation, placingTerritory, onBuildStation, onExpandTerritory])
 
   useEffect(() => {
     if (!container.current) return
@@ -407,7 +409,10 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
       })
       const features = stationCoordinates.map(({ station, coordinates }) => point(coordinates, { name: station.name }))
       const data = featureCollection(features)
-      const territories = stationCoordinates.map(({ station, coordinates }) => villageTerritory(station.id, coordinates, serviceRadiusKm))
+      const territories = [
+        ...stationCoordinates.map(({ station, coordinates }) => villageTerritory(station.id, coordinates, VILLAGE_TERRITORY_RADIUS_KM)),
+        ...territoryExpansions.map((expansion) => villageTerritory(expansion.id, expansion.coordinates, VILLAGE_TERRITORY_RADIUS_KM)),
+      ]
       const unlockedTerritory = mergeVillageTerritories(territories)
       const coverageData = featureCollection(unlockedTerritory ? [unlockedTerritory] : [])
       const lockedData = featureCollection([lockedTerritoryMask(unlockedTerritory)])
@@ -427,7 +432,7 @@ function GameMapView({ cityId, customCities, branches, serviceRadiusKm, vehicles
     if (instance.isStyleLoaded()) updateDepots()
     else instance.once('load', updateDepots)
     return () => { instance.off('load', updateDepots) }
-  }, [branches, customCities, mapRevision, serviceRadiusKm])
+  }, [branches, customCities, mapRevision, territoryExpansions])
 
   useEffect(() => {
     const instance = map.current

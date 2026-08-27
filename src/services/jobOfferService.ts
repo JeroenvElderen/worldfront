@@ -20,6 +20,9 @@ interface MapboxPlace { id: string; name: string; coordinates: Coordinates }
 const mapboxToken = mapboxAccessToken
 const RANDOM_LOCATIONS_PER_OFFER = 32
 
+// New jobs should begin close to the taxi that generated the offer.
+export const MAX_PICKUP_DISTANCE_KM = 2
+
 const isCoordinates = (value: unknown): value is Coordinates =>
   Array.isArray(value) && value.length >= 2 && value.slice(0, 2).every((part) => typeof part === 'number' && Number.isFinite(part))
 
@@ -88,6 +91,60 @@ const randomTerritoryLocations = (city: City, territories: TerritoryFeature[], c
   })
 }
 
+/** Generate pickup candidates close to the taxi requesting work. */
+const randomNearbyPickupLocations = (
+  city: City,
+  isUnlocked: (coordinates: Coordinates) => boolean,
+  count: number,
+): MapboxPlace[] => {
+  const locations: MapboxPlace[] = []
+
+  const [longitude, latitude] = city.coordinates
+
+  const latitudeKmPerDegree = 111.32
+  const longitudeKmPerDegree =
+    111.32 *
+    Math.max(
+      0.1,
+      Math.cos(latitude * Math.PI / 180),
+    )
+
+  const maxAttempts = Math.max(500, count * 100)
+
+  for (
+    let attempt = 0;
+    attempt < maxAttempts && locations.length < count;
+    attempt += 1
+  ) {
+    const distanceKm =
+      Math.sqrt(Math.random()) * MAX_PICKUP_DISTANCE_KM
+
+    const angle = Math.random() * Math.PI * 2
+
+    const candidate: Coordinates = [
+      longitude +
+        Math.cos(angle) *
+          distanceKm /
+          longitudeKmPerDegree,
+
+      latitude +
+        Math.sin(angle) *
+          distanceKm /
+          latitudeKmPerDegree,
+    ]
+
+    if (!isUnlocked(candidate)) continue
+
+    locations.push({
+      id: `pickup-location:${city.id}:${crypto.randomUUID()}`,
+      name: `Pickup ${locations.length + 1} in ${city.name}`,
+      coordinates: candidate,
+    })
+  }
+
+  return locations
+}
+
 const shuffled = <T,>(values: T[]) => values
   .map((value) => ({ value, order: Math.random() }))
   .sort((left, right) => left.order - right.order)
@@ -112,20 +169,55 @@ export async function generateJobOffers(
   let routes: Array<{ pickup: MapboxPlace; destination: MapboxPlace; distanceKm: number; signature: string; stored?: StoredJobRoute }>
   try {
     signal?.throwIfAborted()
-    const places = randomTerritoryLocations(city, ownedTerritories, Math.max(64, count * RANDOM_LOCATIONS_PER_OFFER))
-    const uniqueRoutes = new Map<string, (typeof routes)[number]>()
-    for (const pickup of places) for (const destination of places) {
-      const distanceKm = Math.round(distanceKmBetween(pickup.coordinates, destination.coordinates) * 10) / 10
-      const signature = jobRouteSignature(pickup.name, destination.name)
-      if (pickup.id !== destination.id &&
-        isUnlocked(pickup.coordinates) &&
-        isUnlocked(destination.coordinates) &&
-        distanceKm >= MIN_JOB_DISTANCE_KM && distanceKm <= maxDistanceKm &&
-        !excluded.has(signature) && !uniqueRoutes.has(signature)) {
-        uniqueRoutes.set(signature, { pickup, destination, distanceKm, signature })
-      }
+    const pickupPlaces = randomNearbyPickupLocations(
+  city,
+  isUnlocked,
+  Math.max(24, count * 12),
+)
+
+const destinationPlaces = randomTerritoryLocations(
+  city,
+  ownedTerritories,
+  Math.max(64, count * RANDOM_LOCATIONS_PER_OFFER),
+)
+
+const uniqueRoutes = new Map<string, (typeof routes)[number]>()
+
+for (const pickup of pickupPlaces) {
+  for (const destination of destinationPlaces) {
+    const distanceKm =
+      Math.round(
+        distanceKmBetween(
+          pickup.coordinates,
+          destination.coordinates,
+        ) * 10,
+      ) / 10
+
+    const signature = jobRouteSignature(
+      pickup.name,
+      destination.name,
+    )
+
+    if (
+      pickup.id !== destination.id &&
+      isUnlocked(pickup.coordinates) &&
+      isUnlocked(destination.coordinates) &&
+      distanceKm >= MIN_JOB_DISTANCE_KM &&
+      distanceKm <= maxDistanceKm &&
+      !excluded.has(signature) &&
+      !uniqueRoutes.has(signature)
+    ) {
+      uniqueRoutes.set(signature, {
+        pickup,
+        destination,
+        distanceKm,
+        signature,
+      })
     }
-    routes = shuffled([...uniqueRoutes.values()])
+  }
+}
+
+routes = shuffled([...uniqueRoutes.values()])
   } catch (error) {
     if ((error as Error).name === 'AbortError') throw error
     // A Mapbox/API error is not proof that the device is offline. Reusing a
@@ -136,9 +228,14 @@ export async function generateJobOffers(
     routes = shuffled(readJobJson().routes.flatMap((stored) => {
       const signature = jobRouteSignature(stored.pickupLabel, stored.destinationLabel)
       return stored.cityId === city.id && !excluded.has(signature) &&
-        isUnlocked(stored.pickup) &&
-        isUnlocked(stored.destination) &&
-        stored.distanceKm >= MIN_JOB_DISTANCE_KM && stored.distanceKm <= maxDistanceKm
+  isUnlocked(stored.pickup) &&
+  isUnlocked(stored.destination) &&
+  stored.distanceKm >= MIN_JOB_DISTANCE_KM &&
+  stored.distanceKm <= maxDistanceKm &&
+  distanceKmBetween(
+    city.coordinates,
+    stored.pickupRoad ?? stored.pickup,
+  ) <= MAX_PICKUP_DISTANCE_KM
         ? [{ pickup: { id: signature, name: stored.pickupLabel, coordinates: stored.pickup }, destination: { id: signature, name: stored.destinationLabel, coordinates: stored.destination }, distanceKm: stored.distanceKm, signature, stored }]
         : []
     })).slice(0, count)
@@ -155,8 +252,25 @@ export async function generateJobOffers(
     // Both stops must remain inside owned territory after Mapbox snaps them onto
     // nearby roads. The route between them may cross locked land; completing
     // that journey is what permanently explores its corridor.
-    if (!isUnlocked(stops.pickupRoad) || !isUnlocked(stops.destinationRoad)) continue
-    resolvedRoutes.push({ ...route, stops })
+    if (
+  !isUnlocked(stops.pickupRoad) ||
+  !isUnlocked(stops.destinationRoad)
+) {
+  continue
+}
+
+// Mapbox can move the generated pickup when snapping it to a road.
+// Reject the route if the actual road pickup becomes too far from the taxi.
+if (
+  distanceKmBetween(
+    city.coordinates,
+    stops.pickupRoad,
+  ) > MAX_PICKUP_DISTANCE_KM
+) {
+  continue
+}
+
+resolvedRoutes.push({ ...route, stops })
     if (resolvedRoutes.length >= count) break
   }
   if (!resolvedRoutes.length) throw new Error('No drivable routes were found. Try refreshing the available jobs.')

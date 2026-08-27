@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { featureCollection, lineString, point } from '@turf/helpers'
@@ -110,8 +110,14 @@ const keepMapFlatAndBuildingFree = (instance: mapboxgl.Map) => {
 // the job, including taxis added after the map was created.
 const vehicleSourceId = (vehicleId: string) => `vehicle-${vehicleId}`
 const jobRouteSourceId = (jobId: string) => `job-route-${jobId}`
+
 const missionColor = (jobId: string) => {
-  const hash = [...jobId].reduce((value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0, 0)
+  const hash = [...jobId].reduce(
+    (value, character) =>
+      ((value * 31) + character.charCodeAt(0)) >>> 0,
+    0,
+  )
+
   return `hsl(${hash % 360}, 100%, 60%)`
 }
 
@@ -359,13 +365,44 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
           instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': mapVehicleColor(vehicle, vehicle.type === 'post' ? vehicleColor.postal : job ? vehicleColor.pickingUp : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available), 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
         }
         if (!job) continue
-        liveJobIds.current.add(job.id)
-        const routeSourceId = jobRouteSourceId(job.id)
-        instance.addSource(routeSourceId, { type: 'geojson', data: lineString([...pickupRoute.coordinates, ...passengerRoute.coordinates.slice(1)]) })
-        instance.addLayer({ id: `${routeSourceId}-glow`, type: 'line', source: routeSourceId, paint: { 'line-color': missionColor(job.id), 'line-width': ROUTE_GLOW_WIDTH, 'line-opacity': .18, 'line-blur': 4 } })
-        instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': missionColor(job.id), 'line-width': 3.5, 'line-opacity': .96 } })
-        instance.moveLayer(routeSourceId, sourceId)
-        instance.moveLayer(`${routeSourceId}-glow`, routeSourceId)
+
+liveJobIds.current.add(job.id)
+
+const routeSourceId = jobRouteSourceId(job.id)
+
+instance.addSource(routeSourceId, {
+  type: 'geojson',
+  data: lineString([
+    ...pickupRoute.coordinates,
+    ...passengerRoute.coordinates.slice(1),
+  ]),
+})
+
+instance.addLayer({
+  id: `${routeSourceId}-glow`,
+  type: 'line',
+  source: routeSourceId,
+  paint: {
+    'line-color': missionColor(job.id),
+    'line-width': ROUTE_GLOW_WIDTH,
+    'line-opacity': .18,
+    'line-blur': 4,
+  },
+})
+
+instance.addLayer({
+  id: routeSourceId,
+  type: 'line',
+  source: routeSourceId,
+  paint: {
+    'line-color': missionColor(job.id),
+    'line-width': 3.5,
+    'line-opacity': .96,
+  },
+})
+
+instance.moveLayer(routeSourceId, sourceId)
+instance.moveLayer(`${routeSourceId}-glow`, routeSourceId)
         const journey = getJobJourney(job, vehicle)
         let animationTimer: number | undefined
         let lastRouteUpdateAt = 0
@@ -405,8 +442,22 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
           instance.setPaintProperty(sourceId, 'circle-color', mapVehicleColor(vehicle, pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger))
           if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
           instance.triggerRepaint()
-          if (now < journey.arrivesAt) scheduleAnimation()
-          else animationRunners.delete(animate)
+          if (now < journey.arrivesAt) {
+            scheduleAnimation()
+          } else {
+            animationRunners.delete(animate)
+
+            if(!arrivedJobIds.current.has(job.id)) {
+              arrivedJobIds.current.add(job.id)
+
+              console.debug('[taxi] arrived; settling job and territory', {
+                jobId: job.id,
+                routeCoordinates: passengerRoute.coordinates.length,
+              })
+
+              onTaxiArrived(job.id)
+            }
+          }
         }
         animationRunners.add(animate)
         animate()
@@ -466,19 +517,20 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
   // Sheets and dashboards are layered over the persistent map. Re-measure on
   // every view transition so returning to Map/Dispatch cannot expose a stale
   // Android WebView canvas, without recreating the Mapbox instance.
-  useLayoutEffect(() => {
+  useEffect(() => {
     const instance = map.current
     if (!instance) return
-    // Apply the new viewport before React paints the dismissed sheet. The
-    // follow-up frame handles any delayed Android WebView layout adjustment.
-    instance.resize()
-    instance.triggerRepaint()
+    
     const frame = window.requestAnimationFrame(() => {
       if (map.current !== instance) return
+
       instance.resize()
       instance.triggerRepaint()
     })
-    return () => window.cancelAnimationFrame(frame)
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+    }
   }, [layoutKey])
 
   useEffect(() => {
@@ -522,21 +574,9 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
       const lockedSource = instance.getSource('locked-territory') as mapboxgl.GeoJSONSource | undefined
       if (source && coverageSource && lockedSource) {
         source.setData(data)
-        // Android WebViews can leave setData queued in Mapbox's GeoJSON worker
-        // until the map is reconstructed. Replace the two territory sources
-        // immediately so every completed fare is handled like initial map
-        // setup, while leaving routes and vehicle markers untouched.
-        for (const layerId of ['service-coverage-line', 'service-coverage-fill', 'locked-territory-fill']) {
-          if (instance.getLayer(layerId)) instance.removeLayer(layerId)
-        }
-        instance.removeSource('service-coverage')
-        instance.removeSource('locked-territory')
-        instance.addSource('locked-territory', { type: 'geojson', data: lockedData })
-        instance.addLayer({ id: 'locked-territory-fill', type: 'fill', source: 'locked-territory', paint: { 'fill-color': '#ef7777', 'fill-opacity': .24 } })
-        instance.addSource('service-coverage', { type: 'geojson', data: coverageData })
-        instance.addLayer({ id: 'service-coverage-fill', type: 'fill', source: 'service-coverage', paint: { 'fill-color': '#19cdb3', 'fill-opacity': 0 } })
-        instance.addLayer({ id: 'service-coverage-line', type: 'line', source: 'service-coverage', paint: { 'line-color': '#5eead4', 'line-width': 2, 'line-opacity': .85 } })
-        instance.resize()
+        coverageSource.setData(coverageData)
+        lockedSource.setData(lockedData)
+
         instance.triggerRepaint()
         return
       }
@@ -553,43 +593,83 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
       instance.addLayer({ id: 'depot-network-label', type: 'symbol', source: 'depot-network', minzoom: 8, layout: { 'text-field': ['get', 'name'], 'text-size': 10, 'text-offset': [0, 1.4], 'text-anchor': 'top', 'text-allow-overlap': false }, paint: { 'text-color': '#ffffff', 'text-halo-color': '#10201f', 'text-halo-width': 2 } })
       instance.triggerRepaint()
     }
-    if (instance.isStyleLoaded()) updateDepots()
-    else instance.once('load', updateDepots)
-    return () => { instance.off('load', updateDepots) }
+    let cancelled = false
+    let applied = false
+
+    const applyTerritoryUpdate = () => {
+      if (cancelled || applied || map.current !== instance) return
+
+      try {
+        if (!instance.isStyleLoaded()) return
+
+        updateDepots()
+        applied = true
+
+        instance.off('styledata', applyTerritoryUpdate)
+        instance.off('idle', applyTerritoryUpdate)
+      } catch (error) {
+        if (import.meta.env.DEV) {
+          console.warn('[GameMap] Territory update delayed', error)
+        }
+      }
+    }
+
+    applyTerritoryUpdate()
+
+    if (!applied) {
+      instance.on('styledata', applyTerritoryUpdate)
+      instance.on('idle', applyTerritoryUpdate)
+    }
+
+    return () => {
+      cancelled = true
+      instance.off('styledata', applyTerritoryUpdate)
+      instance.off('idle', applyTerritoryUpdate)
+    }
   }, [branches, customCities, territoryExpansions, mapRevision, realTerritories])
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const instance = map.current
     if (!instance?.isStyleLoaded()) return
-    // Closing the calls sheet changes the map viewport on mobile. Resize before
-    // adding the accepted route so Mapbox never presents a stale/black frame.
-    window.requestAnimationFrame(() => {
-      if (map.current !== instance) return
-      instance.resize()
-      instance.triggerRepaint()
-    })
     const selected = getCity(cityId, customCities)
 
     // Fleet purchases no longer require a map reconstruction. Add any new
     // vehicle source and layer directly to the live style.
     vehicles.forEach((vehicle) => {
-      const sourceId = vehicleSourceId(vehicle.id)
-      if (instance.getSource(sourceId)) return
-      const position = vehicle.position ?? selected?.coordinates
-      if (!position) return
-      instance.addSource(sourceId, { type: 'geojson', data: point(position) })
-      instance.addLayer({
-        id: sourceId,
-        type: 'circle',
-        source: sourceId,
-        paint: {
-          'circle-radius': VEHICLE_MARKER_RADIUS,
-          'circle-color': mapVehicleColor(vehicle, vehicle.type === 'post' ? vehicleColor.postal : vehicle.type === 'rental' ? vehicleColor.rental : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available),
-          'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH,
-          'circle-stroke-color': '#ffffff',
-        },
-      })
+  const sourceId = vehicleSourceId(vehicle.id)
+
+  if (!instance.getSource(sourceId)) {
+    const position = vehicle.position ?? selected?.coordinates
+    if (!position) return
+
+    instance.addSource(sourceId, {
+      type: 'geojson',
+      data: point(position),
     })
+
+    instance.addLayer({
+      id: sourceId,
+      type: 'circle',
+      source: sourceId,
+      paint: {
+        'circle-radius': VEHICLE_MARKER_RADIUS,
+        'circle-color': mapVehicleColor(
+          vehicle,
+          vehicle.type === 'post'
+            ? vehicleColor.postal
+            : vehicle.type === 'rental'
+              ? vehicleColor.rental
+              : vehicle.status === 'maintenance'
+                ? vehicleColor.maintenance
+                : vehicleColor.available,
+        ),
+        'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH,
+        'circle-stroke-color': '#ffffff',
+      },
+    })
+  }
+})
+
     // Keep accepted calls and the offer currently being previewed legible
     // without cluttering the map with every dispatch-board offer.
     const visibleJobs = jobs.filter((job) => job.status === 'accepted' || job.id === focusedJobId)
@@ -643,27 +723,83 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
       const start = vehicle.position ?? getCity(cityId, customCities)?.coordinates
       if (!start) continue
       const taxiSourceId = vehicleSourceId(vehicle.id)
-      const routeSourceId = jobRouteSourceId(job.id)
-      if (!instance.getSource(routeSourceId)) {
-        instance.addSource(routeSourceId, { type: 'geojson', data: lineString([start, ...(job.routeCoordinates ?? [jobPickup(job), jobDestination(job)])]) })
-        instance.addLayer({ id: `${routeSourceId}-glow`, type: 'line', source: routeSourceId, paint: { 'line-color': missionColor(job.id), 'line-width': ROUTE_GLOW_WIDTH, 'line-opacity': .18, 'line-blur': 4 } })
-        instance.addLayer({ id: routeSourceId, type: 'line', source: routeSourceId, paint: { 'line-color': missionColor(job.id), 'line-width': 3.5, 'line-opacity': .96 } })
-        if (instance.getLayer(taxiSourceId)) {
-          instance.moveLayer(routeSourceId, taxiSourceId)
-          instance.moveLayer(`${routeSourceId}-glow`, routeSourceId)
-        }
-      }
-      if (instance.getLayer(taxiSourceId)) instance.setPaintProperty(taxiSourceId, 'circle-color', mapVehicleColor(vehicle, vehicleColor.pickingUp))
-      const passengerSourceId = `pickup-${job.id}`
-      if (instance.getLayer(passengerSourceId) && instance.getLayer(taxiSourceId)) {
-        // Once assigned, the pickup dot becomes a passenger halo. Keep it
-        // underneath the vehicle dot so the fleet marker stays clear.
-        instance.setPaintProperty(passengerSourceId, 'circle-radius', VEHICLE_MARKER_RADIUS + 3)
-        instance.setPaintProperty(passengerSourceId, 'circle-opacity', .45)
-        instance.setPaintProperty(passengerSourceId, 'circle-stroke-width', 0)
-        instance.moveLayer(passengerSourceId, taxiSourceId)
-      }
-      if (liveJobIds.current.has(job.id)) continue
+
+// Already running: don't touch its Mapbox route again.
+if (liveJobIds.current.has(job.id)) continue
+
+const routeSourceId = jobRouteSourceId(job.id)
+
+instance.addSource(routeSourceId, {
+  type: 'geojson',
+  data: lineString([
+    start,
+    ...(job.routeCoordinates ?? [
+      jobPickup(job),
+      jobDestination(job),
+    ]),
+  ]),
+})
+
+instance.addLayer({
+  id: `${routeSourceId}-glow`,
+  type: 'line',
+  source: routeSourceId,
+  paint: {
+    'line-color': missionColor(job.id),
+    'line-width': ROUTE_GLOW_WIDTH,
+    'line-opacity': .18,
+    'line-blur': 4,
+  },
+})
+
+instance.addLayer({
+  id: routeSourceId,
+  type: 'line',
+  source: routeSourceId,
+  paint: {
+    'line-color': missionColor(job.id),
+    'line-width': 3.5,
+    'line-opacity': .96,
+  },
+})
+
+if (instance.getLayer(taxiSourceId)) {
+  instance.moveLayer(routeSourceId, taxiSourceId)
+  instance.moveLayer(`${routeSourceId}-glow`, routeSourceId)
+
+  instance.setPaintProperty(
+    taxiSourceId,
+    'circle-color',
+    mapVehicleColor(vehicle, vehicleColor.pickingUp),
+  )
+}
+
+const passengerSourceId = `pickup-${job.id}`
+
+if (
+  instance.getLayer(passengerSourceId) &&
+  instance.getLayer(taxiSourceId)
+) {
+  instance.setPaintProperty(
+    passengerSourceId,
+    'circle-radius',
+    VEHICLE_MARKER_RADIUS + 3,
+  )
+
+  instance.setPaintProperty(
+    passengerSourceId,
+    'circle-opacity',
+    .45,
+  )
+
+  instance.setPaintProperty(
+    passengerSourceId,
+    'circle-stroke-width',
+    0,
+  )
+
+  instance.moveLayer(passengerSourceId, taxiSourceId)
+}
 
       liveJobIds.current.add(job.id)
       const journey = getJobJourney(job, vehicle)
@@ -750,11 +886,30 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
       taxiSource?.setData(point(jobDestination(job)))
       if (instance.getLayer(sourceId)) instance.setPaintProperty(sourceId, 'circle-color', mapVehicleColor(vehicle, vehicleColor.available))
       const routeSourceId = jobRouteSourceId(job.id)
-      if (instance.getLayer(routeSourceId)) instance.removeLayer(routeSourceId)
-      if (instance.getLayer(`${routeSourceId}-glow`)) instance.removeLayer(`${routeSourceId}-glow`)
-      if (instance.getSource(routeSourceId)) instance.removeSource(routeSourceId)
+
+if (instance.getLayer(`${routeSourceId}-glow`)) {
+  instance.removeLayer(`${routeSourceId}-glow`)
+}
+
+if (instance.getLayer(routeSourceId)) {
+  instance.removeLayer(routeSourceId)
+}
+
+if (instance.getSource(routeSourceId)) {
+  instance.removeSource(routeSourceId)
+}
     }
-  }, [cityId, customCities, focusedJobId, jobs, vehicles, mapRevision, onOpenJob, onSaveJobPickupRoute, onTaxiArrived])
+  }, [
+    cityId,
+    customCities,
+    focusedJobId,
+    jobs,
+    vehicles,
+    mapRevision,
+    onOpenJob,
+    onSaveJobPickupRoute,
+    onTaxiArrived,
+  ])
 
   // Recovery trips can begin long after Mapbox was constructed. Animate them
   // in their own synchronized effect so a newly tired driver drives away

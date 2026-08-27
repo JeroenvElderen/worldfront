@@ -7,7 +7,10 @@ import { getPostVehicleModel } from '../data/postVehicles'
 import type { BrandStrategy, City, Company, Coordinates, DepotFacility, Difficulty, Driver, DriverCertification, ExteriorAccessory, FinancialTransaction, GameSave, RefuelStrategy, ResearchId, Specialization, TaxiJob, TerritoryExpansion, TransactionCategory, TransportMode, Vehicle, VehicleUpgrade } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
 import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
-import { generateJobOffers } from '../services/jobOfferService'
+import {
+  generateJobOffers,
+  MAX_PICKUP_DISTANCE_KM,
+} from '../services/jobOfferService'
 import { acceptJobState, completeArrivedJobsState, completeJobState, distanceKmBetween, getJobJourney, jobDestination, jobOfferExpiresAt, jobPickup, MAX_JOB_OFFERS } from '../services/jobEngine'
 import { createDynamicEvent, energyUseForJob, fatigueUseForJob, OVERNIGHT_STAY_COST, startRecoveryTrip } from '../services/operationsEngine'
 import { nextMonthlyPaymentAt } from '../services/gameTime'
@@ -49,6 +52,65 @@ const jobGeneratingTaxis = (state: Pick<GameState, 'vehicles' | 'drivers' | 'job
   return (vehicle.status === 'available' && driver?.status === 'available') ||
     (vehicle.status === 'on-job' && driver?.status === 'driving' && state.jobs.some((job) => job.status === 'accepted' && job.assignedVehicleId === vehicle.id))
 })
+
+const selectJobGenerationTaxi = (
+  state: Pick<
+    GameState,
+    'vehicles' | 'drivers' | 'jobs' | 'customCities'
+  >,
+) => {
+  const taxis = jobGeneratingTaxis(state)
+
+  if (!taxis.length) return undefined
+
+  const scoredTaxis = taxis.map((vehicle) => {
+    const city = getCity(vehicle.cityId, state.customCities)
+
+    const fallback =
+      vehicle.position ??
+      city?.coordinates
+
+    if (!fallback) {
+      return {
+        vehicle,
+        nearbyJobs: Number.POSITIVE_INFINITY,
+      }
+    }
+
+    const position = taxiJobGenerationPosition(
+      state,
+      vehicle,
+      fallback,
+    )
+
+    const nearbyJobs = state.jobs.filter(
+      (job) =>
+        job.status === 'offered' &&
+        distanceKmBetween(
+          position,
+          jobPickup(job),
+        ) <= MAX_PICKUP_DISTANCE_KM * 1.5,
+    ).length
+
+    return {
+      vehicle,
+      nearbyJobs,
+    }
+  })
+
+  const fewestJobs = Math.min(
+    ...scoredTaxis.map((item) => item.nearbyJobs),
+  )
+
+  const candidates = scoredTaxis.filter(
+    (item) => item.nearbyJobs === fewestJobs,
+  )
+
+  return candidates[
+    Math.floor(Math.random() * candidates.length)
+  ]?.vehicle
+}
+
 const fitOffersToAvailableTaxis = (jobs: GameSave['jobs'], taxiCount: number) => {
   let offersKept = 0
   return jobs.filter((job) => job.status !== 'offered' || offersKept++ < taxiCount)
@@ -188,8 +250,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
   }),
   refreshJobs: async () => {
     const state = useGameStore.getState()
-    const generationTaxi = jobGeneratingTaxis(state)
-      .sort((left, right) => state.jobs.filter((job) => job.status === 'offered' && job.cityId === left.cityId).length - state.jobs.filter((job) => job.status === 'offered' && job.cityId === right.cityId).length)[0]
+const generationTaxi = selectJobGenerationTaxi(state)
     if (!(state.activeCityId ?? state.startingCityId) || state.jobsLoading || !generationTaxi) return
     const city = getCity(generationTaxi.cityId, state.customCities)
     if (!city) return
@@ -213,41 +274,313 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     }
   },
   addRandomJob: async () => {
-    const state = useGameStore.getState()
-    const generationTaxi = jobGeneratingTaxis(state)
-      .sort((left, right) => state.jobs.filter((job) => job.status === 'offered' && job.cityId === left.cityId).length - state.jobs.filter((job) => job.status === 'offered' && job.cityId === right.cityId).length)[0]
-    const offeredCount = state.jobs.filter((job) => job.status === 'offered').length
-    const targetOfferCount = Math.min(MAX_JOB_OFFERS, availableJobOfferCapacity(state))
-    if (!(state.activeCityId ?? state.startingCityId) || state.jobsLoading || !generationTaxi || offeredCount >= targetOfferCount) return
-    const city = getCity(generationTaxi.cityId, state.customCities)
-    if (!city) return
-    set({ jobsLoading: true, jobsError: null })
-    try {
-      const level = levelForReputation(state.company?.reputation ?? 0)
-      const searchArea = { ...city, coordinates: taxiJobGenerationPosition(state, generationTaxi, city.coordinates) }
-      const taxis = state.vehicles.filter((vehicle) => vehicle.type === 'taxi')
-      const maxDistanceKm = maxJobDistanceForFleet(level, taxis.length) * (hasResearch(state.completedResearch ?? [], 'predictive-demand') ? 1.25 : 1)
+  const state = useGameStore.getState()
+
+  const offeredCount = state.jobs.filter(
+    (job) => job.status === 'offered',
+  ).length
+
+  const targetOfferCount = Math.min(
+    MAX_JOB_OFFERS,
+    availableJobOfferCapacity(state),
+  )
+
+  const slotsRemaining = targetOfferCount - offeredCount
+
+  const generationTaxis = jobGeneratingTaxis(state)
+
+  if (
+    !(state.activeCityId ?? state.startingCityId) ||
+    state.jobsLoading ||
+    !generationTaxis.length ||
+    slotsRemaining <= 0
+  ) {
+    return
+  }
+
+  set({
+    jobsLoading: true,
+    jobsError: null,
+  })
+
+  try {
+    const level = levelForReputation(
+      state.company?.reputation ?? 0,
+    )
+
+    const taxis = state.vehicles.filter(
+      (vehicle) => vehicle.type === 'taxi',
+    )
+
+    const maxDistanceKm =
+      maxJobDistanceForFleet(level, taxis.length) *
+      (
+        hasResearch(
+          state.completedResearch ?? [],
+          'predictive-demand',
+        )
+          ? 1.25
+          : 1
+      )
+
+    const territoryCenters = unlockedTerritoryCenters(state)
+
+    /*
+     * Give priority to taxis that currently have the fewest
+     * offered jobs near them.
+     */
+    const orderedTaxis = [...generationTaxis].sort(
+      (left, right) => {
+        const countNearbyJobs = (vehicle: Vehicle) => {
+          const city = getCity(
+            vehicle.cityId,
+            state.customCities,
+          )
+
+          const fallback =
+            vehicle.position ??
+            city?.coordinates
+
+          if (!fallback) {
+            return Number.POSITIVE_INFINITY
+          }
+
+          const position = taxiJobGenerationPosition(
+            state,
+            vehicle,
+            fallback,
+          )
+
+          return state.jobs.filter(
+            (job) =>
+              job.status === 'offered' &&
+              distanceKmBetween(
+                position,
+                jobPickup(job),
+              ) <= MAX_PICKUP_DISTANCE_KM * 1.5,
+          ).length
+        }
+
+        return (
+          countNearbyJobs(left) -
+          countNearbyJobs(right)
+        )
+      },
+    )
+
+    const generatedBatches: Awaited<
+      ReturnType<typeof generateJobOffers>
+    >[] = []
+
+    const generatedSignatures: string[] = []
+
+    const generatedPerCity = new Map<string, number>()
+
+    let lastGenerationError: unknown = null
+
+    /*
+     * Generate at most ONE job around each taxi.
+     *
+     * Taxi A -> one pickup near Taxi A
+     * Taxi B -> one pickup near Taxi B
+     * Taxi C -> one pickup near Taxi C
+     */
+    for (const generationTaxi of orderedTaxis) {
+      if (generatedBatches.length >= slotsRemaining) {
+        break
+      }
+
+      const city = getCity(
+        generationTaxi.cityId,
+        state.customCities,
+      )
+
+      if (!city) continue
+
       const cityCapacity = availableJobOfferCapacity({
-        vehicles: state.vehicles.filter((vehicle) => vehicle.cityId === city.id),
+        vehicles: state.vehicles.filter(
+          (vehicle) => vehicle.cityId === city.id,
+        ),
         drivers: state.drivers,
       })
-      const cityOfferedCount = state.jobs.filter((job) => job.status === 'offered' && job.cityId === city.id).length
-      const offersToGenerate = Math.min(targetOfferCount - offeredCount, Math.max(0, cityCapacity - cityOfferedCount))
-      if (!offersToGenerate) {
-        set({ jobsLoading: false })
-        return
+
+      const existingCityOffers = state.jobs.filter(
+        (job) =>
+          job.status === 'offered' &&
+          job.cityId === city.id,
+      ).length
+
+      const alreadyGenerated =
+        generatedPerCity.get(city.id) ?? 0
+
+      if (
+        existingCityOffers + alreadyGenerated >=
+        cityCapacity
+      ) {
+        continue
       }
-      const generated = await generateJobOffers(searchArea, offersToGenerate, state.jobRequestHistory ?? [], maxDistanceKm, undefined, (state.activeEvent?.fareMultiplier ?? 1) * cityDemandMultiplier(state.cityEconomies.find((economy) => economy.cityId === city.id)) * (state.worldCondition?.demandMultiplier ?? 1) * marketingDemandMultiplier(state.brandStrategy ?? defaultBrandStrategy) * fareMultiplier(state.brandStrategy?.fareStrategy ?? 'standard') * Math.max(.55, 1 - (state.competitors ?? []).filter((competitor) => competitor.relationship === 'rival').reduce((sum, competitor) => sum + competitor.marketShare, 0) / 200), unlockedTerritoryCenters(state))
-      set((latest) => {
-        const openSlots = Math.max(0, availableJobOfferCapacity(latest) - latest.jobs.filter((job) => job.status === 'offered').length)
-        const acceptedJobs = generated.jobs.slice(0, openSlots)
-        const acceptedPassengerIds = new Set(acceptedJobs.flatMap((job) => job.passengerIds))
-        return { jobs: [...latest.jobs.filter((job) => job.status !== 'complete'), ...acceptedJobs], passengers: [...latest.passengers, ...generated.passengers.filter((passenger) => acceptedPassengerIds.has(passenger.id))], jobRequestHistory: [...(latest.jobRequestHistory ?? []), ...generated.signatures.slice(0, openSlots)].slice(-100), updatedAt: new Date().toISOString(), jobsLoading: false }
-      })
-    } catch (error) {
-      set({ jobsLoading: false, jobsError: error instanceof Error ? error.message : 'Could not generate a request.' })
+
+      const searchArea = {
+        ...city,
+
+        // This is the important part:
+        // generate this job around THIS taxi.
+        coordinates: taxiJobGenerationPosition(
+          state,
+          generationTaxi,
+          city.coordinates,
+        ),
+      }
+
+      const demandMultiplier =
+        (state.activeEvent?.fareMultiplier ?? 1) *
+
+        cityDemandMultiplier(
+          state.cityEconomies.find(
+            (economy) => economy.cityId === city.id,
+          ),
+        ) *
+
+        (state.worldCondition?.demandMultiplier ?? 1) *
+
+        marketingDemandMultiplier(
+          state.brandStrategy ?? defaultBrandStrategy,
+        ) *
+
+        fareMultiplier(
+          state.brandStrategy?.fareStrategy ??
+            'standard',
+        ) *
+
+        Math.max(
+          .55,
+          1 -
+            (state.competitors ?? [])
+              .filter(
+                (competitor) =>
+                  competitor.relationship === 'rival',
+              )
+              .reduce(
+                (sum, competitor) =>
+                  sum + competitor.marketShare,
+                0,
+              ) /
+              200,
+        )
+
+      try {
+        const generated = await generateJobOffers(
+          searchArea,
+
+          // Exactly one job for this taxi.
+          1,
+
+          [
+            ...(state.jobRequestHistory ?? []),
+            ...generatedSignatures,
+          ],
+
+          maxDistanceKm,
+          undefined,
+          demandMultiplier,
+          territoryCenters,
+        )
+
+        if (!generated.jobs.length) continue
+
+        generatedBatches.push(generated)
+
+        generatedSignatures.push(
+          ...generated.signatures,
+        )
+
+        generatedPerCity.set(
+          city.id,
+          alreadyGenerated + generated.jobs.length,
+        )
+      } catch (error) {
+        /*
+         * Failure around one taxi should not prevent another
+         * taxi from receiving a nearby job.
+         */
+        lastGenerationError = error
+      }
     }
-  },
+
+    const generatedJobs = generatedBatches.flatMap(
+      (batch) => batch.jobs,
+    )
+
+    const generatedPassengers =
+      generatedBatches.flatMap(
+        (batch) => batch.passengers,
+      )
+
+    if (!generatedJobs.length) {
+      throw (
+        lastGenerationError ??
+        new Error(
+          'Could not generate a job near any taxi.',
+        )
+      )
+    }
+
+    set((latest) => {
+      const openSlots = Math.max(
+        0,
+        availableJobOfferCapacity(latest) -
+          latest.jobs.filter(
+            (job) => job.status === 'offered',
+          ).length,
+      )
+
+      const acceptedJobs =
+        generatedJobs.slice(0, openSlots)
+
+      const acceptedPassengerIds = new Set(
+        acceptedJobs.flatMap(
+          (job) => job.passengerIds,
+        ),
+      )
+
+      return {
+        jobs: [
+          ...latest.jobs.filter(
+            (job) => job.status !== 'complete',
+          ),
+          ...acceptedJobs,
+        ],
+
+        passengers: [
+          ...latest.passengers,
+          ...generatedPassengers.filter(
+            (passenger) =>
+              acceptedPassengerIds.has(passenger.id),
+          ),
+        ],
+
+        jobRequestHistory: [
+          ...(latest.jobRequestHistory ?? []),
+          ...generatedSignatures.slice(
+            0,
+            acceptedJobs.length,
+          ),
+        ].slice(-100),
+
+        updatedAt: new Date().toISOString(),
+        jobsLoading: false,
+      }
+    })
+  } catch (error) {
+    set({
+      jobsLoading: false,
+      jobsError:
+        error instanceof Error
+          ? error.message
+          : 'Could not generate a request.',
+    })
+  }
+},
   acceptJob: (jobId) => set((state) => {
     const offeredJob = state.jobs.find((job) => job.id === jobId)
     const passenger = state.passengers.find((item) => offeredJob?.passengerIds.includes(item.id))

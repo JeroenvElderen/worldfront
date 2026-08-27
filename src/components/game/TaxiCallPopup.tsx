@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Driver, Passenger, TaxiJob, Vehicle } from '../../models/game'
-import { distanceKmBetween, jobOfferExpiresAt, jobPickup } from '../../services/jobEngine'
+import { distanceKmBetween, jobDestination, jobOfferExpiresAt, jobPickup, liveMeterFare } from '../../services/jobEngine'
 import { vehicleCanTakeJob } from '../../services/earlyGameEngine'
 import { licensePlateForVehicle, vehicleMakeAndModel } from '../../services/vehicleIdentity'
 import { JobRoutePreview } from './JobRoutePreview'
@@ -62,10 +62,12 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, driver
       const taxi = assignedTaxi ? { vehicle: assignedTaxi, distance: 0 } : vehicles
         .filter((vehicle) => {
           const driver = drivers.find((candidate) => candidate.id === vehicle.driverId)
-          return vehicle.type === 'taxi' && vehicle.cityId === job.cityId && vehicle.status === 'available' && driver?.status === 'available' &&
+          const activeJob = jobs.find((candidate) => candidate.status === 'accepted' && candidate.assignedVehicleId === vehicle.id)
+          const canQueue = vehicle.status === 'on-job' && activeJob && distanceKmBetween(jobDestination(activeJob), jobPickup(job)) <= 3
+          return vehicle.type === 'taxi' && vehicle.cityId === job.cityId && (vehicle.status === 'available' || canQueue) && (driver?.status === 'available' || canQueue) &&
             vehicleCanTakeJob(vehicle, job, passenger?.partySize ?? 1) &&
-            (job.category !== 'accessible' || (driver.certifications ?? []).includes('accessible')) &&
-            (job.category !== 'executive' || (driver.certifications ?? []).includes('executive'))
+            (job.category !== 'accessible' || (driver?.certifications ?? []).includes('accessible')) &&
+            (job.category !== 'executive' || (driver?.certifications ?? []).includes('executive'))
         })
         .map((vehicle) => ({ vehicle, distance: vehicle.position ? distanceKmBetween(vehicle.position, jobPickup(job)) : Infinity }))
         .sort((left, right) => left.distance - right.distance)[0]
@@ -76,8 +78,9 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, driver
         </div>
         <div className="job-offer-column">
           <span className="job-category">♟ {passenger?.partySize ?? 1} passenger{passenger?.partySize === 1 ? '' : 's'}</span>
-          <strong className="job-fare">{money.format(job.fare)}</strong>
-          <small>{view === 'complete' ? 'Final fare' : 'Estimated fare'}</small>
+          <strong className="job-fare">{money.format(view === 'accepted' && assignedTaxi ? liveMeterFare(job, assignedTaxi, now) : job.fare)}</strong>
+          <small>{view === 'complete' ? 'Final metered fare' : view === 'accepted' ? 'Live meter · traffic included' : 'Estimated fare'}</small>
+          {job.queuedAfterJobId && <span className="queue-pill">NEXT FARE · PICKUP AFTER CURRENT RIDE</span>}
           {taxi && <div className="job-vehicle"><span aria-hidden="true">🚕</span><div><small>{view === 'offered' ? 'NEXT VEHICLE' : 'ASSIGNED VEHICLE'}</small><strong>{vehicleMakeAndModel(taxi.vehicle)}</strong></div><b>{licensePlateForVehicle(taxi.vehicle)}</b></div>}
           {view === 'offered' ? <>
             <button className="accept-call" disabled={!taxi} onClick={() => onAccept(job.id)}>{taxi ? 'Accept' : 'Unavailable'}</button>

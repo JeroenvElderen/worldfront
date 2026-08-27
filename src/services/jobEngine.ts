@@ -34,11 +34,23 @@ export const distanceKmBetween = (from: [number, number], to: [number, number]) 
 export const taxiFareForDistance = (distanceKm: number) =>
   Math.round((10 + Math.max(0, distanceKm) * 3.25) * 100) / 100
 
+/** A visible meter that preserves the quoted modifiers and adds traffic waiting time. */
+export function liveMeterFare(job: TaxiJob, vehicle: Vehicle, now = Date.now()) {
+  const journey = getJobJourney(job, vehicle)
+  const estimate = job.estimatedFare ?? job.fare
+  if (now < journey.pickupAt) return Math.min(estimate, 10)
+  const progress = Math.max(0, Math.min(1, (now - journey.pickupAt) / Math.max(1, journey.arrivesAt - journey.pickupAt)))
+  const normalMinutes = job.distanceKm / 40 * 60
+  const trafficMinutes = Math.max(0, job.durationMinutes - normalMinutes)
+  const finalFare = estimate + trafficMinutes * .45
+  return Math.round((10 + (finalFare - 10) * progress) * 100) / 100
+}
+
 /** Stable journey timings keep a trip in the same place across map reloads. */
 export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {
   const acceptedAt = job.acceptedAt ? new Date(job.acceptedAt).getTime() : Date.now()
   const departsAt = acceptedAt + JOB_DISPATCH_DELAY_MS
-  const start = vehicle.position ?? job.pickup
+  const start = job.dispatchOrigin ?? vehicle.position ?? job.pickup
   const pickupDistanceKm = distanceKmBetween(start, jobPickup(job))
   // Use the job's average journey speed for the empty drive to the passenger too.
   const pickupMinutes = job.distanceKm > 0
@@ -65,14 +77,14 @@ export function acceptJobState(
 
   const job = jobs.find((candidate) => candidate.id === jobId && candidate.status === 'offered')
   const vehicle = (job && vehicles
-    .filter((candidate) => candidate.type === 'taxi' && candidate.status === 'available' && candidate.position && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
+    .filter((candidate) => candidate.type === 'taxi' && (candidate.status === 'available' || candidate.status === 'on-job') && candidate.position && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
     .sort((left, right) => distanceSquared(left.position!, jobPickup(job)) - distanceSquared(right.position!, jobPickup(job)))[0])
-    ?? vehicles.find((candidate) => candidate.type === 'taxi' && candidate.status === 'available' && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
+    ?? vehicles.find((candidate) => candidate.type === 'taxi' && (candidate.status === 'available' || candidate.status === 'on-job') && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
   if (!vehicle || !job) return null
 
   return {
     jobs: jobs.map((candidate) => candidate.id === jobId
-      ? { ...candidate, status: 'accepted' as const, assignedVehicleId: vehicle.id, acceptedAt: new Date().toISOString() }
+      ? { ...candidate, status: 'accepted' as const, assignedVehicleId: vehicle.id, acceptedAt: new Date().toISOString(), estimatedFare: candidate.fare }
       : candidate),
     vehicles: vehicles.map((candidate) => candidate.id === vehicle.id
       ? { ...candidate, status: 'on-job' as const }
@@ -95,16 +107,16 @@ export function completeJobState(
 
   const paidDistanceKm = distanceKmBetween(jobPickup(job), jobDestination(job))
   // The offered fare can include a live-event surge, so preserve it at settlement.
-  const meteredFare = job.fare || taxiFareForDistance(paidDistanceKm)
+  const meteredFare = job.fare ? liveMeterFare(job, vehicle, now) : taxiFareForDistance(paidDistanceKm)
   // Manual settlement has no calculated feedback, so award the one-star floor.
   const reputation = addReputation(company.reputation, 0.2)
 
   return {
     company: { ...company, cash: company.cash + meteredFare, reputation, level: levelForReputation(reputation) },
-    jobs: jobs.map((candidate) => candidate.id === jobId ? { ...candidate, status: 'complete' as const } : candidate),
+    jobs: jobs.map((candidate) => candidate.id === jobId ? { ...candidate, status: 'complete' as const, fare: meteredFare } : candidate),
     vehicles: vehicles.map((candidate) =>
       candidate.id === job.assignedVehicleId || (!job.assignedVehicleId && candidate.status === 'on-job')
-        ? { ...candidate, status: 'available' as const, position: jobDestination(job) }
+        ? { ...candidate, status: jobs.some((next) => next.id !== jobId && next.status === 'accepted' && next.assignedVehicleId === candidate.id) ? 'on-job' as const : 'available' as const, position: jobDestination(job) }
         : candidate),
   }
 }

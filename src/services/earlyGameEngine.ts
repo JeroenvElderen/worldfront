@@ -94,7 +94,7 @@ export function jobOfferCapacity(vehicles: Vehicle[], drivers: Driver[]) {
 export function calculateJobOutcome(job: TaxiJob, vehicle: Vehicle, driver?: Driver) {
   const journey = getJobJourney(job, vehicle)
   const pickupMinutes = Math.max(0, journey.pickupAt - journey.acceptedAt) / 60_000
-  let satisfaction = 92 - pickupMinutes * 2 - (100 - vehicle.condition) * .22 - (driver?.fatigue ?? 0) * .12
+  let satisfaction = 92 - pickupMinutes * 2 - (100 - vehicle.condition) * .22 - (100 - (vehicle.cleanliness ?? 100)) * .18 - (driver?.fatigue ?? 0) * .12
   satisfaction += ((driver?.rating ?? 4.2) - 4) * 12
   satisfaction += vehicleComfortScore(vehicle) * .22
   if (job.category === 'family' && (vehicle.upgrades ?? []).includes('child-seats')) satisfaction += 3

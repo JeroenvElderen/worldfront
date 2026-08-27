@@ -3,7 +3,9 @@ import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 import { addJobsToJobJson, jobRouteSignature, readJobJson, type StoredJobRoute } from './jobJsonService'
-import { isInsideTerritoryFeatures, resolveVillageTerritories, VILLAGE_TERRITORY_RADIUS_KM, type VillageTerritoryCenter } from './territoryGeometry'
+import { area, bbox, booleanPointInPolygon, pointOnFeature } from '@turf/turf'
+import { polygon } from '@turf/helpers'
+import { isInsideTerritoryFeatures, mergeVillageTerritories, resolveVillageTerritories, type TerritoryFeature, type VillageTerritoryCenter } from './territoryGeometry'
 
 // Short local trips keep the board useful even when the player's first owned
 // village has a compact administrative boundary.
@@ -15,33 +17,8 @@ const passengerNames = [
 
 interface MapboxPlace { id: string; name: string; coordinates: Coordinates }
 
-interface MapboxFeature {
-  geometry?: { coordinates?: unknown }
-  properties?: { mapbox_id?: unknown; name?: unknown; full_address?: unknown }
-}
-
 const mapboxToken = mapboxAccessToken
-/**
- * Search across the places a passenger might actually name. Searchbox also
- * returns useful non-POI features (addresses, streets, neighbourhoods and
- * localities), so requests intentionally do not restrict results to `poi`.
- */
-export const placeSearches = [
-  'restaurant', 'cafe', 'hotel', 'hostel', 'guest house', 'holiday rental', 'Airbnb',
-  'supermarket', 'shop', 'shopping centre', 'market', 'convenience store',
-  'airport', 'train station', 'bus station', 'ferry terminal', 'taxi rank', 'car park',
-  'hospital', 'medical clinic', 'pharmacy', 'school', 'university', 'library',
-  'office', 'business park', 'factory', 'warehouse', 'bank', 'post office',
-  'park', 'forest', 'mountain', 'beach', 'lake', 'nature reserve', 'viewpoint',
-  'landmark', 'tourist attraction', 'museum', 'monument', 'place of worship',
-  'stadium', 'sports centre', 'cinema', 'theatre', 'nightclub', 'government office',
-]
-const RANDOM_LOCATIONS_PER_BOX = 12
-// Searchbox queries are independent. A small worker pool avoids the old
-// quarter-second delay after every category without flooding the API.
-const MAPBOX_REQUEST_CONCURRENCY = 6
-interface PlaceCacheEntry { loadedRadiusKm: number; places: MapboxPlace[]; pending?: Promise<void> }
-const placeCache = new Map<string, PlaceCacheEntry>()
+const RANDOM_LOCATIONS_PER_OFFER = 32
 
 const isCoordinates = (value: unknown): value is Coordinates =>
   Array.isArray(value) && value.length >= 2 && value.slice(0, 2).every((part) => typeof part === 'number' && Number.isFinite(part))
@@ -75,108 +52,40 @@ async function roadStops(from: Coordinates, to: Coordinates, signal?: AbortSigna
   }
 }
 
-type BoundingBox = [west: number, south: number, east: number, north: number]
-
-const boundingBoxAround = ([longitude, latitude]: Coordinates, radiusKm: number): BoundingBox => {
-  const latitudeDelta = radiusKm / 110.574
-  const longitudeDelta = radiusKm / (111.32 * Math.max(0.01, Math.cos(latitude * Math.PI / 180)))
-  return [longitude - longitudeDelta, latitude - latitudeDelta, longitude + longitudeDelta, latitude + latitudeDelta]
+/** Split merged coverage into disjoint polygons so area weighting does not count overlaps twice. */
+const territoryComponents = (territories: TerritoryFeature[]) => {
+  const merged = mergeVillageTerritories(territories)
+  if (!merged) return []
+  return (merged.geometry.type === 'Polygon' ? [merged.geometry.coordinates] : merged.geometry.coordinates)
+    .map((coordinates, index) => polygon(coordinates, { id: `owned-${index}` }))
 }
 
-/** Splits the newly unlocked square into non-overlapping boxes around the already cached square. */
-const boxesForNewArea = (center: Coordinates, previousRadiusKm: number, radiusKm: number): BoundingBox[] => {
-  const outer = boundingBoxAround(center, radiusKm)
-  if (previousRadiusKm <= 0) return [outer]
-  const inner = boundingBoxAround(center, previousRadiusKm)
-  return [
-    [outer[0], inner[3], outer[2], outer[3]],
-    [outer[0], outer[1], outer[2], inner[1]],
-    [outer[0], inner[1], inner[0], inner[3]],
-    [inner[2], inner[1], outer[2], inner[3]],
-  ]
-}
+/** Uniformly sample the actual owned polygons, independent of stations and vehicles. */
+const randomTerritoryLocations = (city: City, territories: TerritoryFeature[], count: number): MapboxPlace[] => {
+  const components = territoryComponents(territories)
+  const weighted = components.map((component) => ({ component, area: area(component), bounds: bbox(component) }))
+  const totalArea = weighted.reduce((sum, item) => sum + item.area, 0)
+  if (!weighted.length || totalArea <= 0) return []
 
-/** Add unlabeled points from across the map so jobs are not limited to indexed businesses. */
-const randomMapLocations = (city: City, boxes: BoundingBox[], previousRadiusKm: number, radiusKm: number): MapboxPlace[] =>
-  boxes.flatMap((box, boxIndex) => Array.from({ length: RANDOM_LOCATIONS_PER_BOX }, (_, locationIndex) => {
-    const longitude = box[0] + Math.random() * (box[2] - box[0])
-    const latitude = box[1] + Math.random() * (box[3] - box[1])
-    const coordinates: Coordinates = [longitude, latitude]
-    const distanceFromBase = distanceKmBetween(city.coordinates, coordinates)
-    if (distanceFromBase <= previousRadiusKm || distanceFromBase > radiusKm) return null
+  return Array.from({ length: count }, (_, index) => {
+    let draw = Math.random() * totalArea
+    const selected = weighted.find((item) => (draw -= item.area) <= 0) ?? weighted[weighted.length - 1]
+    const [west, south, east, north] = selected.bounds
+    const fallback = pointOnFeature(selected.component).geometry.coordinates
+    let coordinates: Coordinates = [fallback[0], fallback[1]]
+    for (let attempt = 0; attempt < 2_000; attempt += 1) {
+      const candidate: Coordinates = [west + Math.random() * (east - west), south + Math.random() * (north - south)]
+      if (booleanPointInPolygon(candidate, selected.component)) {
+        coordinates = candidate
+        break
+      }
+    }
     return {
-      id: `map-location:${city.id}:${longitude.toFixed(5)}:${latitude.toFixed(5)}`,
-      name: `Map location near ${city.name} ${boxIndex + 1}-${locationIndex + 1}`,
+      id: `territory-location:${city.id}:${crypto.randomUUID()}`,
+      name: `Random location ${index + 1} in ${city.name}`,
       coordinates,
     }
-  }).filter((place): place is MapboxPlace => place !== null))
-
-async function fetchMapboxPlaces(city: City, previousRadiusKm: number, radiusKm: number, signal?: AbortSignal): Promise<MapboxPlace[]> {
-  const boxes = boxesForNewArea(city.coordinates, previousRadiusKm, radiusKm)
-  const searches = boxes.flatMap((box) => placeSearches.map((search) => ({ box, search })))
-  const responses: Array<{ features?: MapboxFeature[] }> = new Array(searches.length)
-  let nextSearch = 0
-  const workers = Array.from({ length: Math.min(MAPBOX_REQUEST_CONCURRENCY, searches.length) }, async () => {
-    while (nextSearch < searches.length) {
-      const index = nextSearch++
-      const { box, search } = searches[index]
-      const url = new URL('https://api.mapbox.com/search/searchbox/v1/forward')
-      url.searchParams.set('q', search)
-      url.searchParams.set('access_token', mapboxToken)
-      url.searchParams.set('proximity', city.coordinates.join(','))
-      url.searchParams.set('bbox', box.join(','))
-      url.searchParams.set('country', city.countryCode)
-      url.searchParams.set('limit', '10')
-      url.searchParams.set('language', 'en')
-      const response = await fetch(url, { signal })
-      if (!response.ok) throw new Error(`Mapbox place search returned ${response.status}.`)
-      const contentType = response.headers.get('content-type') ?? ''
-      if (!contentType.toLocaleLowerCase().includes('application/json')) throw new Error('Mapbox place search returned an invalid response.')
-      responses[index] = await response.json() as { features?: MapboxFeature[] }
-    }
   })
-  await Promise.all(workers)
-
-  const indexedPlaces = responses.flatMap(({ features = [] }) => features.flatMap((feature): MapboxPlace[] => {
-    const id = feature.properties?.mapbox_id
-    const name = feature.properties?.name ?? feature.properties?.full_address
-    const rawCoordinates = feature.geometry?.coordinates
-    if (typeof id !== 'string' || typeof name !== 'string' || !isCoordinates(rawCoordinates)) return []
-    const coordinates: Coordinates = [rawCoordinates[0], rawCoordinates[1]]
-    const distanceFromBase = distanceKmBetween(city.coordinates, coordinates)
-    return distanceFromBase > previousRadiusKm && distanceFromBase <= radiusKm
-      ? [{ id, name: name.trim(), coordinates }]
-      : []
-  }))
-  const places = [...indexedPlaces, ...randomMapLocations(city, boxes, previousRadiusKm, radiusKm)]
-  return [...new Map(places.map((place) => [place.id, place])).values()]
-}
-
-async function findMapboxPlaces(city: City, radiusKm: number, signal?: AbortSignal) {
-  const cacheKey = `${city.id}:${city.coordinates.join(',')}`
-  const cached = placeCache.get(cacheKey) ?? { loadedRadiusKm: 0, places: [] }
-  placeCache.set(cacheKey, cached)
-
-  if (cached.loadedRadiusKm < radiusKm) {
-    const load = async () => {
-      if (cached.loadedRadiusKm >= radiusKm) return
-      const previousRadiusKm = cached.loadedRadiusKm
-      const additions = await fetchMapboxPlaces(city, previousRadiusKm, radiusKm, signal)
-      cached.places = [...new Map([...cached.places, ...additions].map((place) => [place.id, place])).values()]
-      cached.loadedRadiusKm = radiusKm
-    }
-    const queuedLoad = (cached.pending ?? Promise.resolve()).then(load)
-    cached.pending = queuedLoad
-    try { await queuedLoad } finally {
-      if (cached.pending === queuedLoad) cached.pending = undefined
-    }
-  } else if (cached.pending) {
-    await cached.pending
-  }
-
-  const unlockedPlaces = cached.places.filter((place) => distanceKmBetween(city.coordinates, place.coordinates) <= radiusKm)
-  if (unlockedPlaces.length < 2) throw new Error(`Mapbox could not find enough real places within ${radiusKm} km of ${city.name}.`)
-  return unlockedPlaces
 }
 
 const shuffled = <T,>(values: T[]) => values
@@ -200,15 +109,10 @@ export async function generateJobOffers(
   // land whenever Mapbox displayed a real administrative village boundary.
   const ownedTerritories = await resolveVillageTerritories(territoryCenters)
   const isUnlocked = (coordinates: Coordinates) => isInsideTerritoryFeatures(coordinates, ownedTerritories)
-  // The generation city is normally centred on an available taxi. Expand the
-  // place search far enough to include every owned territory instead of using
-  // that taxi's job-distance limit as an implicit pickup radius.
-  const ownedSearchRadiusKm = Math.max(maxDistanceKm, ...territoryCenters.map((center) =>
-    distanceKmBetween(city.coordinates, center.coordinates) +
-    (center.source === 'taxi-discovery' ? center.radiusKm ?? 0 : VILLAGE_TERRITORY_RADIUS_KM)))
   let routes: Array<{ pickup: MapboxPlace; destination: MapboxPlace; distanceKm: number; signature: string; stored?: StoredJobRoute }>
   try {
-    const places = await findMapboxPlaces(city, ownedSearchRadiusKm, signal)
+    signal?.throwIfAborted()
+    const places = randomTerritoryLocations(city, ownedTerritories, Math.max(64, count * RANDOM_LOCATIONS_PER_OFFER))
     const uniqueRoutes = new Map<string, (typeof routes)[number]>()
     for (const pickup of places) for (const destination of places) {
       const distanceKm = Math.round(distanceKmBetween(pickup.coordinates, destination.coordinates) * 10) / 10

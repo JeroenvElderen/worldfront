@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { featureCollection, lineString, point } from '@turf/helpers'
@@ -125,7 +125,11 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
   const liveJobRunners = useRef(new Map<string, () => void>())
   const [mapRevision, setMapRevision] = useState(0)
   const [containerReady, setContainerReady] = useState(false)
-  const [realTerritories, setRealTerritories] = useState<Record<string, TerritoryFeature>>({})
+  // Null is a resolved fallback too. Remember it so a location with no mapped
+  // boundary does not trigger another reverse-geocode request after each trip.
+  const [realTerritories, setRealTerritories] = useState<Record<string, TerritoryFeature | null>>({})
+  const realTerritoriesRef = useRef(realTerritories)
+  realTerritoriesRef.current = realTerritories
   // Mapbox reads the container dimensions during construction. In Android
   // WebViews the first passive effect can run before the viewport has completed
   // its initial layout, so wait for a genuinely drawable box.
@@ -158,11 +162,16 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
       }),
       ...territoryExpansions.filter((area) => area.source !== 'taxi-discovery').map(({ id, coordinates }) => ({ id, coordinates })),
     ]
-    void Promise.all(centers.map(async ({ id, coordinates }) => {
+    // Taxi discoveries update territoryExpansions after every completed trip,
+    // but they do not change village boundaries. Avoid re-requesting every
+    // already-resolved boundary during that hot transition.
+    const unresolvedCenters = centers.filter(({ id }) => !(id in realTerritoriesRef.current))
+    if (!unresolvedCenters.length) return () => { active = false }
+    void Promise.all(unresolvedCenters.map(async ({ id, coordinates }) => {
       const boundary = await realVillageTerritory(id, coordinates)
-      return boundary ? [id, boundary] as const : null
+      return [id, boundary] as const
     })).then((boundaries) => {
-      if (active) setRealTerritories(Object.fromEntries(boundaries.filter((boundary) => boundary !== null)))
+      if (active) setRealTerritories((current) => ({ ...current, ...Object.fromEntries(boundaries) }))
     }).catch(() => undefined)
     return () => { active = false }
   }, [branches, customCities, territoryExpansions])
@@ -456,9 +465,13 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
   // Sheets and dashboards are layered over the persistent map. Re-measure on
   // every view transition so returning to Map/Dispatch cannot expose a stale
   // Android WebView canvas, without recreating the Mapbox instance.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const instance = map.current
     if (!instance) return
+    // Apply the new viewport before React paints the dismissed sheet. The
+    // follow-up frame handles any delayed Android WebView layout adjustment.
+    instance.resize()
+    instance.triggerRepaint()
     const frame = window.requestAnimationFrame(() => {
       if (map.current !== instance) return
       instance.resize()
@@ -534,7 +547,7 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
     return () => { instance.off('load', updateDepots) }
   }, [branches, customCities, territoryExpansions, mapRevision, realTerritories])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const instance = map.current
     if (!instance?.isStyleLoaded()) return
     // Closing the calls sheet changes the map viewport on mobile. Resize before

@@ -1,5 +1,5 @@
 import { featureCollection, lineString, polygon } from '@turf/helpers'
-import { booleanPointInPolygon, buffer, circle, union } from '@turf/turf'
+import { booleanPointInPolygon, buffer, circle, simplify, union } from '@turf/turf'
 import type { Coordinates } from '../models/game'
 
 const EARTH_KM_PER_LATITUDE_DEGREE = 110.574
@@ -19,6 +19,8 @@ export type TerritoryFeature = {
 }
 
 const realBoundaryCache = new Map<string, Promise<TerritoryFeature | null>>()
+const discoveryFeatureCache = new Map<string, TerritoryFeature>()
+let mergedDiscoveryCache: { ids: string[]; territory: TerritoryFeature | null } = { ids: [], territory: null }
 
 /**
  * Resolve the administrative boundary containing a territory's coordinates.
@@ -100,12 +102,12 @@ export const taxiDiscoveryTerritory = (id: string, center: Coordinates, radiusKm
 
 /** Treat one completed taxi journey as one buffered territory checkpoint. */
 export const taxiDiscoveryRouteTerritory = (id: string, route: Coordinates[], radiusKm = TAXI_DISCOVERY_RADIUS_KM): TerritoryFeature =>
-  buffer(lineString(route, { id, unlocked: true }), radiusKm, { steps: 8, units: 'kilometers' }) as TerritoryFeature
+  buffer(simplify(lineString(route, { id, unlocked: true }), { tolerance: .0001, highQuality: false }), radiusKm, { steps: 8, units: 'kilometers' }) as TerritoryFeature
 
 export const mergeVillageTerritories = (territories: TerritoryFeature[]) => {
   if (!territories.length) return null
   if (territories.length === 1) return territories[0]
-  return union(featureCollection(territories)) ?? null
+  return union(featureCollection(territories)) as TerritoryFeature | null
 }
 
 /**
@@ -115,12 +117,26 @@ export const mergeVillageTerritories = (territories: TerritoryFeature[]) => {
 export const appendDiscoveriesToTerritory = (
   ownedTerritories: TerritoryFeature[],
   discoveries: Array<{ id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; radiusKm?: number }>,
-) => mergeVillageTerritories([
-  ...ownedTerritories,
-  ...discoveries.map((discovery) => discovery.routeCoordinates && discovery.routeCoordinates.length >= 2
-    ? taxiDiscoveryRouteTerritory(discovery.id, discovery.routeCoordinates, discovery.radiusKm)
-    : taxiDiscoveryTerritory(discovery.id, discovery.coordinates, discovery.radiusKm)),
-])
+) => {
+  const ids = discoveries.map(({ id }) => id)
+  const cachedIds = mergedDiscoveryCache.ids
+  const extendsCachedPrefix = cachedIds.length <= ids.length && cachedIds.every((id, index) => ids[index] === id)
+  const firstNewIndex = extendsCachedPrefix ? cachedIds.length : 0
+  const newTerritories = discoveries.slice(firstNewIndex).map((discovery) => {
+    const cached = discoveryFeatureCache.get(discovery.id)
+    if (cached) return cached
+    const territory = discovery.routeCoordinates && discovery.routeCoordinates.length >= 2
+      ? taxiDiscoveryRouteTerritory(discovery.id, discovery.routeCoordinates, discovery.radiusKm)
+      : taxiDiscoveryTerritory(discovery.id, discovery.coordinates, discovery.radiusKm)
+    discoveryFeatureCache.set(discovery.id, territory)
+    return territory
+  })
+  const discoveryTerritory = extendsCachedPrefix
+    ? mergeVillageTerritories([...(mergedDiscoveryCache.territory ? [mergedDiscoveryCache.territory] : []), ...newTerritories])
+    : mergeVillageTerritories(newTerritories)
+  mergedDiscoveryCache = { ids, territory: discoveryTerritory }
+  return mergeVillageTerritories([...ownedTerritories, ...(discoveryTerritory ? [discoveryTerritory] : [])])
+}
 
 /** True when a location belongs to at least one purchased village territory. */
 export const isInsideVillageTerritories = (coordinates: Coordinates, centers: VillageTerritoryCenter[]) =>

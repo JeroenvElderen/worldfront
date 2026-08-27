@@ -523,9 +523,12 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
         source.setData(data)
         coverageSource.setData(coverageData)
         lockedSource.setData(lockedData)
-        // Android WebViews can leave GeoJSON changes queued while the map is
-        // otherwise idle. Wake Mapbox so the expanded territory border appears
-        // immediately after the completed job is settled.
+        // A repaint only redraws data which has already made it through
+        // Mapbox's GeoJSON worker. Android WebViews can suspend that worker
+        // while the map is idle, leaving these setData calls queued until the
+        // app is restarted. Resizing schedules a complete render/update pass
+        // and makes the newly completed journey visible straight away.
+        instance.resize()
         instance.triggerRepaint()
         return
       }

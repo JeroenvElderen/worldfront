@@ -432,6 +432,7 @@ export default function App() {
                 onHireDriver={game.hireDriver}
                 onRefreshCandidates={game.refreshDriverCandidates}
                 onServiceVehicle={game.serviceVehicle}
+                onCleanTaxi={game.cleanTaxi}
                 onInstallUpgrade={game.installUpgrade}
                 onSetRefuelStrategy={game.setRefuelStrategy}
                 onRefuelVehicle={game.refuelVehicle}

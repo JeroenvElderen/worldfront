@@ -499,7 +499,6 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
   useEffect(() => {
     const instance = map.current
     if (!instance) return
-    let territoryRefreshTimer: number | undefined
     const updateDepots = () => {
       const stationCoordinates = branches.flatMap((station) => {
         const coordinates = station.coordinates ?? getCity(station.cityId, customCities)?.coordinates
@@ -513,7 +512,6 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
           realTerritories[expansion.id] ?? villageTerritory(expansion.id, expansion.coordinates, VILLAGE_TERRITORY_RADIUS_KM)),
       ]
       const discoveries = territoryExpansions.filter((expansion) => expansion.source === 'taxi-discovery')
-      const territoryRevision = discoveries.at(-1)?.id ?? `owned-${ownedTerritories.length}`
       // Discovery checkpoints stay invisible. Only their union with the
       // existing territory is drawn, so drop-off simply extends one border.
       const unlockedTerritory = appendDiscoveriesToTerritory(ownedTerritories, discoveries)
@@ -524,40 +522,22 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
       const lockedSource = instance.getSource('locked-territory') as mapboxgl.GeoJSONSource | undefined
       if (source && coverageSource && lockedSource) {
         source.setData(data)
-        coverageSource.setData(coverageData)
-        lockedSource.setData(lockedData)
-        // A repaint only redraws data which has already made it through
-        // Mapbox's GeoJSON worker. Android WebViews can suspend that worker
-        // while the map is idle, leaving these setData calls queued until the
-        // app is restarted. Resizing schedules a complete render/update pass
-        // and makes the newly completed journey visible straight away.
+        // Android WebViews can leave setData queued in Mapbox's GeoJSON worker
+        // until the map is reconstructed. Replace the two territory sources
+        // immediately so every completed fare is handled like initial map
+        // setup, while leaving routes and vehicle markers untouched.
+        for (const layerId of ['service-coverage-line', 'service-coverage-fill', 'locked-territory-fill']) {
+          if (instance.getLayer(layerId)) instance.removeLayer(layerId)
+        }
+        instance.removeSource('service-coverage')
+        instance.removeSource('locked-territory')
+        instance.addSource('locked-territory', { type: 'geojson', data: lockedData })
+        instance.addLayer({ id: 'locked-territory-fill', type: 'fill', source: 'locked-territory', paint: { 'fill-color': '#ef7777', 'fill-opacity': .24 } })
+        instance.addSource('service-coverage', { type: 'geojson', data: coverageData })
+        instance.addLayer({ id: 'service-coverage-fill', type: 'fill', source: 'service-coverage', paint: { 'fill-color': '#19cdb3', 'fill-opacity': 0 } })
+        instance.addLayer({ id: 'service-coverage-line', type: 'line', source: 'service-coverage', paint: { 'line-color': '#5eead4', 'line-width': 2, 'line-opacity': .85 } })
         instance.resize()
         instance.triggerRepaint()
-        const acknowledge = () => {
-          if (territoryRefreshTimer !== undefined) window.clearTimeout(territoryRefreshTimer)
-          territoryRefreshTimer = undefined
-        }
-        instance.once('idle', acknowledge)
-        territoryRefreshTimer = window.setTimeout(() => {
-          instance.off('idle', acknowledge)
-          if (map.current !== instance || !instance.isStyleLoaded()) return
-          // Some Android WebViews can strand an update in Mapbox's worker.
-          // Recreating only the affected sources gives the worker fresh source
-          // identities without discarding the map, routes, or vehicle markers.
-          for (const layerId of ['service-coverage-line', 'service-coverage-fill', 'locked-territory-fill']) {
-            if (instance.getLayer(layerId)) instance.removeLayer(layerId)
-          }
-          for (const sourceId of ['service-coverage', 'locked-territory']) {
-            if (instance.getSource(sourceId)) instance.removeSource(sourceId)
-          }
-          instance.addSource('locked-territory', { type: 'geojson', data: lockedData })
-          instance.addLayer({ id: 'locked-territory-fill', type: 'fill', source: 'locked-territory', paint: { 'fill-color': '#ef7777', 'fill-opacity': .24 } })
-          instance.addSource('service-coverage', { type: 'geojson', data: coverageData })
-          instance.addLayer({ id: 'service-coverage-fill', type: 'fill', source: 'service-coverage', paint: { 'fill-color': '#19cdb3', 'fill-opacity': 0 } })
-          instance.addLayer({ id: 'service-coverage-line', type: 'line', source: 'service-coverage', paint: { 'line-color': '#5eead4', 'line-width': 2, 'line-opacity': .85 } })
-          instance.triggerRepaint()
-          console.debug('[territory] refreshed Mapbox sources', { territoryRevision, discoveries: discoveries.length })
-        }, 1_000)
         return
       }
       instance.addSource('locked-territory', { type: 'geojson', data: lockedData })
@@ -575,10 +555,7 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
     }
     if (instance.isStyleLoaded()) updateDepots()
     else instance.once('load', updateDepots)
-    return () => {
-      instance.off('load', updateDepots)
-      if (territoryRefreshTimer !== undefined) window.clearTimeout(territoryRefreshTimer)
-    }
+    return () => { instance.off('load', updateDepots) }
   }, [branches, customCities, territoryExpansions, mapRevision, realTerritories])
 
   useLayoutEffect(() => {

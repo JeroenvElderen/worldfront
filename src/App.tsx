@@ -321,6 +321,7 @@ export default function App() {
         onBuildStation={handleBuildStation}
         onExpandTerritory={handleExpandTerritory}
         onOpenJob={game.openJob}
+        onSaveJobPickupRoute={game.saveJobPickupRoute}
       />
 
       {game.company ? (

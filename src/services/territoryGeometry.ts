@@ -1,5 +1,5 @@
-import { featureCollection, polygon } from '@turf/helpers'
-import { booleanPointInPolygon, circle, union } from '@turf/turf'
+import { featureCollection, lineString, polygon } from '@turf/helpers'
+import { booleanPointInPolygon, buffer, circle, union } from '@turf/turf'
 import type { Coordinates } from '../models/game'
 
 const EARTH_KM_PER_LATITUDE_DEGREE = 110.574
@@ -8,7 +8,7 @@ export const VILLAGE_TERRITORY_RADIUS_KM = 6
 // save-data volume that a street-scale 100 m radius would require.
 export const TAXI_DISCOVERY_RADIUS_KM = 1
 
-export interface VillageTerritoryCenter { id: string; coordinates: Coordinates; source?: 'village' | 'taxi-discovery'; radiusKm?: number }
+export interface VillageTerritoryCenter { id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; source?: 'village' | 'taxi-discovery'; radiusKm?: number }
 type TerritoryGeometry =
   | { type: 'Polygon'; coordinates: number[][][] }
   | { type: 'MultiPolygon'; coordinates: number[][][][] }
@@ -98,6 +98,10 @@ export const villageTerritory = (id: string, center: Coordinates, radiusKm: numb
 export const taxiDiscoveryTerritory = (id: string, center: Coordinates, radiusKm = TAXI_DISCOVERY_RADIUS_KM): TerritoryFeature =>
   circle(center, radiusKm, { steps: 24, units: 'kilometers', properties: { id, unlocked: true } }) as TerritoryFeature
 
+/** Treat one completed taxi journey as one buffered territory checkpoint. */
+export const taxiDiscoveryRouteTerritory = (id: string, route: Coordinates[], radiusKm = TAXI_DISCOVERY_RADIUS_KM): TerritoryFeature =>
+  buffer(lineString(route, { id, unlocked: true }), radiusKm, { steps: 8, units: 'kilometers' }) as TerritoryFeature
+
 export const mergeVillageTerritories = (territories: TerritoryFeature[]) => {
   if (!territories.length) return null
   if (territories.length === 1) return territories[0]
@@ -110,10 +114,12 @@ export const mergeVillageTerritories = (territories: TerritoryFeature[]) => {
  */
 export const appendDiscoveriesToTerritory = (
   ownedTerritories: TerritoryFeature[],
-  discoveries: Array<{ id: string; coordinates: Coordinates; radiusKm?: number }>,
+  discoveries: Array<{ id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; radiusKm?: number }>,
 ) => mergeVillageTerritories([
   ...ownedTerritories,
-  ...discoveries.map((discovery) => taxiDiscoveryTerritory(discovery.id, discovery.coordinates, discovery.radiusKm)),
+  ...discoveries.map((discovery) => discovery.routeCoordinates && discovery.routeCoordinates.length >= 2
+    ? taxiDiscoveryRouteTerritory(discovery.id, discovery.routeCoordinates, discovery.radiusKm)
+    : taxiDiscoveryTerritory(discovery.id, discovery.coordinates, discovery.radiusKm)),
 ])
 
 /** True when a location belongs to at least one purchased village territory. */
@@ -131,7 +137,9 @@ export const isInsideVillageTerritories = (coordinates: Coordinates, centers: Vi
 export const resolveVillageTerritories = async (centers: VillageTerritoryCenter[]) =>
   Promise.all(centers.map(async (center) =>
     center.source === 'taxi-discovery'
-      ? taxiDiscoveryTerritory(center.id, center.coordinates, center.radiusKm)
+      ? center.routeCoordinates && center.routeCoordinates.length >= 2
+        ? taxiDiscoveryRouteTerritory(center.id, center.routeCoordinates, center.radiusKm)
+        : taxiDiscoveryTerritory(center.id, center.coordinates, center.radiusKm)
       : await realVillageTerritory(center.id, center.coordinates)
         ?? villageTerritory(center.id, center.coordinates, VILLAGE_TERRITORY_RADIUS_KM)))
 

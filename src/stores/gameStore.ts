@@ -41,16 +41,11 @@ const transaction = (category: TransactionCategory, description: string, amount:
 const addTransactions = (existing: FinancialTransaction[] | undefined, ...entries: FinancialTransaction[]) =>
   [...(existing ?? []), ...entries].slice(-500)
 const availableJobOfferCapacity = (state: Pick<GameState, 'vehicles' | 'drivers'>) => jobOfferCapacity(state.vehicles, state.drivers)
-const taxiJobGenerationPosition = (state: Pick<GameState, 'jobs'>, vehicle: Vehicle, fallback: Coordinates) => {
-  if (vehicle.status !== 'on-job') return vehicle.position ?? fallback
-  const currentJob = state.jobs.find((job) => job.status === 'accepted' && job.assignedVehicleId === vehicle.id)
-  return currentJob ? jobDestination(currentJob) : vehicle.position ?? fallback
-}
-const jobGeneratingTaxis = (state: Pick<GameState, 'vehicles' | 'drivers' | 'jobs'>) => state.vehicles.filter((vehicle) => {
+const taxiJobGenerationPosition = (vehicle: Vehicle, fallback: Coordinates) => vehicle.position ?? fallback
+const jobGeneratingTaxis = (state: Pick<GameState, 'vehicles' | 'drivers'>) => state.vehicles.filter((vehicle) => {
   if (vehicle.type !== 'taxi' || !vehicle.driverId) return false
   const driver = state.drivers.find((candidate) => candidate.id === vehicle.driverId)
-  return (vehicle.status === 'available' && driver?.status === 'available') ||
-    (vehicle.status === 'on-job' && driver?.status === 'driving' && state.jobs.some((job) => job.status === 'accepted' && job.assignedVehicleId === vehicle.id))
+  return vehicle.status === 'available' && driver?.status === 'available'
 })
 
 const selectJobGenerationTaxi = (
@@ -78,7 +73,6 @@ const selectJobGenerationTaxi = (
     }
 
     const position = taxiJobGenerationPosition(
-      state,
       vehicle,
       fallback,
     )
@@ -259,7 +253,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
       const level = levelForReputation(state.company?.reputation ?? 0)
       // Search from the taxi so newly explored coverage can produce work even
       // after the vehicle has travelled beyond its original station's area.
-      const searchArea = { ...city, coordinates: taxiJobGenerationPosition(state, generationTaxi, city.coordinates) }
+      const searchArea = { ...city, coordinates: taxiJobGenerationPosition(generationTaxi, city.coordinates) }
       const taxis = state.vehicles.filter((vehicle) => vehicle.type === 'taxi')
       const maxDistanceKm = maxJobDistanceForFleet(level, taxis.length) * (hasResearch(state.completedResearch ?? [], 'predictive-demand') ? 1.25 : 1)
       const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, (state.activeEvent?.fareMultiplier ?? 1) * cityDemandMultiplier(state.cityEconomies.find((economy) => economy.cityId === city.id)) * (state.worldCondition?.demandMultiplier ?? 1) * marketingDemandMultiplier(state.brandStrategy ?? defaultBrandStrategy) * fareMultiplier(state.brandStrategy?.fareStrategy ?? 'standard') * Math.max(.55, 1 - (state.competitors ?? []).filter((competitor) => competitor.relationship === 'rival').reduce((sum, competitor) => sum + competitor.marketShare, 0) / 200), unlockedTerritoryCenters(state))
@@ -346,7 +340,6 @@ const generationTaxi = selectJobGenerationTaxi(state)
           }
 
           const position = taxiJobGenerationPosition(
-            state,
             vehicle,
             fallback,
           )
@@ -426,7 +419,6 @@ const generationTaxi = selectJobGenerationTaxi(state)
         // This is the important part:
         // generate this job around THIS taxi.
         coordinates: taxiJobGenerationPosition(
-          state,
           generationTaxi,
           city.coordinates,
         ),
@@ -586,10 +578,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
     const passenger = state.passengers.find((item) => offeredJob?.passengerIds.includes(item.id))
     const suitableVehicles = state.vehicles.filter((vehicle) => {
       const driver = state.drivers.find((candidate) => candidate.id === vehicle.driverId)
-      const activeJobs = state.jobs.filter((candidate) => candidate.status === 'accepted' && candidate.assignedVehicleId === vehicle.id)
-      const queueTail = activeJobs.sort((left, right) => new Date(left.acceptedAt ?? 0).getTime() - new Date(right.acceptedAt ?? 0).getTime()).at(-1)
-      const canQueue = vehicle.status === 'on-job' && activeJobs.length === 1 && queueTail && offeredJob && distanceKmBetween(jobDestination(queueTail), jobPickup(offeredJob)) <= 3
-      return vehicle.type === 'taxi' && vehicle.cityId === offeredJob?.cityId && (vehicle.status === 'available' || canQueue) && vehicle.driverId && (driver?.status === 'available' || canQueue) && offeredJob && vehicleCanTakeJob(vehicle, offeredJob, passenger?.partySize ?? 1) && (offeredJob.category !== 'accessible' || (driver?.certifications ?? []).includes('accessible')) && (offeredJob.category !== 'executive' || (driver?.certifications ?? []).includes('executive'))
+      return vehicle.type === 'taxi' && vehicle.cityId === offeredJob?.cityId && vehicle.status === 'available' && vehicle.driverId && driver?.status === 'available' && offeredJob && vehicleCanTakeJob(vehicle, offeredJob, passenger?.partySize ?? 1) && (offeredJob.category !== 'accessible' || (driver?.certifications ?? []).includes('accessible')) && (offeredJob.category !== 'executive' || (driver?.certifications ?? []).includes('executive'))
     })
     if (!offeredJob || !suitableVehicles.length) return state
     const result = acceptJobState(state.jobs, state.vehicles, jobId, new Set(suitableVehicles.map((vehicle) => vehicle.id)))
@@ -600,9 +589,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
     if (driver?.trait === 'unreliable' && Math.random() < .12) return { drivers: state.drivers.map((candidate) => candidate.id === driverId ? { ...candidate, status: 'off-duty' as const, missedShiftUntil: new Date(Date.now() + 60_000).toISOString() } : candidate), updatedAt: new Date().toISOString() }
     const drivers = state.drivers.map((candidate) => candidate.id === driverId ? { ...candidate, status: 'driving' as const } : candidate)
     const assignedVehicle = result.vehicles.find((vehicle) => vehicle.id === assignedVehicleId)
-    const precedingJob = state.jobs.filter((job) => job.status === 'accepted' && job.assignedVehicleId === assignedVehicleId).at(-1)
-    const queueStart = precedingJob && assignedVehicle ? getJobJourney(precedingJob, assignedVehicle).arrivesAt : undefined
-    const jobs = result.jobs.map((job) => job.id === jobId ? { ...job, acceptedAt: queueStart ? new Date(queueStart).toISOString() : job.acceptedAt, dispatchOrigin: precedingJob ? jobDestination(precedingJob) : job.dispatchOrigin, queuedAfterJobId: precedingJob?.id, pickupTimeMultiplier: pickupSpeedMultiplier(driver), durationMinutes: (driver?.trait === 'careful' ? job.durationMinutes * 1.05 : job.durationMinutes) / (state.worldCondition?.speedMultiplier ?? 1), fare: Math.round(job.fare * (assignedVehicle ? upgradeFareMultiplier(assignedVehicle) : 1) * (hasResearch(state.completedResearch ?? [], 'smart-dispatch') ? 1.08 : 1) * 100) / 100, estimatedFare: Math.round(job.fare * (assignedVehicle ? upgradeFareMultiplier(assignedVehicle) : 1) * (hasResearch(state.completedResearch ?? [], 'smart-dispatch') ? 1.08 : 1) * 100) / 100 } : job)
+    const jobs = result.jobs.map((job) => job.id === jobId ? { ...job, pickupTimeMultiplier: pickupSpeedMultiplier(driver), durationMinutes: (driver?.trait === 'careful' ? job.durationMinutes * 1.05 : job.durationMinutes) / (state.worldCondition?.speedMultiplier ?? 1), fare: Math.round(job.fare * (assignedVehicle ? upgradeFareMultiplier(assignedVehicle) : 1) * (hasResearch(state.completedResearch ?? [], 'smart-dispatch') ? 1.08 : 1) * 100) / 100, estimatedFare: Math.round(job.fare * (assignedVehicle ? upgradeFareMultiplier(assignedVehicle) : 1) * (hasResearch(state.completedResearch ?? [], 'smart-dispatch') ? 1.08 : 1) * 100) / 100 } : job)
     // Viewing an offer draws a temporary preview line. Clear that focus when
     // dispatching so the preview disappears at the decision point; the live
     // accepted-job route remains responsible for journey progress.

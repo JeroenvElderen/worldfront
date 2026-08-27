@@ -19,8 +19,6 @@ export type TerritoryFeature = {
 }
 
 const realBoundaryCache = new Map<string, Promise<TerritoryFeature | null>>()
-const discoveryFeatureCache = new Map<string, TerritoryFeature>()
-let mergedDiscoveryCache: { ids: string[]; territory: TerritoryFeature | null } = { ids: [], territory: null }
 
 /**
  * Resolve the administrative boundary containing a territory's coordinates.
@@ -118,23 +116,16 @@ export const appendDiscoveriesToTerritory = (
   ownedTerritories: TerritoryFeature[],
   discoveries: Array<{ id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; radiusKm?: number }>,
 ) => {
-  const ids = discoveries.map(({ id }) => id)
-  const cachedIds = mergedDiscoveryCache.ids
-  const extendsCachedPrefix = cachedIds.length <= ids.length && cachedIds.every((id, index) => ids[index] === id)
-  const firstNewIndex = extendsCachedPrefix ? cachedIds.length : 0
-  const newTerritories = discoveries.slice(firstNewIndex).map((discovery) => {
-    const cached = discoveryFeatureCache.get(discovery.id)
-    if (cached) return cached
-    const territory = discovery.routeCoordinates && discovery.routeCoordinates.length >= 2
+  // Build discoveries from the current state on every territory update. A
+  // discovery can retain its id while its route is replaced with the final
+  // Mapbox route, so caching by id can otherwise leave setData() with stale
+  // geometry until the application is reloaded and the cache is rebuilt.
+  const discoveryTerritories = discoveries.map((discovery) =>
+    discovery.routeCoordinates && discovery.routeCoordinates.length >= 2
       ? taxiDiscoveryRouteTerritory(discovery.id, discovery.routeCoordinates, discovery.radiusKm)
       : taxiDiscoveryTerritory(discovery.id, discovery.coordinates, discovery.radiusKm)
-    discoveryFeatureCache.set(discovery.id, territory)
-    return territory
-  })
-  const discoveryTerritory = extendsCachedPrefix
-    ? mergeVillageTerritories([...(mergedDiscoveryCache.territory ? [mergedDiscoveryCache.territory] : []), ...newTerritories])
-    : mergeVillageTerritories(newTerritories)
-  mergedDiscoveryCache = { ids, territory: discoveryTerritory }
+  )
+  const discoveryTerritory = mergeVillageTerritories(discoveryTerritories)
   return mergeVillageTerritories([...ownedTerritories, ...(discoveryTerritory ? [discoveryTerritory] : [])])
 }
 

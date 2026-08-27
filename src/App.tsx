@@ -54,6 +54,13 @@ export default function App() {
     setPlacingTerritory(false)
   }, [expandTerritory])
 
+  const handleTaxiArrived = useCallback((jobId: string) => {
+    const state = useGameStore.getState()
+    if (state.jobs.some((job) => job.id === jobId && job.status === 'accepted')) {
+      state.tickJobs()
+    }
+  }, [])
+
   const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, runAutomation, hasHydrated } = game
 
   const availableOfferCapacity = jobOfferCapacity(game.vehicles, game.drivers)
@@ -323,6 +330,7 @@ export default function App() {
         onExpandTerritory={handleExpandTerritory}
         onOpenJob={game.openJob}
         onSaveJobPickupRoute={game.saveJobPickupRoute}
+        onTaxiArrived={handleTaxiArrived}
       /></Suspense>
 
       {game.company ? (

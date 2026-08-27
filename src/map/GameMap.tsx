@@ -165,11 +165,15 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
     const abortController = new AbortController()
     const animationTimers = new Set<number>()
     const animationRunners = new Set<() => void>()
-    let usingFallbackStyle = !token
-    let mapLoaded = false
     const instance = new mapboxgl.Map({
       container: container.current,
-      style: token ? 'mapbox://styles/mapbox/dark-v11' : fallbackStyle,
+      // Keep the basemap independent from the Mapbox account token. The
+      // bundled token can be revoked, restricted to another origin, or be
+      // unavailable while an Android WebView is starting; any of those cases
+      // previously left the entire map as a blank canvas until a late retry.
+      // Mapbox is still used for optional road routing below, while the public
+      // raster style lets the map and all game overlays render immediately.
+      style: fallbackStyle,
       center: selected?.coordinates ?? worldOverview.center,
       zoom: selected?.mapZoom ?? worldOverview.zoom,
       pitch: 0,
@@ -205,38 +209,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
     const handleContextRestored = () => { instance.resize(); instance.triggerRepaint() }
     canvas.addEventListener('webglcontextlost', handleContextLost)
     canvas.addEventListener('webglcontextrestored', handleContextRestored)
-    const switchToFallbackStyle = () => {
-      if (map.current !== instance || usingFallbackStyle) return
-      usingFallbackStyle = true
-      instance.setStyle(fallbackStyle)
-    }
-    instance.on('error', (event) => {
-      if (map.current !== instance || usingFallbackStyle) return
-      const message = event.error?.message?.toLowerCase() ?? ''
-      // Only replace the whole style when the style itself cannot load. A
-      // transient tile, image, or Directions error must not clear a working
-      // map (which is especially noticeable while a job is being accepted).
-      if (message.includes('webgl') || message.includes('context lost')) {
-        return
-      }
-      const styleCannotLoad = message.includes('unauthorized') ||
-        message.includes('access token') ||
-        message.includes('forbidden') ||
-        message.includes('401') ||
-        message.includes('403') ||
-        message.includes('style') && (message.includes('404') || message.includes('not found') || message.includes('failed to load'))
-      if (!styleCannotLoad) return
-      switchToFallbackStyle()
-    })
-    // A failed style request does not consistently emit a useful Mapbox error
-    // in Android WebViews. Do not leave the game on an empty canvas forever:
-    // if the initial Mapbox style cannot finish, retry with the raster style.
-    const styleLoadTimeout = window.setTimeout(() => {
-      if (!mapLoaded) switchToFallbackStyle()
-    }, 10_000)
     instance.on('load', async () => {
-      mapLoaded = true
-      window.clearTimeout(styleLoadTimeout)
       keepMapFlatAndBuildingFree(instance)
       instance.addSource('company-base', { type: 'geojson', data: featureCollection(selected ? [point(selected.coordinates)] : []) })
       instance.addLayer({ id: 'base-halo', type: 'circle', source: 'company-base', paint: { 'circle-radius': 22, 'circle-color': '#22d3a7', 'circle-opacity': 0.22, 'circle-stroke-width': 1, 'circle-stroke-color': '#5eead4' } })
@@ -427,7 +400,6 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
       currentLiveJobTimers.clear()
       currentLiveJobRunners.clear()
       currentLiveJobIds.clear()
-      window.clearTimeout(styleLoadTimeout)
       resizeObserver.disconnect()
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('pageshow', handleVisibilityChange)

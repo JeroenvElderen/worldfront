@@ -11,6 +11,7 @@ import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
 import { appendDiscoveriesToTerritory, lockedTerritoryMask, realVillageTerritory, villageTerritory, VILLAGE_TERRITORY_RADIUS_KM } from '../services/territoryGeometry'
 import type { TerritoryFeature } from '../services/territoryGeometry'
+import { cancelMapFrame, scheduleMapFrame } from '../services/frameScheduler'
 
 interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; territoryExpansions: TerritoryExpansion[]; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void; onSaveJobPickupRoute: (jobId: string, coordinates: Coordinates[]) => void }
 const token = mapboxAccessToken
@@ -93,6 +94,7 @@ const mapVehicleColor = (vehicle: Vehicle, standardColor: string) =>
 const VEHICLE_MARKER_RADIUS = 4
 const VEHICLE_MARKER_STROKE_WIDTH = 1.5
 const ROUTE_GLOW_WIDTH = 10
+const ROUTE_GEOMETRY_UPDATE_INTERVAL_MS = 250
 
 const keepMapFlatAndBuildingFree = (instance: mapboxgl.Map) => {
   instance.getStyle().layers?.forEach((layer) => {
@@ -102,10 +104,6 @@ const keepMapFlatAndBuildingFree = (instance: mapboxgl.Map) => {
     }
   })
 }
-// Android WebViews can throttle requestAnimationFrame when Mapbox has no
-// camera animation in progress. Drive every journey from a short timer so an
-// idle map still updates smoothly and reliably.
-const JOURNEY_UPDATE_INTERVAL_MS = 50
 // A fleet index is not a stable identity: buying or selling another vehicle can
 // change which vehicle an existing indexed source represents. Key map sources by
 // the persisted vehicle id so dispatch always animates the vehicle assigned to
@@ -195,7 +193,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
     pickupJobIds.current.clear()
     pickupHandlers.current.clear()
     currentLiveJobIds.clear()
-    currentLiveJobTimers.forEach(window.clearTimeout)
+    currentLiveJobTimers.forEach(cancelMapFrame)
     currentLiveJobTimers.clear()
     currentLiveJobRunners.clear()
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
@@ -269,13 +267,13 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
           let rentalTimer: number | undefined
           const animateRental = () => {
             if (rentalTimer !== undefined) {
-              window.clearTimeout(rentalTimer)
+              cancelMapFrame(rentalTimer)
               animationTimers.delete(rentalTimer)
             }
             const progress = rentalJourneyProgress(rental)
             ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(roadCoordinates, progress)))
             instance.triggerRepaint()
-            if (progress < 1 && document.visibilityState !== 'hidden') { rentalTimer = window.setTimeout(animateRental, JOURNEY_UPDATE_INTERVAL_MS); animationTimers.add(rentalTimer) }
+            if (progress < 1 && document.visibilityState !== 'hidden') { rentalTimer = scheduleMapFrame(animateRental); animationTimers.add(rentalTimer) }
           }
           animationRunners.add(animateRental); animateRental(); continue
         }
@@ -306,13 +304,13 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
           let postalTimer: number | undefined
           const animatePostal = () => {
             if (postalTimer !== undefined) {
-              window.clearTimeout(postalTimer)
+              cancelMapFrame(postalTimer)
               animationTimers.delete(postalTimer)
             }
             const progress = postalRouteProgress(postal)
             ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(roadCoordinates, progress)))
             instance.triggerRepaint()
-            if (progress < 1 && document.visibilityState !== 'hidden') { postalTimer = window.setTimeout(animatePostal, JOURNEY_UPDATE_INTERVAL_MS); animationTimers.add(postalTimer) }
+            if (progress < 1 && document.visibilityState !== 'hidden') { postalTimer = scheduleMapFrame(animatePostal); animationTimers.add(postalTimer) }
           }
           animationRunners.add(animatePostal); animatePostal(); continue
         }
@@ -359,18 +357,19 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
         instance.moveLayer(`${routeSourceId}-glow`, routeSourceId)
         const journey = getJobJourney(job, vehicle)
         let animationTimer: number | undefined
+        let lastRouteUpdateAt = 0
         const scheduleAnimation = () => {
           if (animationTimer !== undefined) {
-            window.clearTimeout(animationTimer)
+            cancelMapFrame(animationTimer)
             animationTimers.delete(animationTimer)
           }
           if (document.visibilityState === 'hidden') return
-          animationTimer = window.setTimeout(animate, JOURNEY_UPDATE_INTERVAL_MS)
+          animationTimer = scheduleMapFrame(animate)
           animationTimers.add(animationTimer)
         }
         const animate = () => {
           if (animationTimer !== undefined) {
-            window.clearTimeout(animationTimer)
+            cancelMapFrame(animationTimer)
             animationTimers.delete(animationTimer)
           }
           const now = Date.now()
@@ -385,10 +384,13 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
           const progress = motion.progress
           const currentPosition = routePosition(activeRoute.coordinates, progress)
           ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(currentPosition))
-          const routeAhead = pickingUp
-            ? [...remainingRoute(pickupRoute.coordinates, progress), ...passengerRoute.coordinates.slice(1)]
-            : remainingRoute(passengerRoute.coordinates, progress)
-          ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(routeAhead))
+          if (now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS || now >= journey.arrivesAt) {
+            const routeAhead = pickingUp
+              ? [...remainingRoute(pickupRoute.coordinates, progress), ...passengerRoute.coordinates.slice(1)]
+              : remainingRoute(passengerRoute.coordinates, progress)
+            ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(routeAhead))
+            lastRouteUpdateAt = now
+          }
           instance.setPaintProperty(sourceId, 'circle-color', mapVehicleColor(vehicle, pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger))
           if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
           instance.triggerRepaint()
@@ -402,9 +404,9 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
     })
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
-        animationTimers.forEach(window.clearTimeout)
+        animationTimers.forEach(cancelMapFrame)
         animationTimers.clear()
-        currentLiveJobTimers.forEach(window.clearTimeout)
+        currentLiveJobTimers.forEach(cancelMapFrame)
         currentLiveJobTimers.clear()
         instance.stop()
         return
@@ -420,8 +422,8 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
     window.addEventListener('online', handleVisibilityChange)
     return () => {
       abortController.abort()
-      animationTimers.forEach(window.clearTimeout)
-      currentLiveJobTimers.forEach(window.clearTimeout)
+      animationTimers.forEach(cancelMapFrame)
+      currentLiveJobTimers.forEach(cancelMapFrame)
       currentLiveJobTimers.clear()
       currentLiveJobRunners.clear()
       currentLiveJobIds.clear()
@@ -619,6 +621,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
       const journey = getJobJourney(job, vehicle)
       let pickupRoute: RouteDetails = { coordinates: job.pickupRouteCoordinates ?? [start, jobPickup(job)], speedLimits: [] }
       const passengerRoute: RouteDetails = { coordinates: job.routeCoordinates ?? [jobPickup(job), jobDestination(job)], speedLimits: [] }
+      let lastRouteUpdateAt = 0
       if (token) {
         const fetchRoute = async (from: Coordinates, to: Coordinates) => {
           const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?annotations=maxspeed&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`)
@@ -640,7 +643,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
         if (map.current !== instance || !instance.getSource(taxiSourceId)) return
         const timer = liveJobTimers.current.get(job.id)
         if (timer !== undefined) {
-          window.clearTimeout(timer)
+          cancelMapFrame(timer)
           liveJobTimers.current.delete(job.id)
         }
         const now = Date.now()
@@ -653,10 +656,13 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
         const progress = routeMotion(route, elapsed, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130).progress
         const currentPosition = routePosition(route.coordinates, progress)
         ;(instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(point(currentPosition))
-        const routeAhead = pickingUp
-          ? [...remainingRoute(pickupRoute.coordinates, progress), ...passengerRoute.coordinates.slice(1)]
-          : remainingRoute(passengerRoute.coordinates, progress)
-        ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(routeAhead))
+        if (now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS || now >= journey.arrivesAt) {
+          const routeAhead = pickingUp
+            ? [...remainingRoute(pickupRoute.coordinates, progress), ...passengerRoute.coordinates.slice(1)]
+            : remainingRoute(passengerRoute.coordinates, progress)
+          ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(routeAhead))
+          lastRouteUpdateAt = now
+        }
         instance.setPaintProperty(taxiSourceId, 'circle-color', mapVehicleColor(vehicle, pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger))
         const passengerSource = instance.getSource(passengerSourceId) as mapboxgl.GeoJSONSource | undefined
         // The halo waits at pickup, then rides with the passenger's vehicle.
@@ -665,7 +671,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
         // necessary on some idle Android WebViews.
         instance.triggerRepaint()
         if (now < journey.arrivesAt && document.visibilityState !== 'hidden') {
-          liveJobTimers.current.set(job.id, window.setTimeout(animate, JOURNEY_UPDATE_INTERVAL_MS))
+          liveJobTimers.current.set(job.id, scheduleMapFrame(animate))
         } else if (now >= journey.arrivesAt) liveJobRunners.current.delete(job.id)
       }
 
@@ -682,7 +688,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
       const sourceId = vehicleSourceId(vehicle.id)
       const taxiSource = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined
       const timer = liveJobTimers.current.get(job.id)
-      if (timer !== undefined) window.clearTimeout(timer)
+      if (timer !== undefined) cancelMapFrame(timer)
       liveJobTimers.current.delete(job.id)
       liveJobRunners.current.delete(job.id)
       liveJobIds.current.delete(job.id)
@@ -728,16 +734,21 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
       })()
 
       let timer: number | undefined
+      let lastRouteUpdateAt = 0
       const animate = () => {
         if (timer !== undefined) timers.delete(timer)
         const startedAt = new Date(service.startedAt).getTime()
         const arrivesAt = new Date(service.arrivesAt).getTime()
         const progress = Math.max(0, Math.min(1, (Date.now() - startedAt) / Math.max(1, arrivesAt - startedAt)))
         ;(instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(roadCoordinates, progress)))
-        ;(instance.getSource(routeId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(remainingRoute(roadCoordinates, progress)))
+        const now = Date.now()
+        if (now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS || progress >= 1) {
+          ;(instance.getSource(routeId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(remainingRoute(roadCoordinates, progress)))
+          lastRouteUpdateAt = now
+        }
         instance.triggerRepaint()
         if (progress < 1 && document.visibilityState !== 'hidden') {
-          timer = window.setTimeout(animate, JOURNEY_UPDATE_INTERVAL_MS)
+          timer = scheduleMapFrame(animate)
           timers.add(timer)
         }
       }
@@ -746,7 +757,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
 
     return () => {
       abortController.abort()
-      timers.forEach(window.clearTimeout)
+      timers.forEach(cancelMapFrame)
       routeSourceIds.forEach((routeId) => {
         if (instance.getLayer(routeId)) instance.removeLayer(routeId)
         if (instance.getSource(routeId)) instance.removeSource(routeId)

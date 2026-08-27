@@ -9,7 +9,28 @@ const database = openDB('travel-empire', 1, { upgrade(db) { db.createObjectStore
 // stuck request would otherwise leave the game on its splash screen forever.
 const DATABASE_TIMEOUT_MS = 4_000
 const DATABASE_WRITE_DELAY_MS = 250
+const LOCAL_BACKUP_WRITE_DELAY_MS = 2_000
 const pendingWrites = new Map<string, { value: string; timeout: number }>()
+const pendingBackupWrites = new Map<string, string>()
+let backupTimeout: number | undefined
+
+const flushLocalBackups = () => {
+  if (backupTimeout !== undefined) window.clearTimeout(backupTimeout)
+  backupTimeout = undefined
+  pendingBackupWrites.forEach((value, name) => {
+    try { window.localStorage.setItem(name, value) } catch { /* Storage can be disabled. */ }
+  })
+  pendingBackupWrites.clear()
+}
+
+const queueLocalBackup = (name: string, value: string) => {
+  pendingBackupWrites.set(name, value)
+  if (backupTimeout === undefined) backupTimeout = window.setTimeout(flushLocalBackups, LOCAL_BACKUP_WRITE_DELAY_MS)
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushLocalBackups()
+})
 
 const withTimeout = async <T>(operation: Promise<T>): Promise<T> => {
   let timeout: number | undefined
@@ -32,9 +53,10 @@ const localBackup = {
     try { return window.localStorage.getItem(name) } catch { return null }
   },
   set(name: string, value: string) {
-    try { window.localStorage.setItem(name, value) } catch { /* Storage can be disabled. */ }
+    queueLocalBackup(name, value)
   },
   remove(name: string) {
+    pendingBackupWrites.delete(name)
     try { window.localStorage.removeItem(name) } catch { /* Storage can be disabled. */ }
   },
 }
@@ -50,8 +72,8 @@ export const indexedDbStorage: StateStorage = {
     }
   },
   async setItem(name, value) {
-    // Keep a synchronous backup so a broken IndexedDB database can never make
-    // a player choose between starting the app and retaining their save.
+    // Coalesce the fallback copy so serializing frequent game updates does not
+    // repeatedly block the UI thread; backgrounding always flushes it at once.
     localBackup.set(name, value)
     const pending = pendingWrites.get(name)
     if (pending) window.clearTimeout(pending.timeout)

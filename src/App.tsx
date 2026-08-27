@@ -11,15 +11,15 @@ import { jobOfferCapacity } from './services/earlyGameEngine'
 import { getCity } from './data/cities'
 import { moneyFormatterForCity } from './services/localization'
 import { CurrencyProvider } from './components/game/CurrencyContext'
-import { GameMap } from './map/GameMap'
 
-const JOB_REFRESH_INTERVAL_MS = 10_000
+const JOB_REFRESH_INTERVAL_MS = 60_000
 
 const CitySetup = lazy(() => import('./screens/CitySetup').then(({ CitySetup: component }) => ({ default: component })))
 const TaxiCallPopup = lazy(() => import('./components/game/TaxiCallPopup').then(({ TaxiCallPopup: component }) => ({ default: component })))
 const SectionSheet = lazy(() => import('./components/game/SectionSheet').then(({ SectionSheet: component }) => ({ default: component })))
 const FinancialDashboard = lazy(() => import('./components/game/FinancialDashboard').then(({ FinancialDashboard: component }) => ({ default: component })))
 const HotelDashboard = lazy(() => import('./components/game/HotelDashboard').then(({ HotelDashboard: component }) => ({ default: component })))
+const GameMap = lazy(() => import('./map/GameMap').then(({ GameMap: component }) => ({ default: component })))
 
 export default function App() {
   const game = useGameStore()
@@ -308,7 +308,7 @@ export default function App() {
   return (
     <CurrencyProvider city={activeCity}>
     <div className="game-shell">
-      <GameMap
+      <Suspense fallback={<div className="map-loading" aria-label="Loading map" />}><GameMap
         cityId={game.activeCityId ?? game.startingCityId}
         customCities={game.customCities ?? []}
         branches={game.branches ?? []}
@@ -322,7 +322,7 @@ export default function App() {
         onExpandTerritory={handleExpandTerritory}
         onOpenJob={game.openJob}
         onSaveJobPickupRoute={game.saveJobPickupRoute}
-      />
+      /></Suspense>
 
       {game.company ? (
         <>

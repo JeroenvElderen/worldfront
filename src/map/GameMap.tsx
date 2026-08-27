@@ -13,7 +13,7 @@ import { appendDiscoveriesToTerritory, lockedTerritoryMask, realVillageTerritory
 import type { TerritoryFeature } from '../services/territoryGeometry'
 import { cancelMapFrame, scheduleMapFrame } from '../services/frameScheduler'
 
-interface GameMapProps { layoutKey: string; cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; territoryExpansions: TerritoryExpansion[]; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void; onSaveJobPickupRoute: (jobId: string, coordinates: Coordinates[]) => void }
+interface GameMapProps { layoutKey: string; cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; territoryExpansions: TerritoryExpansion[]; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void; onSaveJobPickupRoute: (jobId: string, coordinates: Coordinates[]) => void; onTaxiArrived: (jobId: string) => void }
 const token = mapboxAccessToken
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
@@ -115,7 +115,7 @@ const missionColor = (jobId: string) => {
   return `hsl(${hash % 360}, 100%, 60%)`
 }
 
-function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpansions, vehicles, jobs, focusedJobId, placingStation, placingTerritory, onBuildStation, onExpandTerritory, onOpenJob, onSaveJobPickupRoute }: GameMapProps) {
+function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpansions, vehicles, jobs, focusedJobId, placingStation, placingTerritory, onBuildStation, onExpandTerritory, onOpenJob, onSaveJobPickupRoute, onTaxiArrived }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const pickupJobIds = useRef(new Set<string>())
@@ -123,6 +123,7 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
   const liveJobIds = useRef(new Set<string>())
   const liveJobTimers = useRef(new Map<string, number>())
   const liveJobRunners = useRef(new Map<string, () => void>())
+  const arrivedJobIds = useRef(new Set<string>())
   const [mapRevision, setMapRevision] = useState(0)
   const [containerReady, setContainerReady] = useState(false)
   // Null is a resolved fallback too. Remember it so a location with no mapped
@@ -498,6 +499,7 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
   useEffect(() => {
     const instance = map.current
     if (!instance) return
+    let territoryRefreshTimer: number | undefined
     const updateDepots = () => {
       const stationCoordinates = branches.flatMap((station) => {
         const coordinates = station.coordinates ?? getCity(station.cityId, customCities)?.coordinates
@@ -511,6 +513,7 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
           realTerritories[expansion.id] ?? villageTerritory(expansion.id, expansion.coordinates, VILLAGE_TERRITORY_RADIUS_KM)),
       ]
       const discoveries = territoryExpansions.filter((expansion) => expansion.source === 'taxi-discovery')
+      const territoryRevision = discoveries.at(-1)?.id ?? `owned-${ownedTerritories.length}`
       // Discovery checkpoints stay invisible. Only their union with the
       // existing territory is drawn, so drop-off simply extends one border.
       const unlockedTerritory = appendDiscoveriesToTerritory(ownedTerritories, discoveries)
@@ -530,6 +533,31 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
         // and makes the newly completed journey visible straight away.
         instance.resize()
         instance.triggerRepaint()
+        const acknowledge = () => {
+          if (territoryRefreshTimer !== undefined) window.clearTimeout(territoryRefreshTimer)
+          territoryRefreshTimer = undefined
+        }
+        instance.once('idle', acknowledge)
+        territoryRefreshTimer = window.setTimeout(() => {
+          instance.off('idle', acknowledge)
+          if (map.current !== instance || !instance.isStyleLoaded()) return
+          // Some Android WebViews can strand an update in Mapbox's worker.
+          // Recreating only the affected sources gives the worker fresh source
+          // identities without discarding the map, routes, or vehicle markers.
+          for (const layerId of ['service-coverage-line', 'service-coverage-fill', 'locked-territory-fill']) {
+            if (instance.getLayer(layerId)) instance.removeLayer(layerId)
+          }
+          for (const sourceId of ['service-coverage', 'locked-territory']) {
+            if (instance.getSource(sourceId)) instance.removeSource(sourceId)
+          }
+          instance.addSource('locked-territory', { type: 'geojson', data: lockedData })
+          instance.addLayer({ id: 'locked-territory-fill', type: 'fill', source: 'locked-territory', paint: { 'fill-color': '#ef7777', 'fill-opacity': .24 } })
+          instance.addSource('service-coverage', { type: 'geojson', data: coverageData })
+          instance.addLayer({ id: 'service-coverage-fill', type: 'fill', source: 'service-coverage', paint: { 'fill-color': '#19cdb3', 'fill-opacity': 0 } })
+          instance.addLayer({ id: 'service-coverage-line', type: 'line', source: 'service-coverage', paint: { 'line-color': '#5eead4', 'line-width': 2, 'line-opacity': .85 } })
+          instance.triggerRepaint()
+          console.debug('[territory] refreshed Mapbox sources', { territoryRevision, discoveries: discoveries.length })
+        }, 1_000)
         return
       }
       instance.addSource('locked-territory', { type: 'geojson', data: lockedData })
@@ -547,7 +575,10 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
     }
     if (instance.isStyleLoaded()) updateDepots()
     else instance.once('load', updateDepots)
-    return () => { instance.off('load', updateDepots) }
+    return () => {
+      instance.off('load', updateDepots)
+      if (territoryRefreshTimer !== undefined) window.clearTimeout(territoryRefreshTimer)
+    }
   }, [branches, customCities, territoryExpansions, mapRevision, realTerritories])
 
   useLayoutEffect(() => {
@@ -712,7 +743,14 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
         instance.triggerRepaint()
         if (now < journey.arrivesAt && document.visibilityState !== 'hidden') {
           liveJobTimers.current.set(job.id, scheduleMapFrame(animate))
-        } else if (now >= journey.arrivesAt) liveJobRunners.current.delete(job.id)
+        } else if (now >= journey.arrivesAt) {
+          liveJobRunners.current.delete(job.id)
+          if (!arrivedJobIds.current.has(job.id)) {
+            arrivedJobIds.current.add(job.id)
+            console.debug('[taxi] arrived; settling job and territory', { jobId: job.id, routeCoordinates: passengerRoute.coordinates.length })
+            onTaxiArrived(job.id)
+          }
+        }
       }
 
       // Start the runner now so it can hold the marker through the dispatch
@@ -739,7 +777,7 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
       if (instance.getLayer(`${routeSourceId}-glow`)) instance.removeLayer(`${routeSourceId}-glow`)
       if (instance.getSource(routeSourceId)) instance.removeSource(routeSourceId)
     }
-  }, [cityId, customCities, focusedJobId, jobs, vehicles, mapRevision, onOpenJob, onSaveJobPickupRoute])
+  }, [cityId, customCities, focusedJobId, jobs, vehicles, mapRevision, onOpenJob, onSaveJobPickupRoute, onTaxiArrived])
 
   // Recovery trips can begin long after Mapbox was constructed. Animate them
   // in their own synchronized effect so a newly tired driver drives away
@@ -967,5 +1005,6 @@ export const GameMap = memo(GameMapView, (previous, next) =>
   previous.focusedJobId === next.focusedJobId &&
   previous.onOpenJob === next.onOpenJob &&
   previous.onSaveJobPickupRoute === next.onSaveJobPickupRoute &&
+  previous.onTaxiArrived === next.onTaxiArrived &&
   previous.jobs === next.jobs
 )

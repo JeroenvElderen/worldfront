@@ -5,15 +5,14 @@ import { featureCollection, lineString, point } from '@turf/helpers'
 import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, worldOverview } from '../data/cities'
 import { taxiModels } from '../data/taxis'
-import type { Branch, Coordinates, TaxiJob, TerritoryExpansion, Vehicle } from '../models/game'
+import type { Branch, Coordinates, TaxiJob, TerritoryExpansion, TerritoryFeature, TrafficIncident, Vehicle, VehicleIncident } from '../models/game'
 import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
-import { appendDiscoveriesToTerritory, lockedTerritoryMask, realVillageTerritory, villageTerritory, VILLAGE_TERRITORY_RADIUS_KM } from '../services/territoryGeometry'
-import type { TerritoryFeature } from '../services/territoryGeometry'
+import { lockedTerritoryMask, mergeVillageTerritories, realVillageTerritory, villageTerritory, VILLAGE_TERRITORY_RADIUS_KM } from '../services/territoryGeometry'
 import { cancelMapFrame, scheduleMapFrame } from '../services/frameScheduler'
 
-interface GameMapProps { layoutKey: string; cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; territoryExpansions: TerritoryExpansion[]; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void; onSaveJobPickupRoute: (jobId: string, coordinates: Coordinates[]) => void; onTaxiArrived: (jobId: string) => void }
+interface GameMapProps { layoutKey: string; cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; territoryExpansions: TerritoryExpansion[]; exploredTerritory: TerritoryFeature | null; vehicles: Vehicle[]; jobs: TaxiJob[]; trafficIncidents: TrafficIncident[]; vehicleIncidents: VehicleIncident[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void; onSaveJobPickupRoute: (jobId: string, coordinates: Coordinates[]) => void; onTaxiArrived: (jobId: string) => void }
 const token = mapboxAccessToken
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
@@ -60,19 +59,32 @@ const speedLimitKmh = (limit: RouteSpeedLimit | undefined) => {
   return Math.round(limit.unit === 'mph' ? limit.speed * 1.609344 : limit.speed)
 }
 
-const routeMotion = (route: RouteDetails, elapsed: number, fallbackSpeedKmh: number, topSpeedKmh: number) => {
+const createRouteMotion = (route: RouteDetails, fallbackSpeedKmh: number, topSpeedKmh: number) => {
   const lengths = routeLengths(route.coordinates)
   const speeds = lengths.map((_, index) => Math.min(topSpeedKmh, speedLimitKmh(route.speedLimits[index]) ?? fallbackSpeedKmh))
   const durations = lengths.map((length, index) => length / Math.max(1, speeds[index]))
   const totalDuration = durations.reduce((sum, duration) => sum + duration, 0)
-  let remaining = Math.max(0, Math.min(1, elapsed)) * totalDuration
-  let segment = 0
-  while (segment < durations.length - 1 && remaining > durations[segment]) remaining -= durations[segment++]
-  const segmentProgress = durations[segment] ? remaining / durations[segment] : 1
-  const distanceBefore = lengths.slice(0, segment).reduce((sum, length) => sum + length, 0)
   const totalLength = lengths.reduce((sum, length) => sum + length, 0)
-  return {
-    progress: totalLength ? (distanceBefore + (lengths[segment] ?? 0) * segmentProgress) / totalLength : 1,
+  const cumulativeDurations = new Array<number>(durations.length + 1).fill(0)
+  const cumulativeLengths = new Array<number>(lengths.length + 1).fill(0)
+  for (let index = 0; index < durations.length; index += 1) {
+    cumulativeDurations[index + 1] = cumulativeDurations[index] + durations[index]
+    cumulativeLengths[index + 1] = cumulativeLengths[index] + lengths[index]
+  }
+
+  return (elapsed: number) => {
+    const target = Math.max(0, Math.min(1, elapsed)) * totalDuration
+    let low = 0
+    let high = Math.max(0, durations.length - 1)
+    while (low < high) {
+      const middle = (low + high) >>> 1
+      if (cumulativeDurations[middle + 1] < target) low = middle + 1
+      else high = middle
+    }
+    const segment = low
+    const segmentElapsed = target - cumulativeDurations[segment]
+    const segmentProgress = durations[segment] ? segmentElapsed / durations[segment] : 1
+    return totalLength ? (cumulativeLengths[segment] + (lengths[segment] ?? 0) * segmentProgress) / totalLength : 1
   }
 }
 
@@ -94,7 +106,7 @@ const mapVehicleColor = (vehicle: Vehicle, standardColor: string) =>
 const VEHICLE_MARKER_RADIUS = 4
 const VEHICLE_MARKER_STROKE_WIDTH = 1.5
 const ROUTE_GLOW_WIDTH = 10
-const ROUTE_GEOMETRY_UPDATE_INTERVAL_MS = 250
+const ROUTE_GEOMETRY_UPDATE_INTERVAL_MS = 500
 
 const keepMapFlatAndBuildingFree = (instance: mapboxgl.Map) => {
   instance.getStyle().layers?.forEach((layer) => {
@@ -121,7 +133,7 @@ const missionColor = (jobId: string) => {
   return `hsl(${hash % 360}, 100%, 60%)`
 }
 
-function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpansions, vehicles, jobs, focusedJobId, placingStation, placingTerritory, onBuildStation, onExpandTerritory, onOpenJob, onSaveJobPickupRoute, onTaxiArrived }: GameMapProps) {
+function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpansions, exploredTerritory, vehicles, jobs, trafficIncidents, vehicleIncidents, focusedJobId, placingStation, placingTerritory, onBuildStation, onExpandTerritory, onOpenJob, onSaveJobPickupRoute, onTaxiArrived }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const pickupJobIds = useRef(new Set<string>())
@@ -130,6 +142,7 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
   const liveJobTimers = useRef(new Map<string, number>())
   const liveJobRunners = useRef(new Map<string, () => void>())
   const arrivedJobIds = useRef(new Set<string>())
+  const incidentMarkers = useRef<mapboxgl.Marker[]>([])
   const [mapRevision, setMapRevision] = useState(0)
   const [containerReady, setContainerReady] = useState(false)
   // Null is a resolved fallback too. Remember it so a location with no mapped
@@ -137,6 +150,21 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
   const [realTerritories, setRealTerritories] = useState<Record<string, TerritoryFeature | null>>({})
   const realTerritoriesRef = useRef(realTerritories)
   realTerritoriesRef.current = realTerritories
+  useEffect(() => {
+    const instance = map.current
+    if (!instance) return
+    incidentMarkers.current.forEach((marker) => marker.remove())
+    const activeTraffic = trafficIncidents.filter((incident) => !incident.resolved && incident.cityId === cityId)
+    const activeVehicles = vehicleIncidents.filter((incident) => !incident.resolved).flatMap((incident) => {
+      const coordinates = incident.coordinates ?? vehicles.find((vehicle) => vehicle.id === incident.vehicleId)?.position
+      return coordinates ? [{ ...incident, coordinates }] : []
+    })
+    incidentMarkers.current = [
+      ...activeTraffic.map((incident) => new mapboxgl.Marker({ color: incident.severity === 3 ? '#ef4444' : '#f59e0b', scale: .72 }).setLngLat(incident.coordinates).setPopup(new mapboxgl.Popup({ offset: 18 }).setText(`${incident.title}: ${incident.description}`)).addTo(instance)),
+      ...activeVehicles.map((incident) => new mapboxgl.Marker({ color: '#ef4444', scale: .82 }).setLngLat(incident.coordinates).setPopup(new mapboxgl.Popup({ offset: 18 }).setText(incident.description)).addTo(instance)),
+    ]
+    return () => { incidentMarkers.current.forEach((marker) => marker.remove()); incidentMarkers.current = [] }
+  }, [cityId, mapRevision, trafficIncidents, vehicleIncidents, vehicles])
   // Mapbox reads the container dimensions during construction. In Android
   // WebViews the first passive effect can run before the viewport has completed
   // its initial layout, so wait for a genuinely drawable box.
@@ -331,27 +359,38 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
           }
           animationRunners.add(animatePostal); animatePostal(); continue
         }
-        let pickupRoute: RouteDetails = { coordinates: job?.pickupRouteCoordinates ?? (job ? [start, jobPickup(job)] : [start]), speedLimits: [] }
-        let passengerRoute: RouteDetails = { coordinates: job?.routeCoordinates ?? (job ? [jobPickup(job), jobDestination(job)] : [start]), speedLimits: [] }
+        let journey = job ? getJobJourney(job, vehicle) : null
+        let pickupRouteReady = !job || Boolean(job.pickupRouteCoordinates?.length && job.pickupRouteCoordinates.length >= 2)
+        let pickupRoute: RouteDetails = { coordinates: job?.pickupRouteCoordinates ?? (job ? [start, start] : [start]), speedLimits: [] }
+        const passengerRoute: RouteDetails = { coordinates: job?.routeCoordinates ?? (job ? [jobPickup(job), jobDestination(job)] : [start]), speedLimits: [] }
+        const fallbackSpeedKmh = job && job.durationMinutes > 0 ? job.distanceKm / (job.durationMinutes / 60) : 30
+        let pickupMotion = createRouteMotion(pickupRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
+        const passengerMotion = createRouteMotion(passengerRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
         if (job && token) {
           const fetchRoute = async (from: Coordinates, to: Coordinates) => {
-            const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?alternatives=true&annotations=maxspeed&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`, { signal: abortController.signal })
-            if (!response.ok) throw new Error(`Directions request failed: ${response.status}`)
-            const result = await response.json() as { routes?: Array<{ duration: number; geometry: { coordinates: number[][] }; legs: Array<{ annotation?: { maxspeed?: RouteSpeedLimit[] } }> }> }
-            const route = result.routes?.reduce((fastest, candidate) => candidate.duration < fastest.duration ? candidate : fastest)
-            return route && { coordinates: route.geometry.coordinates, speedLimits: route.legs.flatMap((leg) => leg.annotation?.maxspeed ?? []) }
+            for (const profile of ['driving-traffic', 'driving'] as const) {
+              const annotations = profile === 'driving-traffic' ? '&annotations=maxspeed' : ''
+              const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/${profile}/${from.join(',')};${to.join(',')}?alternatives=false&continue_straight=true&geometries=geojson&overview=full${annotations}&access_token=${token}`, { signal: abortController.signal })
+              if (!response.ok) continue
+              const result = await response.json() as { routes?: Array<{ duration: number; geometry: { coordinates: number[][] }; legs?: Array<{ annotation?: { maxspeed?: RouteSpeedLimit[] } }> }> }
+              const route = result.routes?.reduce((fastest, candidate) => candidate.duration < fastest.duration ? candidate : fastest)
+              if (route?.geometry.coordinates.length && route.geometry.coordinates.length >= 2) return { coordinates: route.geometry.coordinates, speedLimits: route.legs?.flatMap((leg) => leg.annotation?.maxspeed ?? []) ?? [] }
+            }
+            throw new Error('No road route was returned for the pickup journey.')
           }
-          // A slow or unavailable Directions response must never delay the
-          // vehicle marker. Start on fallback geometry and upgrade the active
-          // route whenever both road routes arrive.
-          void Promise.all([
-            fetchRoute(start, jobPickup(job)),
-            fetchRoute(jobPickup(job), jobDestination(job)),
-          ]).then(([toPickup, toDestination]) => {
+          // The passenger route was resolved and persisted when the offer was
+          // generated. Only the vehicle-to-pickup leg requires a request.
+          void fetchRoute(start, jobPickup(job)).then((toPickup) => {
             if (abortController.signal.aborted || map.current !== instance) return
-            pickupRoute = toPickup ?? pickupRoute
-            passengerRoute = toDestination ?? passengerRoute
-            if (toPickup && !job.pickupRouteCoordinates) onSaveJobPickupRoute(job.id, toPickup.coordinates.map(([longitude, latitude]) => [longitude, latitude]))
+            if (!toPickup) return
+            pickupRoute = toPickup
+            pickupRouteReady = true
+            pickupMotion = createRouteMotion(pickupRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
+            if (!job.pickupRouteCoordinates) {
+              const routeStartedAt = new Date().toISOString()
+              journey = getJobJourney({ ...job, acceptedAt: routeStartedAt, pickupRouteCoordinates: toPickup.coordinates as Coordinates[] }, vehicle)
+              onSaveJobPickupRoute(job.id, toPickup.coordinates.map(([longitude, latitude]) => [longitude, latitude]))
+            }
           }).catch(() => undefined)
         }
         // Directions may still be loading when the live-map effect starts a
@@ -402,10 +441,11 @@ instance.addLayer({
 })
 
 instance.moveLayer(routeSourceId, sourceId)
-instance.moveLayer(`${routeSourceId}-glow`, routeSourceId)
-        const journey = getJobJourney(job, vehicle)
+        instance.moveLayer(`${routeSourceId}-glow`, routeSourceId)
+        if (!journey) continue
         let animationTimer: number | undefined
         let lastRouteUpdateAt = 0
+        let lastPickingUp: boolean | null = null
         const scheduleAnimation = () => {
           if (animationTimer !== undefined) {
             cancelMapFrame(animationTimer)
@@ -422,27 +462,34 @@ instance.moveLayer(`${routeSourceId}-glow`, routeSourceId)
           }
           const now = Date.now()
           const time = now
-          const pickingUp = time < journey.pickupAt
+          if (!pickupRouteReady) {
+            ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(start))
+            ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(passengerRoute.coordinates))
+            scheduleAnimation()
+            return
+          }
+          const currentJourney = journey!
+          const pickingUp = time < currentJourney.pickupAt
           const elapsed = pickingUp
-            ? Math.max(0, Math.min(1, (time - journey.departsAt) / (journey.pickupAt - journey.departsAt)))
-            : Math.max(0, Math.min(1, (time - journey.pickupAt) / (journey.arrivesAt - journey.pickupAt)))
+            ? Math.max(0, Math.min(1, (time - currentJourney.departsAt) / (currentJourney.pickupAt - currentJourney.departsAt)))
+            : Math.max(0, Math.min(1, (time - currentJourney.pickupAt) / (currentJourney.arrivesAt - currentJourney.pickupAt)))
           const activeRoute = pickingUp ? pickupRoute : passengerRoute
-          const fallbackSpeedKmh = job.durationMinutes > 0 ? job.distanceKm / (job.durationMinutes / 60) : 30
-          const motion = routeMotion(activeRoute, elapsed, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
-          const progress = motion.progress
+          const progress = pickingUp ? pickupMotion(elapsed) : passengerMotion(elapsed)
           const currentPosition = routePosition(activeRoute.coordinates, progress)
           ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(currentPosition))
-          if (now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS || now >= journey.arrivesAt) {
+          if (now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS || now >= currentJourney.arrivesAt) {
             const routeAhead = pickingUp
               ? [...remainingRoute(pickupRoute.coordinates, progress), ...passengerRoute.coordinates.slice(1)]
               : remainingRoute(passengerRoute.coordinates, progress)
             ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(routeAhead))
             lastRouteUpdateAt = now
           }
-          instance.setPaintProperty(sourceId, 'circle-color', mapVehicleColor(vehicle, pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger))
-          if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
-          instance.triggerRepaint()
-          if (now < journey.arrivesAt) {
+          if (pickingUp !== lastPickingUp) {
+            instance.setPaintProperty(sourceId, 'circle-color', mapVehicleColor(vehicle, pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger))
+            if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
+            lastPickingUp = pickingUp
+          }
+          if (now < currentJourney.arrivesAt) {
             scheduleAnimation()
           } else {
             animationRunners.delete(animate)
@@ -563,10 +610,13 @@ instance.moveLayer(`${routeSourceId}-glow`, routeSourceId)
         ...territoryExpansions.filter((expansion) => expansion.source !== 'taxi-discovery').map((expansion) =>
           realTerritories[expansion.id] ?? villageTerritory(expansion.id, expansion.coordinates, VILLAGE_TERRITORY_RADIUS_KM)),
       ]
-      const discoveries = territoryExpansions.filter((expansion) => expansion.source === 'taxi-discovery')
-      // Discovery checkpoints stay invisible. Only their union with the
-      // existing territory is drawn, so drop-off simply extends one border.
-      const unlockedTerritory = appendDiscoveriesToTerritory(ownedTerritories, discoveries)
+      // Taxi exploration is already buffered, simplified, and compacted by the
+      // territory engine when a trip completes. Rendering performs one union
+      // with village coverage and never replays historical routes.
+      const unlockedTerritory = mergeVillageTerritories([
+        ...ownedTerritories,
+        ...(exploredTerritory ? [exploredTerritory] : []),
+      ])
       const coverageData = featureCollection(unlockedTerritory ? [unlockedTerritory] : [])
       const lockedData = featureCollection([lockedTerritoryMask(unlockedTerritory)])
       const source = instance.getSource('depot-network') as mapboxgl.GeoJSONSource | undefined
@@ -626,7 +676,7 @@ instance.moveLayer(`${routeSourceId}-glow`, routeSourceId)
       instance.off('styledata', applyTerritoryUpdate)
       instance.off('idle', applyTerritoryUpdate)
     }
-  }, [branches, customCities, territoryExpansions, mapRevision, realTerritories])
+  }, [branches, customCities, territoryExpansions, exploredTerritory, mapRevision, realTerritories])
 
   useEffect(() => {
     const instance = map.current
@@ -802,25 +852,45 @@ if (
 }
 
       liveJobIds.current.add(job.id)
-      const journey = getJobJourney(job, vehicle)
-      let pickupRoute: RouteDetails = { coordinates: job.pickupRouteCoordinates ?? [start, jobPickup(job)], speedLimits: [] }
+      let journey = getJobJourney(job, vehicle)
+      let pickupRouteReady = Boolean(job.pickupRouteCoordinates?.length && job.pickupRouteCoordinates.length >= 2)
+      let pickupRoute: RouteDetails = { coordinates: job.pickupRouteCoordinates ?? [start, start], speedLimits: [] }
       const passengerRoute: RouteDetails = { coordinates: job.routeCoordinates ?? [jobPickup(job), jobDestination(job)], speedLimits: [] }
+      const fallbackSpeedKmh = job.durationMinutes > 0 ? job.distanceKm / (job.durationMinutes / 60) : 30
+      let pickupMotion = createRouteMotion(pickupRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
+      const passengerMotion = createRouteMotion(passengerRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
       let lastRouteUpdateAt = 0
+      let lastPickingUp: boolean | null = null
       if (token) {
         const fetchRoute = async (from: Coordinates, to: Coordinates) => {
-          const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${from.join(',')};${to.join(',')}?annotations=maxspeed&continue_straight=true&geometries=geojson&overview=full&access_token=${token}`)
-          if (!response.ok) throw new Error(`Directions request failed: ${response.status}`)
-          const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] }; legs: Array<{ annotation?: { maxspeed?: RouteSpeedLimit[] } }> }> }
-          const route = result.routes?.[0]
-          return route && { coordinates: route.geometry.coordinates, speedLimits: route.legs.flatMap((leg) => leg.annotation?.maxspeed ?? []) }
+          for (const profile of ['driving-traffic', 'driving'] as const) {
+            const annotations = profile === 'driving-traffic' ? '&annotations=maxspeed' : ''
+            const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/${profile}/${from.join(',')};${to.join(',')}?continue_straight=true&geometries=geojson&overview=full${annotations}&access_token=${token}`)
+            if (!response.ok) continue
+            const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] }; legs?: Array<{ annotation?: { maxspeed?: RouteSpeedLimit[] } }> }> }
+            const route = result.routes?.[0]
+            if (route?.geometry.coordinates.length && route.geometry.coordinates.length >= 2) return { coordinates: route.geometry.coordinates, speedLimits: route.legs?.flatMap((leg) => leg.annotation?.maxspeed ?? []) ?? [] }
+          }
+          throw new Error('No road route was returned for the pickup journey.')
         }
-        void fetchRoute(start, jobPickup(job))
-          .then((toPickup) => {
+        const applyPickupRoute = (toPickup: RouteDetails) => {
             if (!liveJobIds.current.has(job.id) || map.current !== instance) return
-            pickupRoute = toPickup ?? pickupRoute
-            if (toPickup && !job.pickupRouteCoordinates) onSaveJobPickupRoute(job.id, toPickup.coordinates.map(([longitude, latitude]) => [longitude, latitude]))
+            pickupRoute = toPickup
+            pickupRouteReady = true
+            pickupMotion = createRouteMotion(pickupRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
+            if (!job.pickupRouteCoordinates) {
+              const routeStartedAt = new Date().toISOString()
+              journey = getJobJourney({ ...job, acceptedAt: routeStartedAt, pickupRouteCoordinates: toPickup.coordinates as Coordinates[] }, vehicle)
+              onSaveJobPickupRoute(job.id, toPickup.coordinates.map(([longitude, latitude]) => [longitude, latitude]))
+            }
+        }
+        const requestPickupRoute = () => {
+          void fetchRoute(start, jobPickup(job)).then(applyPickupRoute).catch((error) => {
+            if (import.meta.env.DEV) console.warn('[taxi] pickup road route unavailable; retrying', error)
+            window.setTimeout(() => { if (!pickupRouteReady && liveJobIds.current.has(job.id)) requestPickupRoute() }, 2_000)
           })
-          .catch(() => undefined)
+        }
+        requestPickupRoute()
       }
 
       const animate = () => {
@@ -831,13 +901,18 @@ if (
           liveJobTimers.current.delete(job.id)
         }
         const now = Date.now()
+        if (!pickupRouteReady) {
+          ;(instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(point(start))
+          ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(passengerRoute.coordinates))
+          if (document.visibilityState !== 'hidden') liveJobTimers.current.set(job.id, scheduleMapFrame(animate))
+          return
+        }
         const pickingUp = now < journey.pickupAt
         const from = pickingUp ? journey.departsAt : journey.pickupAt
         const to = pickingUp ? journey.pickupAt : journey.arrivesAt
         const route = pickingUp ? pickupRoute : passengerRoute
         const elapsed = Math.max(0, Math.min(1, (now - from) / (to - from)))
-        const fallbackSpeedKmh = job.durationMinutes > 0 ? job.distanceKm / (job.durationMinutes / 60) : 30
-        const progress = routeMotion(route, elapsed, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130).progress
+        const progress = pickingUp ? pickupMotion(elapsed) : passengerMotion(elapsed)
         const currentPosition = routePosition(route.coordinates, progress)
         ;(instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(point(currentPosition))
         if (now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS || now >= journey.arrivesAt) {
@@ -847,13 +922,13 @@ if (
           ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(routeAhead))
           lastRouteUpdateAt = now
         }
-        instance.setPaintProperty(taxiSourceId, 'circle-color', mapVehicleColor(vehicle, pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger))
+        if (pickingUp !== lastPickingUp) {
+          instance.setPaintProperty(taxiSourceId, 'circle-color', mapVehicleColor(vehicle, pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger))
+          lastPickingUp = pickingUp
+        }
         const passengerSource = instance.getSource(passengerSourceId) as mapboxgl.GeoJSONSource | undefined
         // The halo waits at pickup, then rides with the passenger's vehicle.
         passengerSource?.setData(point(pickingUp ? jobPickup(job) : currentPosition, { title: job.pickupLabel }))
-        // setData normally schedules a render, but explicitly waking Mapbox is
-        // necessary on some idle Android WebViews.
-        instance.triggerRepaint()
         if (now < journey.arrivesAt && document.visibilityState !== 'hidden') {
           liveJobTimers.current.set(job.id, scheduleMapFrame(animate))
         } else if (now >= journey.arrivesAt) {
@@ -1078,18 +1153,23 @@ if (instance.getSource(routeSourceId)) {
     }
 
     const loadRoute = async () => {
+      const passengerCoordinates = job.routeCoordinates ?? [jobPickup(job), jobDestination(job)]
+      if (job.pickupRouteCoordinates?.length) {
+        drawRoute([...job.pickupRouteCoordinates, ...passengerCoordinates.slice(1)])
+        return
+      }
       if (!token) {
-        drawRoute([start, ...(job.routeCoordinates ?? [jobPickup(job), jobDestination(job)])])
+        drawRoute([start, ...passengerCoordinates])
         return
       }
 
       try {
-        const waypoints = [start, jobPickup(job), jobDestination(job)]
+        const waypoints = [start, jobPickup(job)]
           .map((coordinate) => coordinate.join(','))
           .join(';')
 
         const response = await fetch(
-          `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${waypoints}?continue_straight=true&geometries=geojson&overview=full&access_token=${token}`,
+          `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${waypoints}?continue_straight=true&geometries=geojson&overview=simplified&access_token=${token}`,
           { signal: abortController.signal },
         )
 
@@ -1102,12 +1182,13 @@ if (instance.getSource(routeSourceId)) {
         }
 
         drawRoute(
-          result.routes?.[0]?.geometry.coordinates ??
-            [start, ...(job.routeCoordinates ?? [jobPickup(job), jobDestination(job)])],
+          result.routes?.[0]?.geometry.coordinates
+            ? [...result.routes[0].geometry.coordinates, ...passengerCoordinates.slice(1)]
+            : [start, ...passengerCoordinates],
         )
       } catch (error) {
         if ((error as Error).name !== 'AbortError') {
-          drawRoute([start, ...(job.routeCoordinates ?? [jobPickup(job), jobDestination(job)])])
+          drawRoute([start, ...passengerCoordinates])
         }
       }
     }
@@ -1129,6 +1210,7 @@ export const GameMap = memo(GameMapView, (previous, next) =>
   previous.customCities === next.customCities &&
   previous.branches === next.branches &&
   previous.territoryExpansions === next.territoryExpansions &&
+  previous.exploredTerritory === next.exploredTerritory &&
   previous.vehicles === next.vehicles &&
   previous.placingStation === next.placingStation &&
   previous.placingTerritory === next.placingTerritory &&

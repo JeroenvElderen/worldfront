@@ -1,6 +1,6 @@
 import { featureCollection, lineString, polygon } from '@turf/helpers'
 import { booleanPointInPolygon, buffer, circle, simplify, union } from '@turf/turf'
-import type { Coordinates } from '../models/game'
+import type { Coordinates, TerritoryFeature, TerritoryGeometry } from '../models/game'
 
 const EARTH_KM_PER_LATITUDE_DEGREE = 110.574
 export const VILLAGE_TERRITORY_RADIUS_KM = 6
@@ -9,14 +9,7 @@ export const VILLAGE_TERRITORY_RADIUS_KM = 6
 export const TAXI_DISCOVERY_RADIUS_KM = 1
 
 export interface VillageTerritoryCenter { id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; source?: 'village' | 'taxi-discovery'; radiusKm?: number }
-type TerritoryGeometry =
-  | { type: 'Polygon'; coordinates: number[][][] }
-  | { type: 'MultiPolygon'; coordinates: number[][][][] }
-export type TerritoryFeature = {
-  type: 'Feature'
-  geometry: TerritoryGeometry
-  properties: { id: string; unlocked: true; source?: 'openstreetmap' }
-}
+export type { TerritoryFeature } from '../models/game'
 
 const realBoundaryCache = new Map<string, Promise<TerritoryFeature | null>>()
 
@@ -127,6 +120,33 @@ export const appendDiscoveriesToTerritory = (
   )
   const discoveryTerritory = mergeVillageTerritories(discoveryTerritories)
   return mergeVillageTerritories([...ownedTerritories, ...(discoveryTerritory ? [discoveryTerritory] : [])])
+}
+
+/** Add one completed route to compact persisted exploration coverage. */
+export const extendExploredTerritory = (
+  existing: TerritoryFeature | null,
+  route: Coordinates[],
+  id = 'taxi-exploration',
+) => {
+  if (route.length < 2) return existing
+  const discovery = taxiDiscoveryRouteTerritory(id, route)
+  const merged = mergeVillageTerritories(existing ? [existing, discovery] : [discovery])
+  if (!merged) return existing
+  const optimized = simplify(merged, { tolerance: .00005, highQuality: false }) as TerritoryFeature
+  return { ...optimized, properties: { id: 'taxi-exploration', unlocked: true as const } }
+}
+
+/** One-time migration for saves that persisted every historical taxi route. */
+export const compactLegacyDiscoveries = (
+  existing: TerritoryFeature | null | undefined,
+  discoveries: Array<{ id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; radiusKm?: number }>,
+) => {
+  if (!discoveries.length) return existing ?? null
+  const legacy = appendDiscoveriesToTerritory([], discoveries)
+  const merged = mergeVillageTerritories([...(existing ? [existing] : []), ...(legacy ? [legacy] : [])])
+  if (!merged) return existing ?? null
+  const optimized = simplify(merged, { tolerance: .00005, highQuality: false }) as TerritoryFeature
+  return { ...optimized, properties: { id: 'taxi-exploration', unlocked: true as const } }
 }
 
 /** True when a location belongs to at least one purchased village territory. */

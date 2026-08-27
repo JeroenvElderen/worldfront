@@ -75,6 +75,8 @@ export function TaxiCallPopup({ focusedJobId, vehicles, jobs, passengers, driver
           <div className="job-trip-meta"><span><i aria-hidden="true">⌁</i>{job.distanceKm.toFixed(1)} km</span><span><i aria-hidden="true">◷</i>{Math.round(job.durationMinutes)} min</span></div>
         </div>
         <div className="job-offer-column">
+          {job.story && <div className={`passenger-story ${job.story.priority}`}><b>{job.story.priority}</b><strong>{job.story.headline}</strong><small>{job.story.description}</small></div>}
+          {job.trafficDelay && <div className="job-traffic-warning">⚠ Delayed by {job.trafficDelay}</div>}
           <span className="job-category">♟ {passenger?.partySize ?? 1} passenger{passenger?.partySize === 1 ? '' : 's'}</span>
           <strong className="job-fare">{money.format(view === 'accepted' && assignedTaxi ? liveMeterFare(job, assignedTaxi, now) : job.fare)}</strong>
           <small>{view === 'complete' ? 'Final metered fare' : view === 'accepted' ? 'Live meter · traffic included' : 'Estimated fare'}</small>

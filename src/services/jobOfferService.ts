@@ -1,4 +1,5 @@
 import type { City, Coordinates, Passenger, TaxiJob } from '../models/game'
+import { createPassengerStory } from './operationsIncidents'
 import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
@@ -30,17 +31,12 @@ const isCoordinates = (value: unknown): value is Coordinates =>
 async function roadStops(from: Coordinates, to: Coordinates, signal?: AbortSignal) {
   try {
     const coordinates = `${from.join(',')};${to.join(',')}`
-    const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?alternatives=true&geometries=geojson&overview=full&access_token=${mapboxToken}`, { signal })
+    const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?alternatives=false&geometries=geojson&overview=simplified&access_token=${mapboxToken}`, { signal })
     if (!response.ok) return null
     const result = await response.json() as { waypoints?: Array<{ location?: unknown }>; routes?: Array<{ distance?: number; geometry?: { coordinates?: unknown } }> }
     const pickup = result.waypoints?.[0]?.location
     const destination = result.waypoints?.[1]?.location
-    const routes = (result.routes ?? []).filter((route) => typeof route.distance === 'number' && route.geometry)
-    const shortestDistance = Math.min(...routes.map((route) => route.distance!))
-    // Vary journeys without selecting implausible detours: only alternatives no
-    // more than 25% longer than the shortest route participate in the draw.
-    const reasonableRoutes = routes.filter((route) => route.distance! <= shortestDistance * 1.25)
-    const selectedRoute = reasonableRoutes[Math.floor(Math.random() * reasonableRoutes.length)] ?? routes[0]
+    const selectedRoute = (result.routes ?? []).find((route) => typeof route.distance === 'number' && route.geometry)
     const routeCoordinates = selectedRoute?.geometry?.coordinates
     if (!isCoordinates(pickup) || !isCoordinates(destination) ||
       !Array.isArray(routeCoordinates) || routeCoordinates.length < 2 || !routeCoordinates.every(isCoordinates)) return null
@@ -159,12 +155,18 @@ export async function generateJobOffers(
   signal?: AbortSignal,
   fareMultiplier = 1,
   territoryCenters: VillageTerritoryCenter[] = [{ id: city.id, coordinates: city.coordinates }],
+  exploredTerritory: TerritoryFeature | null = null,
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
   const excluded = new Set(excludedRoutes)
   // Use the exact OSM/fallback polygons rendered by GameMap. Previously this
   // used only synthetic polygons, allowing calls to appear in visibly locked
   // land whenever Mapbox displayed a real administrative village boundary.
-  const ownedTerritories = await resolveVillageTerritories(territoryCenters)
+  const villageTerritories = await resolveVillageTerritories(territoryCenters)
+  const unlockedTerritory = mergeVillageTerritories([
+    ...villageTerritories,
+    ...(exploredTerritory ? [exploredTerritory] : []),
+  ])
+  const ownedTerritories = unlockedTerritory ? [unlockedTerritory] : []
   const isUnlocked = (coordinates: Coordinates) => isInsideTerritoryFeatures(coordinates, ownedTerritories)
   let routes: Array<{ pickup: MapboxPlace; destination: MapboxPlace; distanceKm: number; signature: string; stored?: StoredJobRoute }>
   try {
@@ -244,11 +246,11 @@ routes = shuffled([...uniqueRoutes.values()])
   if (!routes.length) throw new Error('No new routes were found inside the owned territory.')
 
   const resolvedRoutes: Array<(typeof routes)[number] & { stops: NonNullable<Awaited<ReturnType<typeof roadStops>>> }> = []
-  for (const route of routes) {
+  const resolveRoute = async (route: (typeof routes)[number]) => {
     const stops = route.stored
       ? { pickupRoad: route.stored.pickupRoad ?? route.pickup.coordinates, destinationRoad: route.stored.destinationRoad ?? route.destination.coordinates, routeCoordinates: route.stored.routeCoordinates ?? [route.stored.pickup, route.stored.destination] }
       : await roadStops(route.pickup.coordinates, route.destination.coordinates, signal)
-    if (!stops) continue
+    if (!stops) return null
     // Both stops must remain inside owned territory after Mapbox snaps them onto
     // nearby roads. The route between them may cross locked land; completing
     // that journey is what permanently explores its corridor.
@@ -256,7 +258,7 @@ routes = shuffled([...uniqueRoutes.values()])
   !isUnlocked(stops.pickupRoad) ||
   !isUnlocked(stops.destinationRoad)
 ) {
-  continue
+  return null
 }
 
 // Mapbox can move the generated pickup when snapping it to a road.
@@ -267,11 +269,18 @@ if (
     stops.pickupRoad,
   ) > MAX_PICKUP_DISTANCE_KM
 ) {
-  continue
+  return null
 }
 
-resolvedRoutes.push({ ...route, stops })
-    if (resolvedRoutes.length >= count) break
+    return { ...route, stops }
+  }
+  const ROUTE_REQUEST_CONCURRENCY = 4
+  for (let index = 0; index < routes.length && resolvedRoutes.length < count; index += ROUTE_REQUEST_CONCURRENCY) {
+    const batch = await Promise.all(routes.slice(index, index + ROUTE_REQUEST_CONCURRENCY).map(resolveRoute))
+    for (const route of batch) {
+      if (route) resolvedRoutes.push(route)
+      if (resolvedRoutes.length >= count) break
+    }
   }
   if (!resolvedRoutes.length) throw new Error('No drivable routes were found. Try refreshing the available jobs.')
 
@@ -281,15 +290,17 @@ resolvedRoutes.push({ ...route, stops })
     partySize: 1 + Math.floor(Math.random() * 4),
   }))
   const offeredAt = new Date().toISOString()
-  const jobs = resolvedRoutes.map((route, index): TaxiJob => ({
+  const jobs = resolvedRoutes.map((route, index): TaxiJob => {
+    const story = createPassengerStory()
+    return {
     id: crypto.randomUUID(), cityId: city.id,
     pickup: route.pickup.coordinates, destination: route.destination.coordinates,
     pickupRoad: route.stops.pickupRoad, destinationRoad: route.stops.destinationRoad,
     routeCoordinates: route.stops.routeCoordinates,
     pickupLabel: route.pickup.name, destinationLabel: route.destination.name,
-    passengerIds: [passengers[index].id], fare: Math.round(taxiFareForDistance(route.distanceKm) * fareMultiplier * 100) / 100,
-    distanceKm: route.distanceKm, durationMinutes: route.stored?.durationMinutes ?? Math.max(5, Math.round(route.distanceKm * 3.2)), status: 'offered', offeredAt,
-  }))
+    passengerIds: [passengers[index].id], fare: Math.round(taxiFareForDistance(route.distanceKm) * fareMultiplier * (story?.fareMultiplier ?? 1) * 100) / 100,
+    distanceKm: route.distanceKm, durationMinutes: route.stored?.durationMinutes ?? Math.max(5, Math.round(route.distanceKm * 3.2)), story, status: 'offered', offeredAt,
+  }})
 
   addJobsToJobJson(jobs)
 

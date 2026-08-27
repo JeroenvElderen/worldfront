@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { BottomNav } from './components/game/BottomNav'
+import { OperationsControlCentre } from './components/game/OperationsControlCentre'
 import { TopHud } from './components/game/TopHud'
 import { useGameStore } from './stores/gameStore'
 import { getJobJourney, jobOfferExpiresAt } from './services/jobEngine'
@@ -20,6 +21,7 @@ const SectionSheet = lazy(() => import('./components/game/SectionSheet').then(({
 const FinancialDashboard = lazy(() => import('./components/game/FinancialDashboard').then(({ FinancialDashboard: component }) => ({ default: component })))
 const HotelDashboard = lazy(() => import('./components/game/HotelDashboard').then(({ HotelDashboard: component }) => ({ default: component })))
 const GameMap = lazy(() => import('./map/GameMap').then(({ GameMap: component }) => ({ default: component })))
+const MaintenancePopup = lazy(() => import('./components/game/MaintenancePopup').then(({ MaintenancePopup: component }) => ({ default: component })))
 
 export default function App() {
   const game = useGameStore()
@@ -33,6 +35,7 @@ export default function App() {
   const stationFleetFull = game.vehicles.length >= fleetSlotCapacity(game.company?.level ?? 1, game.garageLevel ?? 0, game.branches) + researchFleetSlots
   const activeCity = getCity(game.activeCityId ?? game.startingCityId, game.customCities ?? [])
   const money = moneyFormatterForCity(activeCity)
+  const maintenanceAlert = (game.maintenanceAlerts ?? []).find((alert) => !alert.dismissed)
   const territoryExpansionPrice = territoryExpansionCost === 0 ? 'Free' : money.format(territoryExpansionCost)
   const territoryProgressMessage = 'Completed taxi journeys retrace their route and expand your territory border; villages unlock instantly.'
   const stationBuildMessage = !game.company || game.company.level < 2
@@ -148,7 +151,9 @@ export default function App() {
       })
       .concat(
         state.vehicles.flatMap((vehicle) =>
-          vehicle.postalRoute
+          vehicle.maintenanceJob
+            ? [new Date(vehicle.maintenanceJob.completesAt).getTime()]
+            : vehicle.postalRoute
             ? [new Date(vehicle.postalRoute.arrivesAt).getTime()]
             : vehicle.serviceTrip
             ? [
@@ -321,8 +326,11 @@ export default function App() {
         customCities={game.customCities ?? []}
         branches={game.branches ?? []}
         territoryExpansions={game.territoryExpansions ?? []}
+        exploredTerritory={game.exploredTerritory}
         vehicles={game.vehicles}
         jobs={game.jobs}
+        trafficIncidents={game.trafficIncidents ?? []}
+        vehicleIncidents={game.incidents ?? []}
         focusedJobId={game.focusedJobId}
         placingStation={placingStation}
         placingTerritory={placingTerritory}
@@ -367,6 +375,7 @@ export default function App() {
 
           {game.activeSection !== 'map' &&
             game.activeSection !== 'jobs' &&
+            game.activeSection !== 'operations' &&
             game.activeSection !== 'hotels' &&
             game.activeSection !== 'finance' && (
               <SectionSheet
@@ -375,6 +384,10 @@ export default function App() {
                 garageLevel={game.garageLevel ?? 0}
                 drivers={game.drivers}
                 driverCandidates={game.driverCandidates}
+                mechanics={game.mechanics ?? []}
+                dispatchers={game.dispatchers ?? []}
+                customerReviews={game.customerReviews ?? []}
+                automationEmployees={game.automationEmployees ?? []}
                 goals={game.goals}
                 jobs={game.jobs}
                 loans={game.loans}
@@ -433,6 +446,15 @@ export default function App() {
                 onRefreshCandidates={game.refreshDriverCandidates}
                 onServiceVehicle={game.serviceVehicle}
                 onCleanTaxi={game.cleanTaxi}
+                onCleanVehicle={game.cleanVehicle}
+                onFitTires={game.fitTires}
+                onRecruitMechanic={game.recruitMechanic}
+                onRecruitDispatcher={game.recruitDispatcher}
+                onSetDispatcherStrategy={game.setDispatcherStrategy}
+                onRespondToReview={game.respondToReview}
+                onHireAutomationEmployee={game.hireAutomationEmployee}
+                onFireAutomationEmployee={game.fireAutomationEmployee}
+                onUpdateAutomationEmployee={game.updateAutomationEmployee}
                 onInstallUpgrade={game.installUpgrade}
                 onSetRefuelStrategy={game.setRefuelStrategy}
                 onRefuelVehicle={game.refuelVehicle}
@@ -466,6 +488,19 @@ export default function App() {
             />
           )}
 
+          {game.activeSection === 'operations' && (
+            <OperationsControlCentre
+              cash={game.company.cash}
+              jobs={game.jobs}
+              vehicles={game.vehicles}
+              trafficIncidents={game.trafficIncidents ?? []}
+              vehicleIncidents={game.incidents ?? []}
+              onResolve={game.resolveIncident}
+              onTrackJob={game.showJobOnMap}
+              onClose={() => game.setSection('map')}
+            />
+          )}
+
           {game.activeSection === 'hotels' && (
             <HotelDashboard
               company={game.company}
@@ -479,6 +514,15 @@ export default function App() {
               onClose={() => game.setSection('map')}
             />
           )}</Suspense>
+
+          {maintenanceAlert && <Suspense fallback={null}><MaintenancePopup
+            alert={maintenanceAlert}
+            vehicle={game.vehicles.find((vehicle) => vehicle.id === maintenanceAlert.vehicleId)}
+            onSend={game.startMaintenance}
+            onClean={game.cleanVehicle}
+            onDismiss={game.dismissMaintenanceAlert}
+            onOpenFleet={() => game.setSection('fleet')}
+          /></Suspense>}
 
           <BottomNav
             active={game.activeSection}

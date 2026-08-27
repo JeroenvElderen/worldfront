@@ -13,7 +13,7 @@ import { appendDiscoveriesToTerritory, lockedTerritoryMask, realVillageTerritory
 import type { TerritoryFeature } from '../services/territoryGeometry'
 import { cancelMapFrame, scheduleMapFrame } from '../services/frameScheduler'
 
-interface GameMapProps { cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; territoryExpansions: TerritoryExpansion[]; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void; onSaveJobPickupRoute: (jobId: string, coordinates: Coordinates[]) => void }
+interface GameMapProps { layoutKey: string; cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; territoryExpansions: TerritoryExpansion[]; vehicles: Vehicle[]; jobs: TaxiJob[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void; onSaveJobPickupRoute: (jobId: string, coordinates: Coordinates[]) => void }
 const token = mapboxAccessToken
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
@@ -115,7 +115,7 @@ const missionColor = (jobId: string) => {
   return `hsl(${hash % 360}, 100%, 60%)`
 }
 
-function GameMapView({ cityId, customCities, branches, territoryExpansions, vehicles, jobs, focusedJobId, placingStation, placingTerritory, onBuildStation, onExpandTerritory, onOpenJob, onSaveJobPickupRoute }: GameMapProps) {
+function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpansions, vehicles, jobs, focusedJobId, placingStation, placingTerritory, onBuildStation, onExpandTerritory, onOpenJob, onSaveJobPickupRoute }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const pickupJobIds = useRef(new Set<string>())
@@ -124,7 +124,31 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
   const liveJobTimers = useRef(new Map<string, number>())
   const liveJobRunners = useRef(new Map<string, () => void>())
   const [mapRevision, setMapRevision] = useState(0)
+  const [containerReady, setContainerReady] = useState(false)
   const [realTerritories, setRealTerritories] = useState<Record<string, TerritoryFeature>>({})
+  // Mapbox reads the container dimensions during construction. In Android
+  // WebViews the first passive effect can run before the viewport has completed
+  // its initial layout, so wait for a genuinely drawable box.
+  useEffect(() => {
+    const element = container.current
+    if (!element) return
+
+    const measure = () => {
+      const { width, height } = element.getBoundingClientRect()
+      if (width > 0 && height > 0) {
+        setContainerReady(true)
+      }
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    const frame = window.requestAnimationFrame(measure)
+
+    return () => {
+      observer.disconnect()
+      window.cancelAnimationFrame(frame)
+    }
+  }, [])
+
   useEffect(() => {
     let active = true
     const centers = [
@@ -156,7 +180,7 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
   }, [placingStation, placingTerritory, onBuildStation, onExpandTerritory])
 
   useEffect(() => {
-    if (!container.current) return
+    if (!containerReady || !container.current || map.current) return
     const currentLiveJobIds = liveJobIds.current
     const currentLiveJobTimers = liveJobTimers.current
     const currentLiveJobRunners = liveJobRunners.current
@@ -167,13 +191,9 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
     const animationRunners = new Set<() => void>()
     const instance = new mapboxgl.Map({
       container: container.current,
-      // Keep the basemap independent from the Mapbox account token. The
-      // bundled token can be revoked, restricted to another origin, or be
-      // unavailable while an Android WebView is starting; any of those cases
-      // previously left the entire map as a blank canvas until a late retry.
-      // Mapbox is still used for optional road routing below, while the public
-      // raster style lets the map and all game overlays render immediately.
-      style: fallbackStyle,
+      // Prefer the configured Mapbox basemap; installations without a token
+      // still retain the existing OpenStreetMap raster fallback.
+      style: token ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle,
       center: selected?.coordinates ?? worldOverview.center,
       zoom: selected?.mapZoom ?? worldOverview.zoom,
       pitch: 0,
@@ -209,7 +229,15 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
     const handleContextRestored = () => { instance.resize(); instance.triggerRepaint() }
     canvas.addEventListener('webglcontextlost', handleContextLost)
     canvas.addEventListener('webglcontextrestored', handleContextRestored)
-    instance.on('load', async () => {
+    const handleMapError = (event: mapboxgl.ErrorEvent) => {
+      if (import.meta.env.DEV) console.error('[GameMap] Mapbox error', event.error)
+    }
+    const handleStyleLoad = () => {
+      if (import.meta.env.DEV) console.debug('[GameMap] Mapbox style loaded')
+    }
+    const handleLoad = async () => {
+      if (import.meta.env.DEV) console.debug('[GameMap] Mapbox map loaded')
+      try {
       keepMapFlatAndBuildingFree(instance)
       instance.addSource('company-base', { type: 'geojson', data: featureCollection(selected ? [point(selected.coordinates)] : []) })
       instance.addLayer({ id: 'base-halo', type: 'circle', source: 'company-base', paint: { 'circle-radius': 22, 'circle-color': '#22d3a7', 'circle-opacity': 0.22, 'circle-stroke-width': 1, 'circle-stroke-color': '#5eead4' } })
@@ -374,7 +402,14 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
         animate()
       }
       setMapRevision((revision) => revision + 1)
-    })
+      } catch (error) {
+        // One malformed journey must not silently abort all remaining setup.
+        console.error('[GameMap] Map load setup failed', error)
+      }
+    }
+    instance.on('error', handleMapError)
+    instance.on('style.load', handleStyleLoad)
+    instance.on('load', handleLoad)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         animationTimers.forEach(cancelMapFrame)
@@ -407,13 +442,30 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
       window.removeEventListener('online', handleVisibilityChange)
       canvas.removeEventListener('webglcontextlost', handleContextLost)
       canvas.removeEventListener('webglcontextrestored', handleContextRestored)
+      instance.off('error', handleMapError)
+      instance.off('style.load', handleStyleLoad)
+      instance.off('load', handleLoad)
       map.current = null
       instance.remove()
     }
     // Construct Mapbox exactly once. Cities, jobs, and fleet state are synchronized
     // into this instance below instead of tearing down the WebGL map and reloading tiles.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [containerReady])
+
+  // Sheets and dashboards are layered over the persistent map. Re-measure on
+  // every view transition so returning to Map/Dispatch cannot expose a stale
+  // Android WebView canvas, without recreating the Mapbox instance.
+  useEffect(() => {
+    const instance = map.current
+    if (!instance) return
+    const frame = window.requestAnimationFrame(() => {
+      if (map.current !== instance) return
+      instance.resize()
+      instance.triggerRepaint()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [layoutKey])
 
   useEffect(() => {
     const instance = map.current
@@ -882,10 +934,11 @@ function GameMapView({ cityId, customCities, branches, territoryExpansions, vehi
     }
   }, [cityId, customCities, focusedJobId, jobs, vehicles, mapRevision])
 
-  return <div ref={container} className="game-map absolute inset-0" aria-label="Interactive game map" />
+  return <div ref={container} className="game-map" aria-label="Interactive game map" />
 }
 
 export const GameMap = memo(GameMapView, (previous, next) =>
+  previous.layoutKey === next.layoutKey &&
   previous.cityId === next.cityId &&
   previous.customCities === next.customCities &&
   previous.branches === next.branches &&

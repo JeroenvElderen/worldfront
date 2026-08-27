@@ -309,6 +309,7 @@ export default function App() {
     <CurrencyProvider city={activeCity}>
     <div className="game-shell">
       <Suspense fallback={<div className="map-loading" aria-label="Loading map" />}><GameMap
+        layoutKey={game.activeSection}
         cityId={game.activeCityId ?? game.startingCityId}
         customCities={game.customCities ?? []}
         branches={game.branches ?? []}

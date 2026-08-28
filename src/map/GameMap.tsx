@@ -1146,7 +1146,7 @@ if (instance.getSource(routeSourceId)) {
       return route?.routeCoordinates && route.routeCoordinates.length >= 2 ? [{ asset, journey: asset.journey, route }] : []
     })
 
-    liveFerries.forEach(({ asset, journey, route }, index) => {
+    liveFerries.forEach(({ asset, journey, route }) => {
       const prefix = `ferry-${asset.id}`
       const routeId = `${prefix}-route`
       const glowId = `${routeId}-glow`
@@ -1168,14 +1168,6 @@ if (instance.getSource(routeSourceId)) {
       ]))
       addLayer({ id: terminalsId, type: 'circle', source: terminalsId, paint: { 'circle-radius': 5, 'circle-color': '#fbbf24', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } })
       addLayer({ id: `${terminalsId}-label`, type: 'symbol', source: terminalsId, layout: { 'text-field': ['get', 'name'], 'text-size': 10, 'text-offset': [0, 1.3], 'text-anchor': 'top' }, paint: { 'text-color': '#ffffff', 'text-halo-color': '#082f49', 'text-halo-width': 2 } })
-
-      if (index === 0) {
-        const bounds = coordinates.reduce(
-          (routeBounds, coordinate) => routeBounds.extend(coordinate),
-          new mapboxgl.LngLatBounds(coordinates[0], coordinates[0]),
-        )
-        instance.fitBounds(bounds, { padding: { top: 100, right: 60, bottom: 130, left: 230 }, maxZoom: 11, duration: 900 })
-      }
 
       let timer: number | undefined
       let lastRouteUpdateAt = 0

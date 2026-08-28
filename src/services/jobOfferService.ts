@@ -1,12 +1,14 @@
-import type { City, Coordinates, Passenger, TaxiJob } from '../models/game'
+import type { City, Coordinates, Passenger, TaxiJob, TransportAsset, TransportRoute } from '../models/game'
 import { createPassengerStory } from './operationsIncidents'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 import { addJobsToJobJson, jobRouteSignature, readJobJson, type StoredJobRoute } from './jobJsonService'
 import { resolveRoadRoute } from './roadRoutes'
+import { mapboxAccessToken } from '../config/mapbox'
 import { area, bbox, booleanPointInPolygon, pointOnFeature } from '@turf/turf'
 import { polygon } from '@turf/helpers'
 import { isInsideTerritoryFeatures, mergeVillageTerritories, resolveVillageTerritories, type TerritoryFeature, type VillageTerritoryCenter } from './territoryGeometry'
+import { ferryCrossingsHaveActiveService } from './ferryService'
 
 // Short local trips keep the board useful even when the player's first owned
 // village has a compact administrative boundary.
@@ -19,15 +21,42 @@ const passengerNames = [
 interface MapboxPlace { id: string; name: string; coordinates: Coordinates }
 
 const RANDOM_LOCATIONS_PER_OFFER = 32
+const MAPBOX_STREETS_TILESET = 'mapbox.mapbox-streets-v8'
 
 // New jobs should begin close to the taxi that generated the offer.
 export const MAX_PICKUP_DISTANCE_KM = 2
+
+/** A Directions waypoint may snap onto a routable ferry edge offshore. */
+async function isWaterCoordinate(coordinates: Coordinates, signal?: AbortSignal) {
+  if (!mapboxAccessToken) return false
+  const query = new URLSearchParams({
+    layers: 'water',
+    geometry: 'polygon',
+    radius: '0',
+    limit: '5',
+    access_token: mapboxAccessToken,
+  })
+  const response = await fetch(`https://api.mapbox.com/v4/${MAPBOX_STREETS_TILESET}/tilequery/${coordinates.join(',')}.json?${query}`, { signal })
+  if (!response.ok) throw new Error(`Could not validate job stop terrain (${response.status}).`)
+  const result = await response.json() as { features?: unknown[] }
+  return Boolean(result.features?.length)
+}
+
+const ferryTouchesRouteEndpoint = (route: NonNullable<Awaited<ReturnType<typeof resolveRoadRoute>>>) =>
+  route.ferryCrossings.some((crossing) =>
+    crossing.startIndex <= 1 || crossing.endIndex >= route.coordinates.length - 2)
 
 /** Resolve a pair of places to curbside stops connected by a drivable route. */
 async function roadStops(from: Coordinates, to: Coordinates, signal?: AbortSignal) {
   try {
     const route = await resolveRoadRoute(from, to, signal, ['driving'])
     if (!route) return null
+    if (ferryTouchesRouteEndpoint(route)) return null
+    const [originIsWater, destinationIsWater] = await Promise.all([
+      isWaterCoordinate(route.origin, signal),
+      isWaterCoordinate(route.destination, signal),
+    ])
+    if (originIsWater || destinationIsWater) return null
     return {
       pickupRoad: route.origin,
       destinationRoad: route.destination,
@@ -147,6 +176,8 @@ export async function generateJobOffers(
   fareMultiplier = 1,
   territoryCenters: VillageTerritoryCenter[] = [{ id: city.id, coordinates: city.coordinates }],
   exploredTerritory: TerritoryFeature | null = null,
+  transportRoutes: TransportRoute[] = [],
+  transportAssets: TransportAsset[] = [],
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
   const excluded = new Set(excludedRoutes)
   // Use the exact OSM/fallback polygons rendered by GameMap. Previously this
@@ -242,6 +273,10 @@ routes = shuffled([...uniqueRoutes.values()])
       ? { pickupRoad: route.stored.pickupRoad ?? route.pickup.coordinates, destinationRoad: route.stored.destinationRoad ?? route.destination.coordinates, routeCoordinates: route.stored.routeCoordinates ?? [route.stored.pickup, route.stored.destination], ferryCrossings: route.stored.ferryCrossings ?? [], durationMinutes: route.stored.durationMinutes, distanceKm: route.stored.distanceKm }
       : await roadStops(route.pickup.coordinates, route.destination.coordinates, signal)
     if (!stops) return null
+    // A ferry edge in Directions is not a vehicle-owned boat. Cross-water work
+    // is available only when the player has dispatched a purchased ferry on the
+    // same terminal pair; otherwise island offers stay off the board.
+    if (!ferryCrossingsHaveActiveService(stops.ferryCrossings, transportRoutes, transportAssets)) return null
     // Both stops must remain inside owned territory after Mapbox snaps them onto
     // nearby roads. The route between them may cross locked land; completing
     // that journey is what permanently explores its corridor.
@@ -285,7 +320,10 @@ if (
     const story = createPassengerStory()
     return {
     id: crypto.randomUUID(), cityId: city.id,
-    pickup: route.pickup.coordinates, destination: route.destination.coordinates,
+    // The sampled territory point may sit in a harbour basin or another
+    // non-drivable sliver of a coastal polygon. Persist the Directions-snapped
+    // curb positions as the actual job stops so no marker can remain at sea.
+    pickup: route.stops.pickupRoad, destination: route.stops.destinationRoad,
     pickupRoad: route.stops.pickupRoad, destinationRoad: route.stops.destinationRoad,
     routeCoordinates: route.stops.routeCoordinates,
     ferryCrossings: route.stops.ferryCrossings,

@@ -19,6 +19,10 @@ export const jobOfferExpiresAt = (job: TaxiJob) =>
 export const jobPickup = (job: TaxiJob) => job.pickupRoad ?? job.pickup
 export const jobDestination = (job: TaxiJob) => job.destinationRoad ?? job.destination
 
+export const jobFerryTravelComplete = (job: TaxiJob) =>
+  (job.completedPickupFerryCrossings?.length ?? 0) >= (job.pickupFerryCrossings?.length ?? 0) &&
+  (job.completedFerryCrossings?.length ?? 0) >= (job.ferryCrossings?.length ?? 0)
+
 const distanceSquared = (from: [number, number], to: [number, number]) => {
   const longitudeScale = Math.cos(((from[1] + to[1]) / 2) * Math.PI / 180)
   return ((from[0] - to[0]) * longitudeScale) ** 2 + (from[1] - to[1]) ** 2
@@ -101,6 +105,7 @@ export function completeJobState(
 ) {
   const job = jobs.find((candidate) => candidate.id === jobId && candidate.status === 'accepted')
   if (!job) return null
+  if (!jobFerryTravelComplete(job)) return null
   const vehicle = vehicles.find((candidate) => candidate.id === job.assignedVehicleId)
     ?? vehicles.find((candidate) => candidate.status === 'on-job')
   if (!vehicle || now < getJobJourney(job, vehicle).arrivesAt) return null

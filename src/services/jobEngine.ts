@@ -53,9 +53,9 @@ export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {
   const start = job.dispatchOrigin ?? vehicle.position ?? job.pickup
   const pickupDistanceKm = distanceKmBetween(start, jobPickup(job))
   // Use the job's average journey speed for the empty drive to the passenger too.
-  const pickupMinutes = job.distanceKm > 0
+  const pickupMinutes = job.pickupDurationMinutes ?? (job.distanceKm > 0
     ? pickupDistanceKm * job.durationMinutes / job.distanceKm
-    : 0
+    : 0)
   const speedMultiplier = taxiTripSpeedMultiplier(vehicle.modelId)
   const pickupDurationMs = Math.max(1_000, pickupMinutes * SIMULATED_MINUTE_MS * (job.pickupTimeMultiplier ?? 1) / speedMultiplier)
   const passengerDurationMs = Math.max(3_000, job.durationMinutes * SIMULATED_MINUTE_MS / speedMultiplier)

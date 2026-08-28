@@ -329,6 +329,8 @@ export default function App() {
         exploredTerritory={game.exploredTerritory}
         vehicles={game.vehicles}
         jobs={game.jobs}
+        transportAssets={game.transportAssets ?? []}
+        transportRoutes={game.transportRoutes ?? []}
         trafficIncidents={game.trafficIncidents ?? []}
         vehicleIncidents={game.incidents ?? []}
         focusedJobId={game.focusedJobId}
@@ -338,6 +340,7 @@ export default function App() {
         onExpandTerritory={handleExpandTerritory}
         onOpenJob={game.openJob}
         onSaveJobPickupRoute={game.saveJobPickupRoute}
+        onSaveJobRoute={game.saveJobRoute}
         onTaxiArrived={handleTaxiArrived}
       /></Suspense>
 
@@ -433,6 +436,7 @@ export default function App() {
                 onDispatchCoach={game.dispatchCoach}
                 onBuyTransportAsset={game.buyTransportAsset}
                 onCreateTransportRoute={game.createTransportRoute}
+                onCreateFerryRoute={game.createFerryRoute}
                 onDispatchTransport={game.dispatchTransport}
                 onSetAutomation={game.setAutomation}
                 onAcceptContract={game.acceptContract}

@@ -1,4 +1,4 @@
-import type { Coordinates, TaxiJob } from '../models/game'
+import type { Coordinates, TaxiFerryCrossing, TaxiJob } from '../models/game'
 
 const JOB_JSON_STORAGE_KEY = 'travel-empire-job-json-v1'
 
@@ -9,6 +9,7 @@ export interface StoredJobRoute {
   pickupRoad?: Coordinates
   destinationRoad?: Coordinates
   routeCoordinates?: Coordinates[]
+  ferryCrossings?: TaxiFerryCrossing[]
   pickupLabel: string
   destinationLabel: string
   distanceKm: number
@@ -68,6 +69,7 @@ export function addJobsToJobJson(jobs: TaxiJob[]) {
       pickupRoad: job.pickupRoad,
       destinationRoad: job.destinationRoad,
       routeCoordinates: job.routeCoordinates,
+      ferryCrossings: job.ferryCrossings,
       pickupLabel: job.pickupLabel,
       destinationLabel: job.destinationLabel,
       distanceKm: job.distanceKm,

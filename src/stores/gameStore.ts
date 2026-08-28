@@ -4,7 +4,7 @@ import { cities, countries, getCity } from '../data/cities'
 import { transportModels } from '../data/transport'
 import { getTaxiModel } from '../data/taxis'
 import { getPostVehicleModel } from '../data/postVehicles'
-import type { AutomationRole, BrandStrategy, City, CleaningService, Company, Coordinates, DepotFacility, Difficulty, DispatcherStrategy, Driver, DriverCertification, ExteriorAccessory, FinancialTransaction, GameSave, IncidentResponse, MaintenanceKind, RefuelStrategy, ResearchId, Specialization, TaxiJob, TerritoryExpansion, TerritoryFeature, TireType, TransactionCategory, TransportMode, Vehicle, VehicleUpgrade } from '../models/game'
+import type { AutomationRole, BrandStrategy, City, CleaningService, Company, Coordinates, DepotFacility, Difficulty, DispatcherStrategy, Driver, DriverCertification, ExteriorAccessory, FerryRouteOption, FinancialTransaction, GameSave, IncidentResponse, MaintenanceKind, RefuelStrategy, ResearchId, Specialization, TaxiFerryCrossing, TaxiJob, TerritoryExpansion, TerritoryFeature, TireType, TransactionCategory, TransportMode, Vehicle, VehicleUpgrade } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
 import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import {
@@ -26,7 +26,7 @@ import { createTrafficIncident, trafficImpactForJob } from '../services/operatio
 import { cleaningDetails, createAutomationEmployee, createCustomerReview, createStarterDispatcher, createStarterMechanic, maintenanceAdvisories, maintenanceQuote, recruitDispatcher, recruitMechanic, tireDetails, tireWearForDistance } from '../services/fleetOperations'
 
 export type Section = 'map' | 'jobs' | 'operations' | 'fleet' | 'hotels' | 'finance' | 'travel' | 'company'
-interface GameActions { initializeCompany: (city: City) => void; buildStation: (coordinates: Coordinates) => void; expandTerritory: (coordinates: Coordinates) => void; buyHotel: () => void; upgradeHotel: (hotelId: string) => void; collectHotelRevenue: (hotelId: string) => void; switchStation: (cityId: string) => void; unlockResearch: (researchId: ResearchId) => void; upgradeDepotFacility: (cityId: string, facility: DepotFacility) => void; pauseGame: () => void; resumeGame: () => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string, navigateToMap?: boolean) => void; saveJobPickupRoute: (jobId: string, coordinates: Coordinates[]) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; cleanTaxi: (vehicleId: string) => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; financeTaxi: (modelId: string) => void; upgradeGarage: () => void; buyPostVehicle: (modelId: string) => void; startPostalRoute: (vehicleId: string) => void; buyRentalCar: (modelId: string) => void; startRental: (vehicleId: string) => void; buyCountryLicense: (countryCode: string) => void; openAgency: () => void; createTour: () => void; dispatchTour: (tourId: string, vehicleId: string) => void; buyTourBus: () => void; buyCoach: () => void; createCoachRoute: (toCityId: string) => void; dispatchCoach: (routeId: string, vehicleId: string) => void; buyTransportAsset: (mode: TransportMode) => void; createTransportRoute: (mode: TransportMode, toCityId: string) => void; dispatchTransport: (routeId: string, assetId: string) => void; setAutomation: (patch: Partial<GameSave['automation']>) => void; runAutomation: () => void; acceptContract: (contractId: string) => void; chooseSpecialization: (specialization: Specialization) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; hireDriver: (candidateId: string, vehicleId: string) => void; refreshDriverCandidates: () => void; serviceVehicle: (vehicleId: string, service: 'quick' | 'full' | 'preventative') => void; installUpgrade: (vehicleId: string, upgrade: VehicleUpgrade) => void; setRefuelStrategy: (vehicleId: string, strategy: RefuelStrategy) => void; refuelVehicle: (vehicleId: string) => void; claimGoal: (goalId: string) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; setDifficulty: (difficulty: Difficulty) => void; setBrandStrategy: (patch: Partial<BrandStrategy>) => void; launchMarketing: (campaign: BrandStrategy['marketingCampaign']) => void; partnerCompetitor: (competitorId: string) => void; acquireCompetitor: (competitorId: string) => void; trainDriver: (driverId: string, certification: DriverCertification) => void; resolveIncident: (incidentId: string) => void; setRouteTimetable: (kind: 'coach' | 'transport', routeId: string, departureHour: number, frequencyHours: number) => void; resetGame: () => void }
+interface GameActions { initializeCompany: (city: City) => void; buildStation: (coordinates: Coordinates) => void; expandTerritory: (coordinates: Coordinates) => void; buyHotel: () => void; upgradeHotel: (hotelId: string) => void; collectHotelRevenue: (hotelId: string) => void; switchStation: (cityId: string) => void; unlockResearch: (researchId: ResearchId) => void; upgradeDepotFacility: (cityId: string, facility: DepotFacility) => void; pauseGame: () => void; resumeGame: () => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string, navigateToMap?: boolean) => void; saveJobPickupRoute: (jobId: string, coordinates: Coordinates[], ferryCrossings: TaxiFerryCrossing[], durationMinutes: number) => void; saveJobRoute: (jobId: string, coordinates: Coordinates[], ferryCrossings: TaxiFerryCrossing[]) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; cleanTaxi: (vehicleId: string) => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; financeTaxi: (modelId: string) => void; upgradeGarage: () => void; buyPostVehicle: (modelId: string) => void; startPostalRoute: (vehicleId: string) => void; buyRentalCar: (modelId: string) => void; startRental: (vehicleId: string) => void; buyCountryLicense: (countryCode: string) => void; openAgency: () => void; createTour: () => void; dispatchTour: (tourId: string, vehicleId: string) => void; buyTourBus: () => void; buyCoach: () => void; createCoachRoute: (toCityId: string) => void; dispatchCoach: (routeId: string, vehicleId: string) => void; buyTransportAsset: (mode: TransportMode) => void; createTransportRoute: (mode: TransportMode, toCityId: string) => void; createFerryRoute: (route: FerryRouteOption) => void; dispatchTransport: (routeId: string, assetId: string) => void; setAutomation: (patch: Partial<GameSave['automation']>) => void; runAutomation: () => void; acceptContract: (contractId: string) => void; chooseSpecialization: (specialization: Specialization) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; hireDriver: (candidateId: string, vehicleId: string) => void; refreshDriverCandidates: () => void; serviceVehicle: (vehicleId: string, service: 'quick' | 'full' | 'preventative') => void; installUpgrade: (vehicleId: string, upgrade: VehicleUpgrade) => void; setRefuelStrategy: (vehicleId: string, strategy: RefuelStrategy) => void; refuelVehicle: (vehicleId: string) => void; claimGoal: (goalId: string) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; setDifficulty: (difficulty: Difficulty) => void; setBrandStrategy: (patch: Partial<BrandStrategy>) => void; launchMarketing: (campaign: BrandStrategy['marketingCampaign']) => void; partnerCompetitor: (competitorId: string) => void; acquireCompetitor: (competitorId: string) => void; trainDriver: (driverId: string, certification: DriverCertification) => void; resolveIncident: (incidentId: string) => void; setRouteTimetable: (kind: 'coach' | 'transport', routeId: string, departureHour: number, frequencyHours: number) => void; resetGame: () => void }
 interface GameActions {
   hireAutomationEmployee: (role: AutomationRole) => void
   fireAutomationEmployee: (employeeId: string) => void
@@ -610,8 +610,12 @@ const generationTaxi = selectJobGenerationTaxi(state)
     // accepted-job route remains responsible for journey progress.
     return { ...result, jobs: fitOffersToAvailableTaxis(jobs, availableJobOfferCapacity({ vehicles: result.vehicles, drivers })), drivers, focusedJobId: null, updatedAt: new Date().toISOString(), activeSection: navigateToMap ? 'map' : state.activeSection }
   }),
-  saveJobPickupRoute: (jobId, coordinates) => set((state) => ({
-    jobs: state.jobs.map((job) => job.id === jobId && job.status === 'accepted' ? { ...job, pickupRouteCoordinates: coordinates, acceptedAt: new Date().toISOString() } : job),
+  saveJobPickupRoute: (jobId, coordinates, ferryCrossings, durationMinutes) => set((state) => ({
+    jobs: state.jobs.map((job) => job.id === jobId && job.status === 'accepted' ? { ...job, pickupRouteCoordinates: coordinates, pickupFerryCrossings: ferryCrossings, pickupDurationMinutes: durationMinutes, acceptedAt: new Date().toISOString() } : job),
+    updatedAt: new Date().toISOString(),
+  })),
+  saveJobRoute: (jobId, coordinates, ferryCrossings) => set((state) => ({
+    jobs: state.jobs.map((job) => job.id === jobId ? { ...job, routeCoordinates: coordinates, ferryCrossings, routeResolved: true } : job),
     updatedAt: new Date().toISOString(),
   })),
   declineJob: (jobId) => set((state) => ({ jobs: state.jobs.filter((job) => job.id !== jobId), focusedJobId: state.focusedJobId === jobId ? null : state.focusedJobId, updatedAt: new Date().toISOString() })),
@@ -750,10 +754,52 @@ const generationTaxi = selectJobGenerationTaxi(state)
     transportAssets = transportAssets.map((asset) => {
       if (!asset.journey || new Date(asset.journey.arrivesAt).getTime() > now) return asset
       const journey = asset.journey
+      const route = (state.transportRoutes ?? []).find((candidate) => candidate.id === journey.routeId)
+      if (asset.mode === 'ferry' && route) {
+        const scheduledStart = new Date(journey.startedAt).getTime()
+        const scheduledEnd = new Date(journey.arrivesAt).getTime()
+        const legDurationMs = Math.max(1_000, journey.legDurationMs ?? scheduledEnd - scheduledStart)
+        const completedLegs = Math.max(1, Math.floor((now - scheduledEnd) / legDurationMs) + 1)
+        const totalReward = journey.reward * completedLegs
+        const totalDistanceKm = journey.distanceKm * completedLegs
+        const reputation = addReputation(company.reputation, 1.3 * completedLegs)
+        const direction = completedLegs % 2 === 0
+          ? (journey.direction ?? 'outbound')
+          : (journey.direction ?? 'outbound') === 'outbound' ? 'returning' : 'outbound'
+        const origin = getCity(route.fromCityId, state.customCities)
+        const destination = getCity(route.toCityId ?? null, state.customCities)
+        const nextDestinationCityId = direction === 'outbound' ? destination?.id : origin?.id
+        const nextDestinationName = direction === 'outbound'
+          ? route.destinationName ?? destination?.name
+          : route.originName ?? origin?.name
+        const nextDestinationCoordinates = direction === 'outbound'
+          ? route.destinationCoordinates ?? destination?.coordinates
+          : route.originCoordinates ?? origin?.coordinates
+        const nextStartedAt = scheduledEnd + (completedLegs - 1) * legDurationMs
+        company = { ...company, cash: company.cash + totalReward, reputation, level: levelForReputation(reputation) }
+        financialTransactions = addTransactions(financialTransactions, transaction('ferry', `${asset.name} continuous shuttle · ${completedLegs} ${completedLegs === 1 ? 'crossing' : 'crossings'}`, totalReward, undefined, new Date(nextStartedAt).toISOString()))
+        return {
+          ...asset,
+          status: 'on-route' as const,
+          lifetimeRevenue: asset.lifetimeRevenue + totalReward,
+          condition: Math.max(0, asset.condition - totalDistanceKm / 2_500),
+          journey: {
+            ...journey,
+            startedAt: new Date(nextStartedAt).toISOString(),
+            arrivesAt: new Date(nextStartedAt + legDurationMs).toISOString(),
+            destinationCityId: nextDestinationCityId,
+            destinationName: nextDestinationName,
+            destinationCoordinates: nextDestinationCoordinates,
+            direction,
+            repeats: true,
+            legDurationMs,
+          },
+        }
+      }
       const reputation = addReputation(company.reputation, 1.3)
       company = { ...company, cash: company.cash + journey.reward, reputation, level: levelForReputation(reputation) }
       financialTransactions = addTransactions(financialTransactions, transaction(asset.mode === 'airliner' ? 'airline' : asset.mode === 'train' ? 'rail' : 'ferry', `${asset.name} scheduled service`, journey.reward, undefined, journey.arrivesAt))
-      return { ...asset, cityId: journey.destinationCityId, status: 'available' as const, lifetimeRevenue: asset.lifetimeRevenue + journey.reward, condition: Math.max(0, asset.condition - journey.distanceKm / 2_500), journey: undefined }
+      return { ...asset, cityId: journey.destinationCityId ?? asset.cityId, status: 'available' as const, lifetimeRevenue: asset.lifetimeRevenue + journey.reward, condition: Math.max(0, asset.condition - journey.distanceKm / 2_500), journey: undefined }
     })
     drivers = drivers.map((driver) => {
       if (driver.missedShiftUntil && new Date(driver.missedShiftUntil).getTime() <= now) return { ...driver, missedShiftUntil: undefined, status: 'available' as const }
@@ -988,7 +1034,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
   buyTransportAsset: (mode) => set((state) => {
     const model = transportModels[mode]
     const city = getCity(state.activeCityId ?? state.startingCityId, state.customCities)
-    if (!model || !city || !state.company || state.company.level < model.unlockLevel || state.company.cash < model.price) return state
+    if (!model || !city || !state.company || (mode !== 'ferry' && state.company.level < model.unlockLevel) || state.company.cash < model.price) return state
     const count = (state.transportAssets ?? []).filter((asset) => asset.mode === mode).length + 1
     const asset = { id: crypto.randomUUID(), mode, name: `${model.model} ${count}`, model: model.model, capacity: model.capacity, speedKmh: model.speedKmh, value: model.price, condition: 100, status: 'available' as const, cityId: city.id, lifetimeRevenue: 0 }
     return { company: { ...state.company, cash: state.company.cash - model.price }, transportAssets: [...(state.transportAssets ?? []), asset], financialTransactions: addTransactions(state.financialTransactions, transaction('vehicles', `Purchased ${model.label}: ${asset.name}`, -model.price)), updatedAt: new Date().toISOString() }
@@ -1002,19 +1048,42 @@ const generationTaxi = selectJobGenerationTaxi(state)
     const baseFare = mode === 'train' ? 0.13 : mode === 'ferry' ? 0.1 : 0.2
     return { transportRoutes: [...(state.transportRoutes ?? []), { id: crypto.randomUUID(), mode, fromCityId: from.id, toCityId: to.id, name: `${from.name} → ${to.name}`, ticketPrice: Math.max(18, Math.round(distanceKm * baseFare)) }], updatedAt: new Date().toISOString() }
   }),
+  createFerryRoute: (ferryRoute) => set((state) => {
+    const from = getCity(state.activeCityId ?? state.startingCityId, state.customCities)
+    if (!from || (state.transportRoutes ?? []).some((route) => route.mode === 'ferry' && route.sourceRouteId === ferryRoute.id)) return state
+    return {
+      transportRoutes: [...(state.transportRoutes ?? []), {
+        id: crypto.randomUUID(),
+        mode: 'ferry' as const,
+        fromCityId: from.id,
+        name: `${ferryRoute.originName} → ${ferryRoute.destinationName}`,
+        ticketPrice: Math.max(8, Math.round(ferryRoute.distanceKm * .1)),
+        sourceRouteId: ferryRoute.id,
+        originName: ferryRoute.originName,
+        destinationName: ferryRoute.destinationName,
+        originCoordinates: ferryRoute.originCoordinates,
+        destinationCoordinates: ferryRoute.destinationCoordinates,
+        routeCoordinates: ferryRoute.routeCoordinates,
+        distanceKm: ferryRoute.distanceKm,
+      }],
+      updatedAt: new Date().toISOString(),
+    }
+  }),
   dispatchTransport: (routeId, assetId) => set((state) => {
     const route = (state.transportRoutes ?? []).find((item) => item.id === routeId)
     const asset = (state.transportAssets ?? []).find((item) => item.id === assetId && item.mode === route?.mode && item.status === 'available' && item.cityId === route?.fromCityId)
     const from = getCity(route?.fromCityId ?? null, state.customCities)
     const destination = getCity(route?.toCityId ?? null, state.customCities)
-    if (!route || !asset || !from || !destination) return state
+    const destinationCoordinates = route?.destinationCoordinates ?? destination?.coordinates
+    const destinationName = route?.destinationName ?? destination?.name
+    if (!route || !asset || !from || !destinationCoordinates || !destinationName) return state
     if ((route.mode === 'ferry' && state.worldCondition?.disruption === 'ferry-cancelled') || (route.mode === 'airliner' && state.worldCondition?.disruption === 'airport-delay') || (route.mode === 'train' && state.worldCondition?.disruption === 'rail-strike')) return state
-    const distanceKm = distanceKmBetween(from.coordinates, destination.coordinates)
+    const distanceKm = route.distanceKm ?? distanceKmBetween(route.originCoordinates ?? from.coordinates, destinationCoordinates)
     const occupancy = route.mode === 'airliner' ? .72 : route.mode === 'ferry' ? .58 : .66
     const reward = Math.round(route.ticketPrice * asset.capacity * occupancy)
     const durationMs = Math.max(45_000, Math.min(240_000, distanceKm / (asset.speedKmh * (state.worldCondition?.speedMultiplier ?? 1)) * 35_000))
     const startedAt = new Date()
-    return { transportRoutes: (state.transportRoutes ?? []).map((item) => item.id === routeId ? { ...item, assetId } : item), transportAssets: (state.transportAssets ?? []).map((item) => item.id === assetId ? { ...item, status: 'on-route' as const, journey: { routeId, startedAt: startedAt.toISOString(), arrivesAt: new Date(startedAt.getTime() + durationMs).toISOString(), reward, distanceKm, destinationCityId: destination.id } } : item), updatedAt: startedAt.toISOString(), activeSection: 'map' }
+    return { transportRoutes: (state.transportRoutes ?? []).map((item) => item.id === routeId ? { ...item, assetId } : item), transportAssets: (state.transportAssets ?? []).map((item) => item.id === assetId ? { ...item, status: 'on-route' as const, journey: { routeId, startedAt: startedAt.toISOString(), arrivesAt: new Date(startedAt.getTime() + durationMs).toISOString(), reward, distanceKm, destinationCityId: destination?.id, destinationName, destinationCoordinates, direction: 'outbound' as const, repeats: route.mode === 'ferry', legDurationMs: durationMs } } : item), updatedAt: startedAt.toISOString(), activeSection: 'map' }
   }),
   setAutomation: (patch) => set((state) => ({ automation: { ...state.automation, ...patch }, updatedAt: new Date().toISOString() })),
   hireAutomationEmployee: (role) => set((state) => {

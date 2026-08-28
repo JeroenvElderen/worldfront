@@ -1,9 +1,9 @@
 import type { City, Coordinates, Passenger, TaxiJob } from '../models/game'
 import { createPassengerStory } from './operationsIncidents'
-import { mapboxAccessToken } from '../config/mapbox'
 import { BASE_JOB_DISTANCE_KM } from './companyProgression'
 import { distanceKmBetween, taxiFareForDistance } from './jobEngine'
 import { addJobsToJobJson, jobRouteSignature, readJobJson, type StoredJobRoute } from './jobJsonService'
+import { resolveRoadRoute } from './roadRoutes'
 import { area, bbox, booleanPointInPolygon, pointOnFeature } from '@turf/turf'
 import { polygon } from '@turf/helpers'
 import { isInsideTerritoryFeatures, mergeVillageTerritories, resolveVillageTerritories, type TerritoryFeature, type VillageTerritoryCenter } from './territoryGeometry'
@@ -18,32 +18,23 @@ const passengerNames = [
 
 interface MapboxPlace { id: string; name: string; coordinates: Coordinates }
 
-const mapboxToken = mapboxAccessToken
 const RANDOM_LOCATIONS_PER_OFFER = 32
 
 // New jobs should begin close to the taxi that generated the offer.
 export const MAX_PICKUP_DISTANCE_KM = 2
 
-const isCoordinates = (value: unknown): value is Coordinates =>
-  Array.isArray(value) && value.length >= 2 && value.slice(0, 2).every((part) => typeof part === 'number' && Number.isFinite(part))
-
 /** Resolve a pair of places to curbside stops connected by a drivable route. */
 async function roadStops(from: Coordinates, to: Coordinates, signal?: AbortSignal) {
   try {
-    const coordinates = `${from.join(',')};${to.join(',')}`
-    const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?alternatives=false&geometries=geojson&overview=simplified&access_token=${mapboxToken}`, { signal })
-    if (!response.ok) return null
-    const result = await response.json() as { waypoints?: Array<{ location?: unknown }>; routes?: Array<{ distance?: number; geometry?: { coordinates?: unknown } }> }
-    const pickup = result.waypoints?.[0]?.location
-    const destination = result.waypoints?.[1]?.location
-    const selectedRoute = (result.routes ?? []).find((route) => typeof route.distance === 'number' && route.geometry)
-    const routeCoordinates = selectedRoute?.geometry?.coordinates
-    if (!isCoordinates(pickup) || !isCoordinates(destination) ||
-      !Array.isArray(routeCoordinates) || routeCoordinates.length < 2 || !routeCoordinates.every(isCoordinates)) return null
+    const route = await resolveRoadRoute(from, to, signal, ['driving'])
+    if (!route) return null
     return {
-      pickupRoad: [pickup[0], pickup[1]] as Coordinates,
-      destinationRoad: [destination[0], destination[1]] as Coordinates,
-      routeCoordinates: routeCoordinates.map((coordinate) => [coordinate[0], coordinate[1]] as Coordinates),
+      pickupRoad: route.origin,
+      destinationRoad: route.destination,
+      routeCoordinates: route.coordinates,
+      ferryCrossings: route.ferryCrossings,
+      durationMinutes: route.durationMinutes,
+      distanceKm: route.distanceKm,
     }
   } catch (error) {
     if ((error as Error).name === 'AbortError') throw error
@@ -248,7 +239,7 @@ routes = shuffled([...uniqueRoutes.values()])
   const resolvedRoutes: Array<(typeof routes)[number] & { stops: NonNullable<Awaited<ReturnType<typeof roadStops>>> }> = []
   const resolveRoute = async (route: (typeof routes)[number]) => {
     const stops = route.stored
-      ? { pickupRoad: route.stored.pickupRoad ?? route.pickup.coordinates, destinationRoad: route.stored.destinationRoad ?? route.destination.coordinates, routeCoordinates: route.stored.routeCoordinates ?? [route.stored.pickup, route.stored.destination] }
+      ? { pickupRoad: route.stored.pickupRoad ?? route.pickup.coordinates, destinationRoad: route.stored.destinationRoad ?? route.destination.coordinates, routeCoordinates: route.stored.routeCoordinates ?? [route.stored.pickup, route.stored.destination], ferryCrossings: route.stored.ferryCrossings ?? [], durationMinutes: route.stored.durationMinutes, distanceKm: route.stored.distanceKm }
       : await roadStops(route.pickup.coordinates, route.destination.coordinates, signal)
     if (!stops) return null
     // Both stops must remain inside owned territory after Mapbox snaps them onto
@@ -297,9 +288,11 @@ if (
     pickup: route.pickup.coordinates, destination: route.destination.coordinates,
     pickupRoad: route.stops.pickupRoad, destinationRoad: route.stops.destinationRoad,
     routeCoordinates: route.stops.routeCoordinates,
+    ferryCrossings: route.stops.ferryCrossings,
+    routeResolved: !route.stored || Boolean(route.stored.routeCoordinates && route.stored.routeCoordinates.length > 2),
     pickupLabel: route.pickup.name, destinationLabel: route.destination.name,
-    passengerIds: [passengers[index].id], fare: Math.round(taxiFareForDistance(route.distanceKm) * fareMultiplier * (story?.fareMultiplier ?? 1) * 100) / 100,
-    distanceKm: route.distanceKm, durationMinutes: route.stored?.durationMinutes ?? Math.max(5, Math.round(route.distanceKm * 3.2)), story, status: 'offered', offeredAt,
+    passengerIds: [passengers[index].id], fare: Math.round(taxiFareForDistance(route.stops.distanceKm) * fareMultiplier * (story?.fareMultiplier ?? 1) * 100) / 100,
+    distanceKm: Math.round(route.stops.distanceKm * 10) / 10, durationMinutes: Math.max(5, Math.round(route.stops.durationMinutes)), story, status: 'offered', offeredAt,
   }})
 
   addJobsToJobJson(jobs)

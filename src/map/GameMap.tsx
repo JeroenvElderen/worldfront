@@ -5,14 +5,15 @@ import { featureCollection, lineString, point } from '@turf/helpers'
 import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, worldOverview } from '../data/cities'
 import { taxiModels } from '../data/taxis'
-import type { Branch, Coordinates, TaxiJob, TerritoryExpansion, TerritoryFeature, TrafficIncident, Vehicle, VehicleIncident } from '../models/game'
-import { getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
+import type { Branch, Coordinates, TaxiFerryCrossing, TaxiJob, TerritoryExpansion, TerritoryFeature, TrafficIncident, TransportAsset, TransportRoute, Vehicle, VehicleIncident } from '../models/game'
+import { distanceKmBetween, getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
 import { lockedTerritoryMask, mergeVillageTerritories, realVillageTerritory, villageTerritory, VILLAGE_TERRITORY_RADIUS_KM } from '../services/territoryGeometry'
 import { cancelMapFrame, scheduleMapFrame } from '../services/frameScheduler'
+import { resolveRoadRoute, type RoadRouteDetails, type RouteSpeedLimit } from '../services/roadRoutes'
 
-interface GameMapProps { layoutKey: string; cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; territoryExpansions: TerritoryExpansion[]; exploredTerritory: TerritoryFeature | null; vehicles: Vehicle[]; jobs: TaxiJob[]; trafficIncidents: TrafficIncident[]; vehicleIncidents: VehicleIncident[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void; onSaveJobPickupRoute: (jobId: string, coordinates: Coordinates[]) => void; onTaxiArrived: (jobId: string) => void }
+interface GameMapProps { layoutKey: string; cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; territoryExpansions: TerritoryExpansion[]; exploredTerritory: TerritoryFeature | null; vehicles: Vehicle[]; jobs: TaxiJob[]; transportAssets: TransportAsset[]; transportRoutes: TransportRoute[]; trafficIncidents: TrafficIncident[]; vehicleIncidents: VehicleIncident[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void; onSaveJobPickupRoute: (jobId: string, coordinates: Coordinates[], ferryCrossings: TaxiFerryCrossing[], durationMinutes: number) => void; onSaveJobRoute: (jobId: string, coordinates: Coordinates[], ferryCrossings: TaxiFerryCrossing[]) => void; onTaxiArrived: (jobId: string) => void }
 const token = mapboxAccessToken
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
@@ -20,7 +21,7 @@ const routeLengthCache = new WeakMap<number[][], number[]>()
 const routeLengths = (coordinates: number[][]) => {
   const cached = routeLengthCache.get(coordinates)
   if (cached) return cached
-  const lengths = coordinates.slice(1).map((coordinate, index) => Math.hypot(coordinate[0] - coordinates[index][0], coordinate[1] - coordinates[index][1]))
+  const lengths = coordinates.slice(1).map((coordinate, index) => distanceKmBetween(coordinates[index] as Coordinates, coordinate as Coordinates))
   routeLengthCache.set(coordinates, lengths)
   return lengths
 }
@@ -48,11 +49,16 @@ const remainingRoute = (coordinates: number[][], progress: number) => {
   return remaining.length > 1 ? remaining : [remaining[0], remaining[0]]
 }
 
+const hasDetailedRoute = (coordinates: number[][] | undefined): coordinates is number[][] =>
+  Boolean(coordinates && coordinates.length > 2)
+
+const passengerRouteNeedsRepair = (job: TaxiJob) =>
+  !job.routeCoordinates || job.routeCoordinates.length < 2 || job.ferryCrossings === undefined || (!job.routeResolved && !hasDetailedRoute(job.routeCoordinates))
+
 // Keep moving markers synchronized with the browser's paint cycle. Calculating
 // their position from the current time (rather than accumulating frame deltas)
 // also lets a journey resume at the exact right point after a background pause.
-type RouteSpeedLimit = { speed: number; unit: 'km/h' | 'mph' } | { unknown: true } | { none: true }
-type RouteDetails = { coordinates: number[][]; speedLimits: RouteSpeedLimit[] }
+type RouteDetails = Pick<RoadRouteDetails, 'coordinates' | 'speedLimits' | 'ferryCrossings'>
 
 const speedLimitKmh = (limit: RouteSpeedLimit | undefined) => {
   if (!limit || 'unknown' in limit || 'none' in limit) return null
@@ -61,30 +67,59 @@ const speedLimitKmh = (limit: RouteSpeedLimit | undefined) => {
 
 const createRouteMotion = (route: RouteDetails, fallbackSpeedKmh: number, topSpeedKmh: number) => {
   const lengths = routeLengths(route.coordinates)
-  const speeds = lengths.map((_, index) => Math.min(topSpeedKmh, speedLimitKmh(route.speedLimits[index]) ?? fallbackSpeedKmh))
-  const durations = lengths.map((length, index) => length / Math.max(1, speeds[index]))
-  const totalDuration = durations.reduce((sum, duration) => sum + duration, 0)
   const totalLength = lengths.reduce((sum, length) => sum + length, 0)
-  const cumulativeDurations = new Array<number>(durations.length + 1).fill(0)
   const cumulativeLengths = new Array<number>(lengths.length + 1).fill(0)
-  for (let index = 0; index < durations.length; index += 1) {
-    cumulativeDurations[index + 1] = cumulativeDurations[index] + durations[index]
+  for (let index = 0; index < lengths.length; index += 1) {
     cumulativeLengths[index + 1] = cumulativeLengths[index] + lengths[index]
   }
+  const crossings = [...route.ferryCrossings]
+    .map((crossing) => ({ ...crossing, startIndex: Math.max(0, Math.min(lengths.length, crossing.startIndex)), endIndex: Math.max(0, Math.min(lengths.length, crossing.endIndex)) }))
+    .filter((crossing) => crossing.endIndex > crossing.startIndex)
+    .sort((left, right) => left.startIndex - right.startIndex)
+  const crossingByStart = new Map(crossings.map((crossing) => [crossing.startIndex, crossing]))
+  const phases: Array<{ duration: number; fromDistance: number; toDistance: number; waitingForFerry: boolean }> = []
+  let index = 0
+  while (index < lengths.length) {
+    const crossing = crossingByStart.get(index)
+    if (crossing) {
+      phases.push({
+        // Include a short terminal queue in addition to Mapbox's real ferry time.
+        duration: (crossing.durationMinutes + 4) / 60,
+        fromDistance: cumulativeLengths[crossing.startIndex],
+        toDistance: cumulativeLengths[crossing.endIndex],
+        waitingForFerry: true,
+      })
+      index = crossing.endIndex
+      continue
+    }
+    const speed = Math.min(topSpeedKmh, speedLimitKmh(route.speedLimits[index]) ?? fallbackSpeedKmh)
+    phases.push({
+      duration: lengths[index] / Math.max(1, speed),
+      fromDistance: cumulativeLengths[index],
+      toDistance: cumulativeLengths[index + 1],
+      waitingForFerry: false,
+    })
+    index += 1
+  }
+  const totalDuration = phases.reduce((sum, phase) => sum + phase.duration, 0)
+  const cumulativeDurations = new Array<number>(phases.length + 1).fill(0)
+  for (let phaseIndex = 0; phaseIndex < phases.length; phaseIndex += 1) cumulativeDurations[phaseIndex + 1] = cumulativeDurations[phaseIndex] + phases[phaseIndex].duration
 
   return (elapsed: number) => {
+    if (elapsed >= 1 || !phases.length || !totalLength) return { progress: 1, waitingForFerry: false }
     const target = Math.max(0, Math.min(1, elapsed)) * totalDuration
     let low = 0
-    let high = Math.max(0, durations.length - 1)
+    let high = Math.max(0, phases.length - 1)
     while (low < high) {
       const middle = (low + high) >>> 1
       if (cumulativeDurations[middle + 1] < target) low = middle + 1
       else high = middle
     }
-    const segment = low
-    const segmentElapsed = target - cumulativeDurations[segment]
-    const segmentProgress = durations[segment] ? segmentElapsed / durations[segment] : 1
-    return totalLength ? (cumulativeLengths[segment] + (lengths[segment] ?? 0) * segmentProgress) / totalLength : 1
+    const phase = phases[low]
+    if (phase.waitingForFerry) return { progress: phase.fromDistance / totalLength, waitingForFerry: true }
+    const phaseElapsed = target - cumulativeDurations[low]
+    const phaseProgress = phase.duration ? phaseElapsed / phase.duration : 1
+    return { progress: (phase.fromDistance + (phase.toDistance - phase.fromDistance) * phaseProgress) / totalLength, waitingForFerry: false }
   }
 }
 
@@ -92,6 +127,7 @@ const vehicleColor = {
   available: '#8b5cf6',
   pickingUp: '#8b5cf6',
   carryingPassenger: '#8b5cf6',
+  waitingForFerry: '#f59e0b',
   maintenance: '#8b5cf6',
   postal: '#8b5cf6',
   rental: '#8b5cf6',
@@ -107,6 +143,18 @@ const VEHICLE_MARKER_RADIUS = 4
 const VEHICLE_MARKER_STROKE_WIDTH = 1.5
 const ROUTE_GLOW_WIDTH = 10
 const ROUTE_GEOMETRY_UPDATE_INTERVAL_MS = 500
+
+const ensureFerryWaitLabel = (instance: mapboxgl.Map, sourceId: string) => {
+  const layerId = `${sourceId}-ferry-wait`
+  if (instance.getLayer(layerId)) return
+  instance.addLayer({
+    id: layerId,
+    type: 'symbol',
+    source: sourceId,
+    layout: { 'text-field': ['get', 'ferryStatus'], 'text-size': 10, 'text-offset': [0, 1.35], 'text-anchor': 'top' },
+    paint: { 'text-color': '#fbbf24', 'text-halo-color': '#111827', 'text-halo-width': 2 },
+  })
+}
 
 const keepMapFlatAndBuildingFree = (instance: mapboxgl.Map) => {
   instance.getStyle().layers?.forEach((layer) => {
@@ -133,7 +181,7 @@ const missionColor = (jobId: string) => {
   return `hsl(${hash % 360}, 100%, 60%)`
 }
 
-function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpansions, exploredTerritory, vehicles, jobs, trafficIncidents, vehicleIncidents, focusedJobId, placingStation, placingTerritory, onBuildStation, onExpandTerritory, onOpenJob, onSaveJobPickupRoute, onTaxiArrived }: GameMapProps) {
+function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpansions, exploredTerritory, vehicles, jobs, transportAssets, transportRoutes, trafficIncidents, vehicleIncidents, focusedJobId, placingStation, placingTerritory, onBuildStation, onExpandTerritory, onOpenJob, onSaveJobPickupRoute, onSaveJobRoute, onTaxiArrived }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const pickupJobIds = useRef(new Set<string>())
@@ -144,6 +192,7 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
   const arrivedJobIds = useRef(new Set<string>())
   const incidentMarkers = useRef<mapboxgl.Marker[]>([])
   const [mapRevision, setMapRevision] = useState(0)
+  const [ferryStyleRevision, setFerryStyleRevision] = useState(0)
   const [containerReady, setContainerReady] = useState(false)
   // Null is a resolved fallback too. Remember it so a location with no mapped
   // boundary does not trigger another reverse-geocode request after each trip.
@@ -360,22 +409,16 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
           animationRunners.add(animatePostal); animatePostal(); continue
         }
         let journey = job ? getJobJourney(job, vehicle) : null
-        let pickupRouteReady = !job || Boolean(job.pickupRouteCoordinates?.length && job.pickupRouteCoordinates.length >= 2)
-        let pickupRoute: RouteDetails = { coordinates: job?.pickupRouteCoordinates ?? (job ? [start, start] : [start]), speedLimits: [] }
-        const passengerRoute: RouteDetails = { coordinates: job?.routeCoordinates ?? (job ? [jobPickup(job), jobDestination(job)] : [start]), speedLimits: [] }
+        let pickupRouteReady = !job || Boolean(job.pickupRouteCoordinates?.length && job.pickupRouteCoordinates.length >= 2 && (!token || job.pickupFerryCrossings !== undefined))
+        let pickupRoute: RouteDetails = { coordinates: job?.pickupRouteCoordinates ?? (job ? [start, start] : [start]), speedLimits: [], ferryCrossings: job?.pickupFerryCrossings ?? [] }
+        let passengerRoute: RouteDetails = { coordinates: job?.routeCoordinates ?? (job ? [jobPickup(job), jobDestination(job)] : [start]), speedLimits: [], ferryCrossings: job?.ferryCrossings ?? [] }
         const fallbackSpeedKmh = job && job.durationMinutes > 0 ? job.distanceKm / (job.durationMinutes / 60) : 30
         let pickupMotion = createRouteMotion(pickupRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
-        const passengerMotion = createRouteMotion(passengerRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
+        let passengerMotion = createRouteMotion(passengerRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
         if (job && token) {
           const fetchRoute = async (from: Coordinates, to: Coordinates) => {
-            for (const profile of ['driving-traffic', 'driving'] as const) {
-              const annotations = profile === 'driving-traffic' ? '&annotations=maxspeed' : ''
-              const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/${profile}/${from.join(',')};${to.join(',')}?alternatives=false&continue_straight=true&geometries=geojson&overview=full${annotations}&access_token=${token}`, { signal: abortController.signal })
-              if (!response.ok) continue
-              const result = await response.json() as { routes?: Array<{ duration: number; geometry: { coordinates: number[][] }; legs?: Array<{ annotation?: { maxspeed?: RouteSpeedLimit[] } }> }> }
-              const route = result.routes?.reduce((fastest, candidate) => candidate.duration < fastest.duration ? candidate : fastest)
-              if (route?.geometry.coordinates.length && route.geometry.coordinates.length >= 2) return { coordinates: route.geometry.coordinates, speedLimits: route.legs?.flatMap((leg) => leg.annotation?.maxspeed ?? []) ?? [] }
-            }
+            const route = await resolveRoadRoute(from, to, abortController.signal)
+            if (route) return route
             throw new Error('No road route was returned for the pickup journey.')
           }
           // The passenger route was resolved and persisted when the offer was
@@ -386,12 +429,21 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
             pickupRoute = toPickup
             pickupRouteReady = true
             pickupMotion = createRouteMotion(pickupRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
-            if (!job.pickupRouteCoordinates) {
+            if (!job.pickupRouteCoordinates || job.pickupFerryCrossings === undefined) {
               const routeStartedAt = new Date().toISOString()
               journey = getJobJourney({ ...job, acceptedAt: routeStartedAt, pickupRouteCoordinates: toPickup.coordinates as Coordinates[] }, vehicle)
-              onSaveJobPickupRoute(job.id, toPickup.coordinates.map(([longitude, latitude]) => [longitude, latitude]))
+              onSaveJobPickupRoute(job.id, toPickup.coordinates.map(([longitude, latitude]) => [longitude, latitude]), toPickup.ferryCrossings, toPickup.durationMinutes)
             }
           }).catch(() => undefined)
+          if (passengerRouteNeedsRepair(job)) {
+            void fetchRoute(jobPickup(job), jobDestination(job)).then((resolvedRoute) => {
+              if (abortController.signal.aborted || map.current !== instance) return
+              passengerRoute = resolvedRoute
+              passengerMotion = createRouteMotion(passengerRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
+              ;(instance.getSource(jobRouteSourceId(job.id)) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(passengerRoute.coordinates))
+              onSaveJobRoute(job.id, resolvedRoute.coordinates.map(([longitude, latitude]) => [longitude, latitude]), resolvedRoute.ferryCrossings)
+            }).catch(() => undefined)
+          }
         }
         // Directions may still be loading when the live-map effect starts a
         // newly accepted job using its immediate straight-line fallback. Let
@@ -404,6 +456,7 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
           instance.addLayer({ id: sourceId, type: 'circle', source: sourceId, paint: { 'circle-radius': VEHICLE_MARKER_RADIUS, 'circle-color': mapVehicleColor(vehicle, vehicle.type === 'post' ? vehicleColor.postal : job ? vehicleColor.pickingUp : vehicle.status === 'maintenance' ? vehicleColor.maintenance : vehicleColor.available), 'circle-stroke-width': VEHICLE_MARKER_STROKE_WIDTH, 'circle-stroke-color': '#ffffff' } })
         }
         if (!job) continue
+        ensureFerryWaitLabel(instance, sourceId)
 
 liveJobIds.current.add(job.id)
 
@@ -446,6 +499,7 @@ instance.moveLayer(routeSourceId, sourceId)
         let animationTimer: number | undefined
         let lastRouteUpdateAt = 0
         let lastPickingUp: boolean | null = null
+        let lastWaitingForFerry: boolean | null = null
         const scheduleAnimation = () => {
           if (animationTimer !== undefined) {
             cancelMapFrame(animationTimer)
@@ -474,9 +528,10 @@ instance.moveLayer(routeSourceId, sourceId)
             ? Math.max(0, Math.min(1, (time - currentJourney.departsAt) / (currentJourney.pickupAt - currentJourney.departsAt)))
             : Math.max(0, Math.min(1, (time - currentJourney.pickupAt) / (currentJourney.arrivesAt - currentJourney.pickupAt)))
           const activeRoute = pickingUp ? pickupRoute : passengerRoute
-          const progress = pickingUp ? pickupMotion(elapsed) : passengerMotion(elapsed)
+          const motion = pickingUp ? pickupMotion(elapsed) : passengerMotion(elapsed)
+          const { progress } = motion
           const currentPosition = routePosition(activeRoute.coordinates, progress)
-          ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(currentPosition))
+          ;(instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(currentPosition, { ferryStatus: motion.waitingForFerry ? 'Waiting for ferry' : '' }))
           if (now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS || now >= currentJourney.arrivesAt) {
             const routeAhead = pickingUp
               ? [...remainingRoute(pickupRoute.coordinates, progress), ...passengerRoute.coordinates.slice(1)]
@@ -484,10 +539,11 @@ instance.moveLayer(routeSourceId, sourceId)
             ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(routeAhead))
             lastRouteUpdateAt = now
           }
-          if (pickingUp !== lastPickingUp) {
-            instance.setPaintProperty(sourceId, 'circle-color', mapVehicleColor(vehicle, pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger))
+          if (pickingUp !== lastPickingUp || motion.waitingForFerry !== lastWaitingForFerry) {
+            instance.setPaintProperty(sourceId, 'circle-color', mapVehicleColor(vehicle, motion.waitingForFerry ? vehicleColor.waitingForFerry : pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger))
             if (instance.getLayer(`pickup-${job.id}`)) instance.setLayoutProperty(`pickup-${job.id}`, 'visibility', pickingUp ? 'visible' : 'none')
             lastPickingUp = pickingUp
+            lastWaitingForFerry = motion.waitingForFerry
           }
           if (now < currentJourney.arrivesAt) {
             scheduleAnimation()
@@ -814,6 +870,7 @@ instance.addLayer({
 })
 
 if (instance.getLayer(taxiSourceId)) {
+  ensureFerryWaitLabel(instance, taxiSourceId)
   instance.moveLayer(routeSourceId, taxiSourceId)
   instance.moveLayer(`${routeSourceId}-glow`, routeSourceId)
 
@@ -853,24 +910,19 @@ if (
 
       liveJobIds.current.add(job.id)
       let journey = getJobJourney(job, vehicle)
-      let pickupRouteReady = Boolean(job.pickupRouteCoordinates?.length && job.pickupRouteCoordinates.length >= 2)
-      let pickupRoute: RouteDetails = { coordinates: job.pickupRouteCoordinates ?? [start, start], speedLimits: [] }
-      const passengerRoute: RouteDetails = { coordinates: job.routeCoordinates ?? [jobPickup(job), jobDestination(job)], speedLimits: [] }
+      let pickupRouteReady = Boolean(job.pickupRouteCoordinates?.length && job.pickupRouteCoordinates.length >= 2 && (!token || job.pickupFerryCrossings !== undefined))
+      let pickupRoute: RouteDetails = { coordinates: job.pickupRouteCoordinates ?? [start, start], speedLimits: [], ferryCrossings: job.pickupFerryCrossings ?? [] }
+      let passengerRoute: RouteDetails = { coordinates: job.routeCoordinates ?? [jobPickup(job), jobDestination(job)], speedLimits: [], ferryCrossings: job.ferryCrossings ?? [] }
       const fallbackSpeedKmh = job.durationMinutes > 0 ? job.distanceKm / (job.durationMinutes / 60) : 30
       let pickupMotion = createRouteMotion(pickupRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
-      const passengerMotion = createRouteMotion(passengerRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
+      let passengerMotion = createRouteMotion(passengerRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
       let lastRouteUpdateAt = 0
       let lastPickingUp: boolean | null = null
+      let lastWaitingForFerry: boolean | null = null
       if (token) {
         const fetchRoute = async (from: Coordinates, to: Coordinates) => {
-          for (const profile of ['driving-traffic', 'driving'] as const) {
-            const annotations = profile === 'driving-traffic' ? '&annotations=maxspeed' : ''
-            const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/${profile}/${from.join(',')};${to.join(',')}?continue_straight=true&geometries=geojson&overview=full${annotations}&access_token=${token}`)
-            if (!response.ok) continue
-            const result = await response.json() as { routes?: Array<{ geometry: { coordinates: number[][] }; legs?: Array<{ annotation?: { maxspeed?: RouteSpeedLimit[] } }> }> }
-            const route = result.routes?.[0]
-            if (route?.geometry.coordinates.length && route.geometry.coordinates.length >= 2) return { coordinates: route.geometry.coordinates, speedLimits: route.legs?.flatMap((leg) => leg.annotation?.maxspeed ?? []) ?? [] }
-          }
+          const route = await resolveRoadRoute(from, to)
+          if (route) return route
           throw new Error('No road route was returned for the pickup journey.')
         }
         const applyPickupRoute = (toPickup: RouteDetails) => {
@@ -878,10 +930,10 @@ if (
             pickupRoute = toPickup
             pickupRouteReady = true
             pickupMotion = createRouteMotion(pickupRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
-            if (!job.pickupRouteCoordinates) {
+            if (!job.pickupRouteCoordinates || job.pickupFerryCrossings === undefined) {
               const routeStartedAt = new Date().toISOString()
               journey = getJobJourney({ ...job, acceptedAt: routeStartedAt, pickupRouteCoordinates: toPickup.coordinates as Coordinates[] }, vehicle)
-              onSaveJobPickupRoute(job.id, toPickup.coordinates.map(([longitude, latitude]) => [longitude, latitude]))
+              onSaveJobPickupRoute(job.id, toPickup.coordinates.map(([longitude, latitude]) => [longitude, latitude]), toPickup.ferryCrossings, toPickup.durationMinutes)
             }
         }
         const requestPickupRoute = () => {
@@ -891,6 +943,17 @@ if (
           })
         }
         requestPickupRoute()
+        if (passengerRouteNeedsRepair(job)) {
+          void fetchRoute(jobPickup(job), jobDestination(job)).then((resolvedRoute) => {
+            if (!liveJobIds.current.has(job.id) || map.current !== instance) return
+            passengerRoute = resolvedRoute
+            passengerMotion = createRouteMotion(passengerRoute, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130)
+            ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(passengerRoute.coordinates))
+            onSaveJobRoute(job.id, resolvedRoute.coordinates.map(([longitude, latitude]) => [longitude, latitude]), resolvedRoute.ferryCrossings)
+          }).catch((error) => {
+            if (import.meta.env.DEV) console.warn('[taxi] passenger road route unavailable', error)
+          })
+        }
       }
 
       const animate = () => {
@@ -912,9 +975,10 @@ if (
         const to = pickingUp ? journey.pickupAt : journey.arrivesAt
         const route = pickingUp ? pickupRoute : passengerRoute
         const elapsed = Math.max(0, Math.min(1, (now - from) / (to - from)))
-        const progress = pickingUp ? pickupMotion(elapsed) : passengerMotion(elapsed)
+        const motion = pickingUp ? pickupMotion(elapsed) : passengerMotion(elapsed)
+        const { progress } = motion
         const currentPosition = routePosition(route.coordinates, progress)
-        ;(instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(point(currentPosition))
+        ;(instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(point(currentPosition, { ferryStatus: motion.waitingForFerry ? 'Waiting for ferry' : '' }))
         if (now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS || now >= journey.arrivesAt) {
           const routeAhead = pickingUp
             ? [...remainingRoute(pickupRoute.coordinates, progress), ...passengerRoute.coordinates.slice(1)]
@@ -922,9 +986,10 @@ if (
           ;(instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(routeAhead))
           lastRouteUpdateAt = now
         }
-        if (pickingUp !== lastPickingUp) {
-          instance.setPaintProperty(taxiSourceId, 'circle-color', mapVehicleColor(vehicle, pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger))
+        if (pickingUp !== lastPickingUp || motion.waitingForFerry !== lastWaitingForFerry) {
+          instance.setPaintProperty(taxiSourceId, 'circle-color', mapVehicleColor(vehicle, motion.waitingForFerry ? vehicleColor.waitingForFerry : pickingUp ? vehicleColor.pickingUp : vehicleColor.carryingPassenger))
           lastPickingUp = pickingUp
+          lastWaitingForFerry = motion.waitingForFerry
         }
         const passengerSource = instance.getSource(passengerSourceId) as mapboxgl.GeoJSONSource | undefined
         // The halo waits at pickup, then rides with the passenger's vehicle.
@@ -983,6 +1048,7 @@ if (instance.getSource(routeSourceId)) {
     mapRevision,
     onOpenJob,
     onSaveJobPickupRoute,
+    onSaveJobRoute,
     onTaxiArrived,
   ])
 
@@ -1049,6 +1115,95 @@ if (instance.getSource(routeSourceId)) {
       })
     }
   }, [vehicles, mapRevision])
+
+  // Ferry services use the real OpenStreetMap water line saved on their route.
+  // Mapbox does not expose a boat routing profile, so the persisted OSM geometry
+  // is also the animation path and remains visible ahead of the vessel.
+  useEffect(() => {
+    const instance = map.current
+    if (!instance) return
+    if (!instance.isStyleLoaded()) {
+      const retryWhenReady = () => setFerryStyleRevision((revision) => revision + 1)
+      instance.once('idle', retryWhenReady)
+      return () => { instance.off('idle', retryWhenReady) }
+    }
+    const timers = new Set<number>()
+    const sourceIds: string[] = []
+    const layerIds: string[] = []
+
+    const addSource = (id: string, data: GeoJSON.Feature | GeoJSON.FeatureCollection) => {
+      instance.addSource(id, { type: 'geojson', data })
+      sourceIds.push(id)
+    }
+    const addLayer = (layer: mapboxgl.AnyLayer) => {
+      instance.addLayer(layer)
+      layerIds.push(layer.id)
+    }
+
+    const liveFerries = transportAssets.flatMap((asset) => {
+      if (asset.mode !== 'ferry' || !asset.journey) return []
+      const route = transportRoutes.find((candidate) => candidate.id === asset.journey?.routeId)
+      return route?.routeCoordinates && route.routeCoordinates.length >= 2 ? [{ asset, journey: asset.journey, route }] : []
+    })
+
+    liveFerries.forEach(({ asset, journey, route }, index) => {
+      const prefix = `ferry-${asset.id}`
+      const routeId = `${prefix}-route`
+      const glowId = `${routeId}-glow`
+      const vesselId = `${prefix}-vessel`
+      const terminalsId = `${prefix}-terminals`
+      const coordinates = journey.direction === 'returning' ? [...route.routeCoordinates!].reverse() : route.routeCoordinates!
+      const startedAt = new Date(journey.startedAt).getTime()
+      const arrivesAt = new Date(journey.arrivesAt).getTime()
+      const initialProgress = Math.max(0, Math.min(1, (Date.now() - startedAt) / Math.max(1, arrivesAt - startedAt)))
+
+      addSource(routeId, lineString(remainingRoute(coordinates, initialProgress)))
+      addLayer({ id: glowId, type: 'line', source: routeId, paint: { 'line-color': '#0369a1', 'line-width': 14, 'line-opacity': .55, 'line-blur': 5 } })
+      addLayer({ id: routeId, type: 'line', source: routeId, paint: { 'line-color': '#f0f9ff', 'line-width': 4, 'line-opacity': .98, 'line-dasharray': [1.5, 1] } })
+      addSource(vesselId, point(routePosition(coordinates, initialProgress), { name: asset.name }))
+      addLayer({ id: vesselId, type: 'circle', source: vesselId, paint: { 'circle-radius': 7, 'circle-color': '#0ea5e9', 'circle-stroke-width': 2.5, 'circle-stroke-color': '#ffffff' } })
+      addSource(terminalsId, featureCollection([
+        point(route.originCoordinates ?? coordinates[0], { name: route.originName ?? 'Harbour' }),
+        point(route.destinationCoordinates ?? coordinates.at(-1)!, { name: route.destinationName ?? 'Destination' }),
+      ]))
+      addLayer({ id: terminalsId, type: 'circle', source: terminalsId, paint: { 'circle-radius': 5, 'circle-color': '#fbbf24', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } })
+      addLayer({ id: `${terminalsId}-label`, type: 'symbol', source: terminalsId, layout: { 'text-field': ['get', 'name'], 'text-size': 10, 'text-offset': [0, 1.3], 'text-anchor': 'top' }, paint: { 'text-color': '#ffffff', 'text-halo-color': '#082f49', 'text-halo-width': 2 } })
+
+      if (index === 0) {
+        const bounds = coordinates.reduce(
+          (routeBounds, coordinate) => routeBounds.extend(coordinate),
+          new mapboxgl.LngLatBounds(coordinates[0], coordinates[0]),
+        )
+        instance.fitBounds(bounds, { padding: { top: 100, right: 60, bottom: 130, left: 230 }, maxZoom: 11, duration: 900 })
+      }
+
+      let timer: number | undefined
+      let lastRouteUpdateAt = 0
+      const animate = () => {
+        if (timer !== undefined) timers.delete(timer)
+        const now = Date.now()
+        const progress = Math.max(0, Math.min(1, (now - startedAt) / Math.max(1, arrivesAt - startedAt)))
+        ;(instance.getSource(vesselId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(routePosition(coordinates, progress), { name: asset.name }))
+        if (now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS || progress >= 1) {
+          ;(instance.getSource(routeId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(remainingRoute(coordinates, progress)))
+          lastRouteUpdateAt = now
+        }
+        instance.triggerRepaint()
+        if (progress < 1 && document.visibilityState !== 'hidden') {
+          timer = scheduleMapFrame(animate)
+          timers.add(timer)
+        }
+      }
+      animate()
+    })
+
+    return () => {
+      timers.forEach(cancelMapFrame)
+      if (map.current !== instance) return
+      ;[...layerIds].reverse().forEach((id) => { if (instance.getLayer(id)) instance.removeLayer(id) })
+      sourceIds.forEach((id) => { if (instance.getSource(id)) instance.removeSource(id) })
+    }
+  }, [transportAssets, transportRoutes, mapRevision, ferryStyleRevision])
 
   useEffect(() => {
     const instance = map.current
@@ -1153,41 +1308,32 @@ if (instance.getSource(routeSourceId)) {
     }
 
     const loadRoute = async () => {
-      const passengerCoordinates = job.routeCoordinates ?? [jobPickup(job), jobDestination(job)]
-      if (job.pickupRouteCoordinates?.length) {
-        drawRoute([...job.pickupRouteCoordinates, ...passengerCoordinates.slice(1)])
-        return
-      }
       if (!token) {
+        const passengerCoordinates = job.routeCoordinates ?? [jobPickup(job), jobDestination(job)]
         drawRoute([start, ...passengerCoordinates])
         return
       }
 
       try {
-        const waypoints = [start, jobPickup(job)]
-          .map((coordinate) => coordinate.join(','))
-          .join(';')
-
-        const response = await fetch(
-          `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${waypoints}?continue_straight=true&geometries=geojson&overview=simplified&access_token=${token}`,
-          { signal: abortController.signal },
-        )
-
-        if (!response.ok) {
-          throw new Error(`Directions request failed: ${response.status}`)
+        const fetchRoute = async (from: Coordinates, to: Coordinates) => {
+          const route = await resolveRoadRoute(from, to, abortController.signal)
+          if (route) return route
+          throw new Error('No detailed road route was returned.')
         }
 
-        const result = await response.json() as {
-          routes?: Array<{ geometry: { coordinates: number[][] } }>
-        }
-
-        drawRoute(
-          result.routes?.[0]?.geometry.coordinates
-            ? [...result.routes[0].geometry.coordinates, ...passengerCoordinates.slice(1)]
-            : [start, ...passengerCoordinates],
-        )
+        const [pickupRoute, passengerRoute] = await Promise.all([
+          job.pickupRouteCoordinates?.length && job.pickupRouteCoordinates.length >= 2
+            ? Promise.resolve({ coordinates: job.pickupRouteCoordinates, ferryCrossings: job.pickupFerryCrossings ?? [] })
+            : fetchRoute(start, jobPickup(job)),
+          passengerRouteNeedsRepair(job)
+            ? fetchRoute(jobPickup(job), jobDestination(job))
+            : Promise.resolve({ coordinates: job.routeCoordinates!, ferryCrossings: job.ferryCrossings ?? [] }),
+        ])
+        if (passengerRouteNeedsRepair(job)) onSaveJobRoute(job.id, passengerRoute.coordinates.map(([longitude, latitude]) => [longitude, latitude]), passengerRoute.ferryCrossings)
+        drawRoute([...pickupRoute.coordinates, ...passengerRoute.coordinates.slice(1)])
       } catch (error) {
         if ((error as Error).name !== 'AbortError') {
+          const passengerCoordinates = job.routeCoordinates ?? [jobPickup(job), jobDestination(job)]
           drawRoute([start, ...passengerCoordinates])
         }
       }
@@ -1199,7 +1345,7 @@ if (instance.getSource(routeSourceId)) {
       abortController.abort()
       removeFocusedRoute()
     }
-  }, [cityId, customCities, focusedJobId, jobs, vehicles, mapRevision])
+  }, [cityId, customCities, focusedJobId, jobs, vehicles, mapRevision, onSaveJobRoute])
 
   return <div ref={container} className="game-map" aria-label="Interactive game map" />
 }
@@ -1212,6 +1358,8 @@ export const GameMap = memo(GameMapView, (previous, next) =>
   previous.territoryExpansions === next.territoryExpansions &&
   previous.exploredTerritory === next.exploredTerritory &&
   previous.vehicles === next.vehicles &&
+  previous.transportAssets === next.transportAssets &&
+  previous.transportRoutes === next.transportRoutes &&
   previous.placingStation === next.placingStation &&
   previous.placingTerritory === next.placingTerritory &&
   previous.onBuildStation === next.onBuildStation &&
@@ -1219,6 +1367,7 @@ export const GameMap = memo(GameMapView, (previous, next) =>
   previous.focusedJobId === next.focusedJobId &&
   previous.onOpenJob === next.onOpenJob &&
   previous.onSaveJobPickupRoute === next.onSaveJobPickupRoute &&
+  previous.onSaveJobRoute === next.onSaveJobRoute &&
   previous.onTaxiArrived === next.onTaxiArrived &&
   previous.jobs === next.jobs
 )

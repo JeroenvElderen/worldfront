@@ -27,7 +27,7 @@ import { cleaningDetails, createAutomationEmployee, createCustomerReview, create
 import { ferryCrossingsHaveActiveService } from '../services/ferryService'
 
 export type Section = 'map' | 'jobs' | 'ferries' | 'operations' | 'fleet' | 'hotels' | 'finance' | 'travel' | 'company'
-interface GameActions { initializeCompany: (city: City) => void; buildStation: (coordinates: Coordinates) => void; expandTerritory: (coordinates: Coordinates) => void; buyHotel: (coordinates: Coordinates) => void; upgradeHotel: (hotelId: string) => void; collectHotelRevenue: (hotelId: string) => void; switchStation: (cityId: string) => void; unlockResearch: (researchId: ResearchId) => void; upgradeDepotFacility: (cityId: string, facility: DepotFacility) => void; pauseGame: () => void; resumeGame: () => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string, navigateToMap?: boolean) => void; saveJobPickupRoute: (jobId: string, coordinates: Coordinates[], ferryCrossings: TaxiFerryCrossing[], durationMinutes: number) => void; saveJobRoute: (jobId: string, coordinates: Coordinates[], ferryCrossings: TaxiFerryCrossing[]) => void; markJobFerryCrossingComplete: (jobId: string, leg: 'pickup' | 'passenger', crossingIndex: number) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; cleanTaxi: (vehicleId: string) => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; financeTaxi: (modelId: string) => void; upgradeGarage: () => void; buyPostVehicle: (modelId: string) => void; startPostalRoute: (vehicleId: string) => void; buyRentalCar: (modelId: string) => void; startRental: (vehicleId: string) => void; buyCountryLicense: (countryCode: string) => void; openAgency: () => void; createTour: () => void; dispatchTour: (tourId: string, vehicleId: string) => void; buyTourBus: () => void; buyCoach: () => void; createCoachRoute: (toCityId: string) => void; dispatchCoach: (routeId: string, vehicleId: string) => void; buyTransportAsset: (mode: TransportMode) => void; createTransportRoute: (mode: TransportMode, toCityId: string) => void; saveDiscoveredFerryRoutes: (cityId: string, routes: FerryRouteOption[]) => void; createFerryRoute: (route: FerryRouteOption) => void; dispatchTransport: (routeId: string, assetId: string) => void; setAutomation: (patch: Partial<GameSave['automation']>) => void; runAutomation: () => void; acceptContract: (contractId: string) => void; chooseSpecialization: (specialization: Specialization) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; hireDriver: (candidateId: string, vehicleId: string) => void; refreshDriverCandidates: () => void; serviceVehicle: (vehicleId: string, service: 'quick' | 'full' | 'preventative') => void; installUpgrade: (vehicleId: string, upgrade: VehicleUpgrade) => void; setRefuelStrategy: (vehicleId: string, strategy: RefuelStrategy) => void; refuelVehicle: (vehicleId: string) => void; claimGoal: (goalId: string) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; setDifficulty: (difficulty: Difficulty) => void; setBrandStrategy: (patch: Partial<BrandStrategy>) => void; launchMarketing: (campaign: BrandStrategy['marketingCampaign']) => void; partnerCompetitor: (competitorId: string) => void; acquireCompetitor: (competitorId: string) => void; trainDriver: (driverId: string, certification: DriverCertification) => void; resolveIncident: (incidentId: string) => void; setRouteTimetable: (kind: 'coach' | 'transport', routeId: string, departureHour: number, frequencyHours: number) => void; resetGame: () => void }
+interface GameActions { initializeCompany: (city: City) => void; buildStation: (coordinates: Coordinates) => void; expandTerritory: (coordinates: Coordinates) => void; buyHotel: (coordinates: Coordinates) => void; upgradeHotel: (hotelId: string) => void; collectHotelRevenue: (hotelId: string) => void; switchStation: (cityId: string) => void; unlockResearch: (researchId: ResearchId) => void; upgradeDepotFacility: (cityId: string, facility: DepotFacility) => void; pauseGame: () => void; resumeGame: () => void; setSection: (section: Section) => void; openJob: (jobId: string) => void; showJobOnMap: (jobId: string) => void; refreshJobs: () => Promise<void>; addRandomJob: () => Promise<void>; acceptJob: (jobId: string, navigateToMap?: boolean) => void; saveJobPickupRoute: (jobId: string, coordinates: Coordinates[], ferryCrossings: TaxiFerryCrossing[], durationMinutes: number) => void; saveJobRoute: (jobId: string, coordinates: Coordinates[], ferryCrossings: TaxiFerryCrossing[]) => void; markJobFerryCrossingComplete:(jobId: string, leg: 'pickup' | 'passenger', crossingIndex: number, delayMs: number,) => void; declineJob: (jobId: string) => void; completeJob: (jobId: string) => void; tickJobs: () => void; cleanTaxi: (vehicleId: string) => void; buyTaxi: (modelId: string) => void; leaseTaxi: (modelId: string) => void; financeTaxi: (modelId: string) => void; upgradeGarage: () => void; buyPostVehicle: (modelId: string) => void; startPostalRoute: (vehicleId: string) => void; buyRentalCar: (modelId: string) => void; startRental: (vehicleId: string) => void; buyCountryLicense: (countryCode: string) => void; openAgency: () => void; createTour: () => void; dispatchTour: (tourId: string, vehicleId: string) => void; buyTourBus: () => void; buyCoach: () => void; createCoachRoute: (toCityId: string) => void; dispatchCoach: (routeId: string, vehicleId: string) => void; buyTransportAsset: (mode: TransportMode) => void; createTransportRoute: (mode: TransportMode, toCityId: string) => void; saveDiscoveredFerryRoutes: (cityId: string, routes: FerryRouteOption[]) => void; createFerryRoute: (route: FerryRouteOption) => void; dispatchTransport: (routeId: string, assetId: string) => void; setAutomation: (patch: Partial<GameSave['automation']>) => void; runAutomation: () => void; acceptContract: (contractId: string) => void; chooseSpecialization: (specialization: Specialization) => void; takeLoan: (amount: number) => void; sellVehicle: (vehicleId: string) => void; setDriverShift: (driverId: string, shift: Driver['shift']) => void; hireDriver: (candidateId: string, vehicleId: string) => void; refreshDriverCandidates: () => void; serviceVehicle: (vehicleId: string, service: 'quick' | 'full' | 'preventative') => void; installUpgrade: (vehicleId: string, upgrade: VehicleUpgrade) => void; setRefuelStrategy: (vehicleId: string, strategy: RefuelStrategy) => void; refuelVehicle: (vehicleId: string) => void; claimGoal: (goalId: string) => void; toggleExteriorAccessory: (vehicleId: string, accessory: ExteriorAccessory) => void; setDifficulty: (difficulty: Difficulty) => void; setBrandStrategy: (patch: Partial<BrandStrategy>) => void; launchMarketing: (campaign: BrandStrategy['marketingCampaign']) => void; partnerCompetitor: (competitorId: string) => void; acquireCompetitor: (competitorId: string) => void; trainDriver: (driverId: string, certification: DriverCertification) => void; resolveIncident: (incidentId: string) => void; setRouteTimetable: (kind: 'coach' | 'transport', routeId: string, departureHour: number, frequencyHours: number) => void; resetGame: () => void }
 interface GameActions {
   hireAutomationEmployee: (role: AutomationRole) => void
   fireAutomationEmployee: (employeeId: string) => void
@@ -615,23 +615,94 @@ const generationTaxi = selectJobGenerationTaxi(state)
     // accepted-job route remains responsible for journey progress.
     return { ...result, jobs: fitOffersToAvailableTaxis(jobs, availableJobOfferCapacity({ vehicles: result.vehicles, drivers })), drivers, focusedJobId: null, updatedAt: new Date().toISOString(), activeSection: navigateToMap ? 'map' : state.activeSection }
   }),
-  saveJobPickupRoute: (jobId, coordinates, ferryCrossings, durationMinutes) => set((state) => ({
-    jobs: state.jobs.map((job) => job.id === jobId && job.status === 'accepted' ? { ...job, pickupRouteCoordinates: coordinates, pickupFerryCrossings: ferryCrossings, completedPickupFerryCrossings: [], pickupDurationMinutes: durationMinutes, acceptedAt: new Date().toISOString() } : job),
-    updatedAt: new Date().toISOString(),
-  })),
-  saveJobRoute: (jobId, coordinates, ferryCrossings) => set((state) => ({
-    jobs: state.jobs.map((job) => job.id === jobId ? { ...job, routeCoordinates: coordinates, ferryCrossings, completedFerryCrossings: [], routeResolved: true } : job),
-    updatedAt: new Date().toISOString(),
-  })),
-  markJobFerryCrossingComplete: (jobId, leg, crossingIndex) => set((state) => ({
-    jobs: state.jobs.map((job) => {
-      if (job.id !== jobId || job.status !== 'accepted') return job
-      const field = leg === 'pickup' ? 'completedPickupFerryCrossings' : 'completedFerryCrossings'
-      const completed = job[field] ?? []
-      return completed.includes(crossingIndex) ? job : { ...job, [field]: [...completed, crossingIndex] }
-    }),
-    updatedAt: new Date().toISOString(),
-  })),
+  saveJobPickupRoute: (
+  jobId,
+  coordinates,
+  ferryCrossings,
+  durationMinutes,
+) => set((state) => ({
+  jobs: state.jobs.map((job) =>
+    job.id === jobId && job.status === 'accepted'
+      ? {
+          ...job,
+          pickupRouteCoordinates: coordinates,
+          pickupFerryCrossings: ferryCrossings,
+          completedPickupFerryCrossings: [],
+          pickupFerryDelayMs: 0,
+          pickupDurationMinutes: durationMinutes,
+          acceptedAt: new Date().toISOString(),
+        }
+      : job
+  ),
+  updatedAt: new Date().toISOString(),
+})),
+  saveJobRoute: (
+  jobId,
+  coordinates,
+  ferryCrossings,
+) => set((state) => ({
+  jobs: state.jobs.map((job) =>
+    job.id === jobId
+      ? {
+          ...job,
+          routeCoordinates: coordinates,
+          ferryCrossings,
+          completedFerryCrossings: [],
+          passengerFerryDelayMs: 0,
+          routeResolved: true,
+        }
+      : job
+  ),
+  updatedAt: new Date().toISOString(),
+})),
+  markJobFerryCrossingComplete: (
+  jobId,
+  leg,
+  crossingIndex,
+  delayMs,
+) => set((state) => ({
+  jobs: state.jobs.map((job) => {
+    if (
+      job.id !== jobId ||
+      job.status !== 'accepted'
+    ) {
+      return job
+    }
+
+    const completedField =
+      leg === 'pickup'
+        ? 'completedPickupFerryCrossings'
+        : 'completedFerryCrossings'
+
+    const delayField =
+      leg === 'pickup'
+        ? 'pickupFerryDelayMs'
+        : 'passengerFerryDelayMs'
+
+    const completed =
+      job[completedField] ?? []
+
+    // Never add the timing adjustment twice.
+    if (completed.includes(crossingIndex)) {
+      return job
+    }
+
+    return {
+      ...job,
+
+      [completedField]: [
+        ...completed,
+        crossingIndex,
+      ],
+
+      [delayField]:
+        (job[delayField] ?? 0) +
+        delayMs,
+    }
+  }),
+
+  updatedAt: new Date().toISOString(),
+})),
   declineJob: (jobId) => set((state) => ({ jobs: state.jobs.filter((job) => job.id !== jobId), focusedJobId: state.focusedJobId === jobId ? null : state.focusedJobId, updatedAt: new Date().toISOString() })),
   completeJob: (jobId) => set((state) => {
     if (!state.company) return state

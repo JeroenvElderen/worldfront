@@ -50,24 +50,79 @@ export function liveMeterFare(job: TaxiJob, vehicle: Vehicle, now = Date.now()) 
   return Math.round((10 + (finalFare - 10) * progress) * 100) / 100
 }
 
-/** Stable journey timings keep a trip in the same place across map reloads. */
-export function getJobJourney(job: TaxiJob, vehicle: Vehicle) {
+/** Base road-motion timings. Ferry timing offsets are applied separately. */
+export function getJobMotionJourney(job: TaxiJob, vehicle: Vehicle) {
   const acceptedAt = job.acceptedAt ? new Date(job.acceptedAt).getTime() : Date.now()
   const departsAt = acceptedAt + JOB_DISPATCH_DELAY_MS
   const start = job.dispatchOrigin ?? vehicle.position ?? job.pickup
   const pickupDistanceKm = distanceKmBetween(start, jobPickup(job))
+
   // Use the job's average journey speed for the empty drive to the passenger too.
   const pickupMinutes = job.pickupDurationMinutes ?? (job.distanceKm > 0
     ? pickupDistanceKm * job.durationMinutes / job.distanceKm
     : 0)
+
   const speedMultiplier = taxiTripSpeedMultiplier(vehicle.modelId)
-  const pickupDurationMs = Math.max(1_000, pickupMinutes * SIMULATED_MINUTE_MS * (job.pickupTimeMultiplier ?? 1) / speedMultiplier)
-  const passengerDurationMs = Math.max(3_000, job.durationMinutes * SIMULATED_MINUTE_MS / speedMultiplier)
+
+  const pickupDurationMs = Math.max(
+    1_000,
+    pickupMinutes *
+      SIMULATED_MINUTE_MS *
+      (job.pickupTimeMultiplier ?? 1) /
+      speedMultiplier,
+  )
+
+  const passengerDurationMs = Math.max(
+    3_000,
+    job.durationMinutes *
+      SIMULATED_MINUTE_MS /
+      speedMultiplier,
+  )
+
   return {
     acceptedAt,
     departsAt,
     pickupAt: departsAt + pickupDurationMs,
     arrivesAt: departsAt + pickupDurationMs + passengerDurationMs,
+  }
+}
+
+/**
+ * The road-motion clock excludes ferry timing adjustments.
+ * The ferry owns the vehicle while waiting/aboard.
+ */
+export const getJobMotionTime = (
+  job: TaxiJob,
+  now = Date.now(),
+) =>
+  now -
+  (job.pickupFerryDelayMs ?? 0) -
+  (job.passengerFerryDelayMs ?? 0)
+
+/** Stable real-world deadlines include actual ferry timing. */
+export function getJobJourney(
+  job: TaxiJob,
+  vehicle: Vehicle,
+) {
+  const journey = getJobMotionJourney(job, vehicle)
+
+  const pickupFerryDelayMs =
+    job.pickupFerryDelayMs ?? 0
+
+  const passengerFerryDelayMs =
+    job.passengerFerryDelayMs ?? 0
+
+  return {
+    ...journey,
+
+    pickupAt:
+      journey.pickupAt +
+      pickupFerryDelayMs,
+
+    arrivesAt:
+      journey.arrivesAt +
+      pickupFerryDelayMs +
+      passengerFerryDelayMs,
   }
 }
 

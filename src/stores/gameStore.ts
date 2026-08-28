@@ -686,7 +686,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
         const depleted = { ...previousVehicle, position: jobDestination(job), status: hasQueuedJob ? 'on-job' as const : 'available' as const, odometerKm: (previousVehicle.odometerKm ?? 0) + journeyDistanceKm, lifetimeRevenue: (previousVehicle.lifetimeRevenue ?? 0) + job.fare + outcome.tip, batteryHealth: Math.max(60, (previousVehicle.batteryHealth ?? 100) - batteryWear), condition: Math.max(0, previousVehicle.condition - outcome.wear), cleanliness: Math.max(0, (previousVehicle.cleanliness ?? 100) - cleaningWear), tireCondition: Math.max(0, (previousVehicle.tireCondition ?? 100) - tireWear), fuel: Math.max(0, previousVehicle.fuel - energyUsed), taxiPerformance: { trips: performance.trips + 1, emptyKm: performance.emptyKm + emptyDistanceKm, occupiedKm: performance.occupiedKm + job.distanceKm, serviceMinutes: performance.serviceMinutes + job.durationMinutes, ratingTotal: performance.ratingTotal + outcome.customerRating, tips: performance.tips + outcome.tip, energyCost: performance.energyCost + energyUsed * 1.5, cancellations: performance.cancellations } }
         customerReviews = [...customerReviews, createCustomerReview(job, previousVehicle, driver, state.passengers.find((passenger) => job.passengerIds.includes(passenger.id)), outcome.customerRating, outcome.satisfaction, new Date(completedAt).toISOString())].slice(-100)
         const tiredDriver = driver && { ...driver, fatigue: Math.min(100, driver.fatigue + fatigueUseForJob(job)) }
-        const needsAutomaticRecovery = !hasQueuedJob && (previousVehicle.refuelStrategy === 'automatic' || (tiredDriver?.fatigue ?? 0) >= 80)
+        const needsAutomaticRecovery = !previousVehicle.queuedService && !hasQueuedJob && (previousVehicle.refuelStrategy === 'automatic' || (tiredDriver?.fatigue ?? 0) >= 80)
         vehicles = vehicles.map((vehicle) => vehicle.id !== previousVehicle.id ? vehicle : needsAutomaticRecovery ? startRecoveryTrip(depleted, tiredDriver, getCity(vehicle.cityId, state.customCities)?.coordinates ?? job.destination, completedAt) : depleted)
         drivers = drivers.map((candidate) => candidate.id !== driver?.id ? candidate : { ...candidate, fatigue: Math.min(100, candidate.fatigue + fatigueUseForJob(job)), status: vehicles.find((vehicle) => vehicle.driverId === candidate.id)?.status === 'maintenance' ? 'driving' : 'available' })
         let goals = updateGoals(state.goals ?? [], 'fares', 1)
@@ -850,6 +850,27 @@ const generationTaxi = selectJobGenerationTaxi(state)
     if (result?.completedJobIds.length) drivers = drivers.map((driver) => {
       const completed = result.completedJobIds.filter((jobId) => state.vehicles.find((vehicle) => vehicle.driverId === driver.id)?.id === state.jobs.find((job) => job.id === jobId)?.assignedVehicleId).length
       return completed ? { ...driver, experience: (driver.experience ?? 0) + completed * 10, completedTrips: (driver.completedTrips ?? 0) + completed, careerEarnings: (driver.careerEarnings ?? 0) + completed * 25, morale: Math.min(100, (driver.morale ?? 80) + 1) } : driver
+    })
+    // A workshop choice made while a vehicle was busy takes priority as soon as
+    // its current work ends. Charging is deferred until then so a queued choice
+    // cannot strand the company if its balance changes in the meantime.
+    vehicles = vehicles.map((vehicle) => {
+      if (vehicle.status !== 'available' || !vehicle.queuedService) return vehicle
+      const queued = vehicle.queuedService
+      if (queued.kind === 'cleaning') {
+        const plan = cleaningDetails[queued.service]
+        if (company.cash < plan.cost) return vehicle
+        company = { ...company, cash: company.cash - plan.cost }
+        financialTransactions = addTransactions(financialTransactions, transaction('maintenance', `${vehicle.name}: ${plan.label}`, -plan.cost, vehicle.id))
+        return { ...vehicle, queuedService: undefined, cleanliness: Math.min(100, (vehicle.cleanliness ?? 100) + plan.restored), recentlyDetailedUntil: queued.service === 'detail' ? new Date(now + 24 * 60 * 60_000).toISOString() : vehicle.recentlyDetailedUntil, lifetimeExpenses: (vehicle.lifetimeExpenses ?? 0) + plan.cost }
+      }
+      const mechanic = (state.mechanics ?? []).filter((candidate) => candidate.cityId === vehicle.cityId).sort((left, right) => right.skill - left.skill)[0]
+      const quote = maintenanceQuote(vehicle, queued.kind, mechanic)
+      if (company.cash < quote.cost) return vehicle
+      const startedAt = new Date(now).toISOString()
+      company = { ...company, cash: company.cash - quote.cost }
+      financialTransactions = addTransactions(financialTransactions, transaction('maintenance', `${vehicle.name}: ${queued.kind}`, -quote.cost, vehicle.id, startedAt))
+      return { ...vehicle, queuedService: undefined, status: 'maintenance' as const, maintenanceJob: { kind: queued.kind, mechanicId: mechanic?.id, startedAt, completesAt: new Date(now + quote.durationMs).toISOString(), cost: quote.cost }, lifetimeExpenses: (vehicle.lifetimeExpenses ?? 0) + quote.cost }
     })
     const maintenanceAlerts = maintenanceAdvisories(vehicles, state.maintenanceAlerts ?? [], now)
     return { company, jobs: result?.jobs ?? jobs, vehicles, transportAssets, drivers, goals, contracts, driverCandidates, loans, financialTransactions, exploredTerritory, activeEvent, nextEventAt, nextOperatingPaymentAt, worldCondition, competitors, incidents, trafficIncidents, nextTrafficIncidentAt, passengers, customerReviews, maintenanceAlerts, focusedJobId: result ? null : (jobs.some((job) => job.id === state.focusedJobId) ? state.focusedJobId : null), updatedAt: new Date().toISOString() }
@@ -1129,9 +1150,10 @@ const generationTaxi = selectJobGenerationTaxi(state)
     return { company: { ...state.company, cash: state.company.cash - responseCost }, incidents: state.incidents.map((item) => item.id === incidentId ? { ...item, resolved: true, response } : item), vehicles: state.vehicles.map((vehicle) => vehicle.id === incident.vehicleId ? { ...vehicle, status: response === 'replacement' || response === 'refund' ? 'maintenance' as const : 'available' as const, ...(condition === undefined ? {} : { condition }) } : vehicle), brandStrategy: { ...(state.brandStrategy ?? defaultBrandStrategy), safetyRating: Math.max(0, (state.brandStrategy?.safetyRating ?? 100) - (response === 'replacement' ? Math.max(1, incident.severity - 3) : incident.severity)) }, financialTransactions: addTransactions(state.financialTransactions, transaction(response === 'refund' ? 'fares' : 'maintenance', `${response.replace('-', ' ')}: ${incident.description}`, -responseCost, incident.vehicleId)), updatedAt: new Date().toISOString() }
   }),
   cleanVehicle: (vehicleId, service) => set((state) => {
-    const vehicle = state.vehicles.find((candidate) => candidate.id === vehicleId && candidate.status === 'available')
+    const vehicle = state.vehicles.find((candidate) => candidate.id === vehicleId)
     const plan = cleaningDetails[service]
     if (!state.company || !vehicle || state.company.cash < plan.cost || (vehicle.cleanliness ?? 100) >= 100) return state
+    if (vehicle.status !== 'available') return { vehicles: state.vehicles.map((candidate) => candidate.id === vehicleId ? { ...candidate, queuedService: { kind: 'cleaning' as const, service } } : candidate), maintenanceAlerts: (state.maintenanceAlerts ?? []).filter((alert) => alert.vehicleId !== vehicleId || alert.kind !== 'cleaning'), updatedAt: new Date().toISOString() }
     return { company: { ...state.company, cash: state.company.cash - plan.cost }, vehicles: state.vehicles.map((candidate) => candidate.id !== vehicleId ? candidate : { ...candidate, cleanliness: Math.min(100, (candidate.cleanliness ?? 100) + plan.restored), recentlyDetailedUntil: service === 'detail' ? new Date(Date.now() + 24 * 60 * 60_000).toISOString() : candidate.recentlyDetailedUntil, lifetimeExpenses: (candidate.lifetimeExpenses ?? 0) + plan.cost }), maintenanceAlerts: (state.maintenanceAlerts ?? []).filter((alert) => alert.vehicleId !== vehicleId || alert.kind !== 'cleaning'), financialTransactions: addTransactions(state.financialTransactions, transaction('maintenance', `${vehicle.name}: ${plan.label}`, -plan.cost, vehicle.id)), updatedAt: new Date().toISOString() }
   }),
   fitTires: (vehicleId, tireType) => set((state) => {
@@ -1141,11 +1163,12 @@ const generationTaxi = selectJobGenerationTaxi(state)
     return { company: { ...state.company, cash: state.company.cash - cost }, vehicles: state.vehicles.map((candidate) => candidate.id !== vehicleId ? candidate : { ...candidate, tireType, tireCondition: 100, tireInstalledAtKm: candidate.odometerKm ?? 0, lifetimeExpenses: (candidate.lifetimeExpenses ?? 0) + cost }), maintenanceAlerts: (state.maintenanceAlerts ?? []).filter((alert) => alert.vehicleId !== vehicleId || alert.kind !== 'tires'), financialTransactions: addTransactions(state.financialTransactions, transaction('maintenance', `${vehicle.name}: ${tireDetails[tireType].label} tires`, -cost, vehicle.id)), updatedAt: new Date().toISOString() }
   }),
   startMaintenance: (vehicleId, kind) => set((state) => {
-    const vehicle = state.vehicles.find((candidate) => candidate.id === vehicleId && candidate.status === 'available' && !candidate.maintenanceJob)
+    const vehicle = state.vehicles.find((candidate) => candidate.id === vehicleId && !candidate.maintenanceJob)
     const mechanic = (state.mechanics ?? []).filter((candidate) => candidate.cityId === vehicle?.cityId).sort((left, right) => right.skill - left.skill)[0]
     if (!state.company || !vehicle) return state
     const quote = maintenanceQuote(vehicle, kind, mechanic)
     if (state.company.cash < quote.cost) return state
+    if (vehicle.status !== 'available') return { vehicles: state.vehicles.map((candidate) => candidate.id === vehicleId ? { ...candidate, queuedService: { kind } } : candidate), maintenanceAlerts: (state.maintenanceAlerts ?? []).filter((alert) => alert.vehicleId !== vehicleId), updatedAt: new Date().toISOString() }
     const startedAt = new Date().toISOString()
     return { company: { ...state.company, cash: state.company.cash - quote.cost }, vehicles: state.vehicles.map((candidate) => candidate.id !== vehicleId ? candidate : { ...candidate, status: 'maintenance' as const, maintenanceJob: { kind, mechanicId: mechanic?.id, startedAt, completesAt: new Date(Date.now() + quote.durationMs).toISOString(), cost: quote.cost }, lifetimeExpenses: (candidate.lifetimeExpenses ?? 0) + quote.cost }), maintenanceAlerts: (state.maintenanceAlerts ?? []).filter((alert) => alert.vehicleId !== vehicleId), financialTransactions: addTransactions(state.financialTransactions, transaction('maintenance', `${vehicle.name}: ${kind}`, -quote.cost, vehicle.id)), updatedAt: startedAt }
   }),

@@ -5,7 +5,7 @@ import { featureCollection, lineString, point } from '@turf/helpers'
 import { mapboxAccessToken } from '../config/mapbox'
 import { getCity, worldOverview } from '../data/cities'
 import { taxiModels } from '../data/taxis'
-import type { Branch, Coordinates, DiscoveredFerryRoute, TaxiFerryCrossing, TaxiJob, TerritoryExpansion, TerritoryFeature, TrafficIncident, TransportAsset, TransportRoute, Vehicle, VehicleIncident } from '../models/game'
+import type { Branch, Coordinates, DiscoveredFerryRoute, Hotel, TaxiFerryCrossing, TaxiJob, TerritoryExpansion, TerritoryFeature, TrafficIncident, TransportAsset, TransportRoute, Vehicle, VehicleIncident } from '../models/game'
 import { distanceKmBetween, getJobJourney, jobDestination, jobPickup } from '../services/jobEngine'
 import { postalRouteProgress } from '../services/postalEngine'
 import { rentalJourneyProgress } from '../services/rentalEngine'
@@ -14,7 +14,7 @@ import { cancelMapFrame, scheduleMapFrame } from '../services/frameScheduler'
 import { resolveRoadRoute, type RoadRouteDetails, type RouteSpeedLimit } from '../services/roadRoutes'
 import { activeFerryServiceForCrossing } from '../services/ferryService'
 
-interface GameMapProps { layoutKey: string; cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; territoryExpansions: TerritoryExpansion[]; exploredTerritory: TerritoryFeature | null; vehicles: Vehicle[]; jobs: TaxiJob[]; transportAssets: TransportAsset[]; transportRoutes: TransportRoute[]; discoveredFerryRoutes: DiscoveredFerryRoute[]; trafficIncidents: TrafficIncident[]; vehicleIncidents: VehicleIncident[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void; onSaveJobPickupRoute: (jobId: string, coordinates: Coordinates[], ferryCrossings: TaxiFerryCrossing[], durationMinutes: number) => void; onSaveJobRoute: (jobId: string, coordinates: Coordinates[], ferryCrossings: TaxiFerryCrossing[]) => void; onJobFerryCrossingComplete: (jobId: string, leg: 'pickup' | 'passenger', crossingIndex: number) => void; onTaxiArrived: (jobId: string) => void }
+interface GameMapProps { layoutKey: string; cityId: string | null; customCities: import('../models/game').City[]; branches: Branch[]; hotels: Hotel[]; territoryExpansions: TerritoryExpansion[]; exploredTerritory: TerritoryFeature | null; vehicles: Vehicle[]; jobs: TaxiJob[]; transportAssets: TransportAsset[]; transportRoutes: TransportRoute[]; discoveredFerryRoutes: DiscoveredFerryRoute[]; trafficIncidents: TrafficIncident[]; vehicleIncidents: VehicleIncident[]; focusedJobId: string | null; placingStation: boolean; placingTerritory: boolean; placingHotel: boolean; onBuildStation: (coordinates: Coordinates) => void; onExpandTerritory: (coordinates: Coordinates) => void; onBuildHotel: (coordinates: Coordinates) => void; onOpenJob: (jobId: string) => void; onSaveJobPickupRoute: (jobId: string, coordinates: Coordinates[], ferryCrossings: TaxiFerryCrossing[], durationMinutes: number) => void; onSaveJobRoute: (jobId: string, coordinates: Coordinates[], ferryCrossings: TaxiFerryCrossing[]) => void; onJobFerryCrossingComplete: (jobId: string, leg: 'pickup' | 'passenger', crossingIndex: number) => void; onTaxiArrived: (jobId: string) => void }
 const token = mapboxAccessToken
 const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { openStreetMap: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'openStreetMap', type: 'raster', source: 'openStreetMap' }] }
 
@@ -255,7 +255,10 @@ const positionVehicleOnOwnedFerry = (
   const ferryCoordinates = journeyDirection === 'returning'
     ? [...service.route.routeCoordinates].reverse()
     : service.route.routeCoordinates
-  return { position: routePosition(ferryCoordinates, progress), state: 'aboard' as const, crossingIndex, completedNow: false }
+  // Keep the road vehicle at the departure terminal while the ferry marker
+  // represents the actual sea crossing. This prevents taxis and coaches from
+  // appearing as independent vehicles in open water.
+  return { position: crossing.boardAt, state: 'aboard' as const, crossingIndex, completedNow: false }
 }
 
 const ferryCrossingsComplete = (key: string, route: RouteDetails, completed: Set<string>) =>
@@ -286,7 +289,7 @@ const missionColor = (jobId: string) => {
   return `hsl(${hash % 360}, 100%, 60%)`
 }
 
-function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpansions, exploredTerritory, vehicles, jobs, transportAssets, transportRoutes, discoveredFerryRoutes, trafficIncidents, vehicleIncidents, focusedJobId, placingStation, placingTerritory, onBuildStation, onExpandTerritory, onOpenJob, onSaveJobPickupRoute, onSaveJobRoute, onJobFerryCrossingComplete, onTaxiArrived }: GameMapProps) {
+function GameMapView({ layoutKey, cityId, customCities, branches, hotels, territoryExpansions, exploredTerritory, vehicles, jobs, transportAssets, transportRoutes, discoveredFerryRoutes, trafficIncidents, vehicleIncidents, focusedJobId, placingStation, placingTerritory, placingHotel, onBuildStation, onExpandTerritory, onBuildHotel, onOpenJob, onSaveJobPickupRoute, onSaveJobRoute, onJobFerryCrossingComplete, onTaxiArrived }: GameMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const pickupJobIds = useRef(new Set<string>())
@@ -297,6 +300,7 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
   const arrivedJobIds = useRef(new Set<string>())
   const incidentMarkers = useRef<mapboxgl.Marker[]>([])
   const harbourMarkers = useRef<mapboxgl.Marker[]>([])
+  const hotelMarkers = useRef<mapboxgl.Marker[]>([])
   const ferryMarkers = useRef(new Map<string, mapboxgl.Marker>())
   const boardedFerryCrossings = useRef(new Set<string>())
   const completedFerryCrossings = useRef(new Set<string>())
@@ -374,15 +378,16 @@ function GameMapView({ layoutKey, cityId, customCities, branches, territoryExpan
   useEffect(() => {
     const instance = map.current
     if (!instance) return
-    instance.getCanvas().classList.toggle('placing-depot', placingStation || placingTerritory)
+    instance.getCanvas().classList.toggle('placing-depot', placingStation || placingTerritory || placingHotel)
     const handlePlacement = (event: mapboxgl.MapMouseEvent) => {
       const coordinates: Coordinates = [event.lngLat.lng, event.lngLat.lat]
       if (placingStation) onBuildStation(coordinates)
       else if (placingTerritory) onExpandTerritory(coordinates)
+      else if (placingHotel) onBuildHotel(coordinates)
     }
     instance.on('click', handlePlacement)
     return () => { instance.off('click', handlePlacement); instance.getCanvas().classList.remove('placing-depot') }
-  }, [placingStation, placingTerritory, onBuildStation, onExpandTerritory])
+  }, [placingStation, placingTerritory, placingHotel, onBuildStation, onExpandTerritory, onBuildHotel])
 
   useEffect(() => {
     if (!containerReady || !container.current || map.current) return
@@ -892,6 +897,29 @@ instance.addSource(routeSourceId, {
       if (harbourMarkers.current === markers) harbourMarkers.current = []
     }
   }, [discoveredFerryRoutes, mapRevision])
+
+  useEffect(() => {
+    const instance = map.current
+    if (!instance) return
+    hotelMarkers.current.forEach((marker) => marker.remove())
+    const markers = hotels.flatMap((hotel) => {
+      const coordinates = hotel.coordinates ?? getCity(hotel.cityId, customCities)?.coordinates
+      if (!coordinates) return []
+      const element = document.createElement('div')
+      element.className = 'hotel-map-marker'
+      element.textContent = '🏨'
+      element.setAttribute('aria-label', hotel.name)
+      return [new mapboxgl.Marker({ element, anchor: 'bottom' })
+        .setLngLat(coordinates)
+        .setPopup(new mapboxgl.Popup({ offset: 18 }).setText(`${hotel.name} · Level ${hotel.level} · ${hotel.rooms} rooms`))
+        .addTo(instance)]
+    })
+    hotelMarkers.current = markers
+    return () => {
+      markers.forEach((marker) => marker.remove())
+      if (hotelMarkers.current === markers) hotelMarkers.current = []
+    }
+  }, [hotels, customCities, mapRevision])
 
   useEffect(() => {
     const instance = map.current
@@ -1481,6 +1509,7 @@ export const GameMap = memo(GameMapView, (previous, next) =>
   previous.cityId === next.cityId &&
   previous.customCities === next.customCities &&
   previous.branches === next.branches &&
+  previous.hotels === next.hotels &&
   previous.territoryExpansions === next.territoryExpansions &&
   previous.exploredTerritory === next.exploredTerritory &&
   previous.vehicles === next.vehicles &&
@@ -1489,8 +1518,10 @@ export const GameMap = memo(GameMapView, (previous, next) =>
   previous.discoveredFerryRoutes === next.discoveredFerryRoutes &&
   previous.placingStation === next.placingStation &&
   previous.placingTerritory === next.placingTerritory &&
+  previous.placingHotel === next.placingHotel &&
   previous.onBuildStation === next.onBuildStation &&
   previous.onExpandTerritory === next.onExpandTerritory &&
+  previous.onBuildHotel === next.onBuildHotel &&
   previous.focusedJobId === next.focusedJobId &&
   previous.onOpenJob === next.onOpenJob &&
   previous.onSaveJobPickupRoute === next.onSaveJobPickupRoute &&

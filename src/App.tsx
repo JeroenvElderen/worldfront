@@ -11,6 +11,7 @@ import { getTaxiModel } from './data/taxis'
 import { jobOfferCapacity } from './services/earlyGameEngine'
 import { getCity } from './data/cities'
 import { moneyFormatterForCity } from './services/localization'
+import { HOTEL_PURCHASE_COST } from './services/hotelEconomy'
 import { CurrencyProvider } from './components/game/CurrencyContext'
 
 const JOB_REFRESH_INTERVAL_MS = 60_000
@@ -28,6 +29,7 @@ export default function App() {
   const game = useGameStore()
   const [placingStation, setPlacingStation] = useState(false)
   const [placingTerritory, setPlacingTerritory] = useState(false)
+  const [placingHotel, setPlacingHotel] = useState(false)
   const [showExpansionMenu, setShowExpansionMenu] = useState(false)
   const purchasedTerritories = (game.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery' && area.source !== 'ferry-discovery').length
   const unlockedTerritories = (game.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery').length
@@ -58,6 +60,12 @@ export default function App() {
     expandTerritory(coordinates)
     setPlacingTerritory(false)
   }, [expandTerritory])
+  const buyHotel = game.buyHotel
+  const handleBuildHotel = useCallback((coordinates: Parameters<typeof buyHotel>[0]) => {
+    const hotelCount = useGameStore.getState().hotels.length
+    buyHotel(coordinates)
+    if (useGameStore.getState().hotels.length > hotelCount) setPlacingHotel(false)
+  }, [buyHotel])
 
   const handleTaxiArrived = useCallback((jobId: string) => {
     const state = useGameStore.getState()
@@ -327,6 +335,7 @@ export default function App() {
         cityId={game.activeCityId ?? game.startingCityId}
         customCities={game.customCities ?? []}
         branches={game.branches ?? []}
+        hotels={game.hotels ?? []}
         territoryExpansions={game.territoryExpansions ?? []}
         exploredTerritory={game.exploredTerritory}
         vehicles={game.vehicles}
@@ -339,8 +348,10 @@ export default function App() {
         focusedJobId={game.focusedJobId}
         placingStation={placingStation}
         placingTerritory={placingTerritory}
+        placingHotel={placingHotel}
         onBuildStation={handleBuildStation}
         onExpandTerritory={handleExpandTerritory}
+        onBuildHotel={handleBuildHotel}
         onOpenJob={game.openJob}
         onSaveJobPickupRoute={game.saveJobPickupRoute}
         onSaveJobRoute={game.saveJobRoute}
@@ -352,9 +363,10 @@ export default function App() {
         <>
           <TopHud company={game.company} />
 
-          {game.activeSection === 'map' && !placingStation && !placingTerritory && <><aside className="territory-guide" aria-live="polite"><b>Village borders unlocked: {game.branches.length + unlockedTerritories}</b><small>{territoryProgressMessage}</small></aside>{showExpansionMenu && <aside className="expansion-menu"><b>Expand your network</b><button disabled={game.company.cash < territoryExpansionCost} onClick={() => { setPlacingTerritory(true); setShowExpansionMenu(false) }}><span>◎</span><div><strong>Unlock village territory</strong><small>Choose a village border · {territoryExpansionPrice}</small></div></button><button disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => { setPlacingStation(true); setShowExpansionMenu(false) }} title={stationBuildMessage}><span>＋</span><div><strong>Build a station</strong><small>Start a separate service area · {money.format(stationPackageCost)}</small></div></button></aside>}<button className="station-add-button" onClick={() => setShowExpansionMenu((open) => !open)} aria-label="Territory expansion options" aria-expanded={showExpansionMenu}>＋</button></>}
+          {game.activeSection === 'map' && !placingStation && !placingTerritory && !placingHotel && <><aside className="territory-guide" aria-live="polite"><b>Village borders unlocked: {game.branches.length + unlockedTerritories}</b><small>{territoryProgressMessage}</small></aside>{showExpansionMenu && <aside className="expansion-menu"><b>Expand your network</b><button disabled={game.company.cash < territoryExpansionCost} onClick={() => { setPlacingTerritory(true); setShowExpansionMenu(false) }}><span>◎</span><div><strong>Unlock village territory</strong><small>Choose a village border · {territoryExpansionPrice}</small></div></button><button disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => { setPlacingStation(true); setShowExpansionMenu(false) }} title={stationBuildMessage}><span>＋</span><div><strong>Build a station</strong><small>Start a separate service area · {money.format(stationPackageCost)}</small></div></button></aside>}<button className="station-add-button" onClick={() => setShowExpansionMenu((open) => !open)} aria-label="Territory expansion options" aria-expanded={showExpansionMenu}>＋</button></>}
           {placingStation && <aside className="depot-placement-banner"><span>⌖</span><div><b>Place Station {game.branches.length + 1}</b><small>Tap the map to build a station with one taxi for {money.format(stationPackageCost)}.</small></div><button onClick={() => setPlacingStation(false)}>Cancel</button></aside>}
           {placingTerritory && <aside className="depot-placement-banner"><span>◎</span><div><b>Unlock a village territory</b><small>Tap a village on the map to purchase its organic border for {territoryExpansionPrice.toLocaleLowerCase()}. No station will be built.</small></div><button onClick={() => setPlacingTerritory(false)}>Cancel</button></aside>}
+          {placingHotel && <aside className="depot-placement-banner hotel-placement-banner"><span>🏨</span><div><b>Place hotel {(game.hotels ?? []).filter((hotel) => hotel.cityId === (game.activeCityId ?? game.startingCityId)).length + 1}</b><small>Tap the exact map location to build this property for {money.format(HOTEL_PURCHASE_COST)}.</small></div><button onClick={() => setPlacingHotel(false)}>Cancel</button></aside>}
 
           {game.worldCondition && game.worldCondition.weather !== 'clear' && (
             <aside className="weather-chip" title={game.worldCondition.description}>
@@ -533,7 +545,7 @@ export default function App() {
               customCities={game.customCities ?? []}
               hotels={game.hotels ?? []}
               economies={game.cityEconomies ?? []}
-              onBuy={game.buyHotel}
+              onBuy={() => { game.setSection('map'); setPlacingHotel(true) }}
               onUpgrade={game.upgradeHotel}
               onCollect={game.collectHotelRevenue}
               onClose={() => game.setSection('map')}

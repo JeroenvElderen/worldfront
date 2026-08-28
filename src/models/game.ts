@@ -47,7 +47,7 @@ export type DepotFacility = 'parking' | 'workshop' | 'energy' | 'lounge'
 export interface DepotFacilities { parking: number; workshop: number; energy: number; lounge: number }
 export interface TerritoryExpansion { id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; purchasedAt: string; source?: 'purchase' | 'taxi-discovery' | 'ferry-discovery'; radiusKm?: number }
 export interface Branch { id: string; cityId: string; name: string; openedAt: string; coordinates?: Coordinates; managerName?: string; isHeadquarters?: boolean; depot?: DepotFacilities }
-export interface Hotel { id: string; cityId: string; name: string; level: number; rooms: number; purchasedAt: string; lastCollectedAt: string; lifetimeRevenue: number }
+export interface Hotel { id: string; cityId: string; name: string; coordinates?: Coordinates; level: number; rooms: number; purchasedAt: string; lastCollectedAt: string; lifetimeRevenue: number }
 export interface CityEconomy { cityId: string; population: number; tourism: number; business: number; prosperity: number; costIndex: number; trend: number }
 export interface TravelAgency { id: string; name: string; cityId: string; level: number }
 export interface Tour { id: string; agencyId: string; name: string; stops: Coordinates[]; price: number; vehicleId?: string }

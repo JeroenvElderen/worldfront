@@ -43,7 +43,7 @@ export default function App() {
   const money = moneyFormatterForCity(activeCity)
   const maintenanceAlert = (game.maintenanceAlerts ?? []).find((alert) => !alert.dismissed)
   const territoryExpansionPrice = territoryExpansionCost === 0 ? 'Free' : money.format(territoryExpansionCost)
-  const territoryProgressMessage = 'Completed taxi journeys expand your border; an operating ferry unlocks its destination when it first docks.'
+  const territoryProgressMessage = 'Completed taxi and ferry journeys expand your border along the route they travelled.'
   const stationBuildMessage = !game.company || game.company.level < 2
     ? 'Building a separate station becomes available at level 2'
     : stationFleetFull

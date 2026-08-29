@@ -1,4 +1,5 @@
 import type { Coordinates, TaxiFerryCrossing, TaxiJob } from '../models/game'
+import { resolveLandsideFerryTerminals } from './ferryTerminals'
 
 const JOB_JSON_STORAGE_KEY = 'travel-empire-job-json-v1'
 
@@ -39,6 +40,12 @@ const storedRouteKey = (route: Pick<StoredJobRoute, 'cityId' | 'pickup' | 'desti
 const uniqueStoredRoutes = (routes: StoredJobRoute[]) =>
   [...new Map(routes.map((route) => [storedRouteKey(route), route])).values()]
 
+const repairStoredFerryTerminals = (route: StoredJobRoute): StoredJobRoute => {
+  if (!route.routeCoordinates || !route.ferryCrossings?.length) return route
+  const ferryCrossings = resolveLandsideFerryTerminals(route.routeCoordinates, route.ferryCrossings)
+  return ferryCrossings === route.ferryCrossings ? route : { ...route, ferryCrossings }
+}
+
 const emptyJobJson = (): JobJson => ({ version: 1, routes: [] })
 
 export function readJobJson(): JobJson {
@@ -46,7 +53,7 @@ export function readJobJson(): JobJson {
   try {
     const parsed = JSON.parse(localStorage.getItem(JOB_JSON_STORAGE_KEY) ?? '') as Partial<JobJson>
     return parsed.version === 1 && Array.isArray(parsed.routes)
-      ? { version: 1, routes: uniqueStoredRoutes(parsed.routes) }
+      ? { version: 1, routes: uniqueStoredRoutes(parsed.routes.map(repairStoredFerryTerminals)) }
       : emptyJobJson()
   } catch {
     return emptyJobJson()

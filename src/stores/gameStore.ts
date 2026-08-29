@@ -25,6 +25,7 @@ import { compactLegacyDiscoveries, extendExploredTerritory, isInsideVillageTerri
 import { createTrafficIncident, trafficImpactForJob } from '../services/operationsIncidents'
 import { cleaningDetails, createAutomationEmployee, createCustomerReview, createStarterDispatcher, createStarterMechanic, maintenanceAdvisories, maintenanceQuote, recruitDispatcher, recruitMechanic, tireDetails, tireWearForDistance } from '../services/fleetOperations'
 import { ferryCrossingsHaveActiveService } from '../services/ferryService'
+import { resolveLandsideFerryTerminals } from '../services/ferryTerminals'
 import { harbourId } from '../services/maritimeRoutes'
 
 export type Section = 'map' | 'jobs' | 'ferries' | 'operations' | 'fleet' | 'hotels' | 'finance' | 'travel' | 'company'
@@ -1471,6 +1472,17 @@ const generationTaxi = selectJobGenerationTaxi(state)
     let jobs = savedVersion < 23
       ? (saved.jobs ?? []).filter((job) => job.status !== 'offered')
       : saved.jobs ?? []
+    jobs = jobs.map((job) => {
+      const pickupFerryCrossings = job.pickupRouteCoordinates && job.pickupFerryCrossings?.length
+        ? resolveLandsideFerryTerminals(job.pickupRouteCoordinates, job.pickupFerryCrossings)
+        : job.pickupFerryCrossings
+      const ferryCrossings = job.routeCoordinates && job.ferryCrossings?.length
+        ? resolveLandsideFerryTerminals(job.routeCoordinates, job.ferryCrossings)
+        : job.ferryCrossings
+      return pickupFerryCrossings === job.pickupFerryCrossings && ferryCrossings === job.ferryCrossings
+        ? job
+        : { ...job, pickupFerryCrossings, ferryCrossings }
+    })
     const strandedJobVehicleIds = new Set<string>()
     if (savedVersion < 26) {
       jobs = jobs.map((job) => {

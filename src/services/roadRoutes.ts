@@ -1,5 +1,6 @@
 import { mapboxAccessToken } from '../config/mapbox'
 import type { Coordinates, TaxiFerryCrossing } from '../models/game'
+import { resolveLandsideFerryTerminals } from './ferryTerminals'
 
 export type RouteSpeedLimit = { speed: number; unit: 'km/h' | 'mph' } | { unknown: true } | { none: true }
 
@@ -70,7 +71,7 @@ const ferryCrossingsForRoute = (coordinates: Coordinates[], legs: MapboxRoute['l
     })
     cursor = endIndex
   }
-  return crossings
+  return resolveLandsideFerryTerminals(coordinates, crossings)
 }
 
 /** Resolve a real drivable route and retain any ferry legs Mapbox selected. */

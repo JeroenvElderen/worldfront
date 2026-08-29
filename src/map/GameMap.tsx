@@ -45,6 +45,7 @@ import {
   type RouteSpeedLimit,
 } from "../services/roadRoutes";
 import { activeFerryServiceForCrossing } from "../services/ferryService";
+import { resolveLandsideFerryTerminals } from "../services/ferryTerminals";
 
 interface GameMapProps {
   layoutKey: string;
@@ -449,13 +450,6 @@ const positionVehicleOnOwnedFerry = (
     };
   }
 
-  const waitingHarbour =
-    service.direction === "returning"
-      ? service.route.destinationCoordinates
-      : service.route.originCoordinates;
-
-  const waitingPosition = waitingHarbour ?? crossing.boardAt;
-
   const journeyDirection = service.asset.journey.direction ?? "outbound";
   const startedAt = new Date(service.asset.journey.startedAt).getTime();
   const arrivesAt = new Date(service.asset.journey.arrivesAt).getTime();
@@ -485,7 +479,7 @@ const positionVehicleOnOwnedFerry = (
   if (!isBoarded) {
     if (journeyDirection !== service.direction || progress > 0.08) {
       return {
-        position: waitingPosition,
+        position: crossing.boardAt,
         state: "waiting" as const,
         crossingIndex,
         completedNow: false,
@@ -505,7 +499,7 @@ const positionVehicleOnOwnedFerry = (
   const ferryPosition =
     ferryCoordinates.length >= 2
       ? routePosition(ferryCoordinates, progress)
-      : waitingPosition;
+      : crossing.boardAt;
 
   return {
     position: ferryPosition,
@@ -2082,7 +2076,10 @@ function GameMapView({
       let pickupRoute: RouteDetails = {
         coordinates: job.pickupRouteCoordinates ?? [start, start],
         speedLimits: [],
-        ferryCrossings: job.pickupFerryCrossings ?? [],
+        ferryCrossings: resolveLandsideFerryTerminals(
+          job.pickupRouteCoordinates ?? [start, start],
+          job.pickupFerryCrossings ?? [],
+        ),
       };
       let passengerRoute: RouteDetails = {
         coordinates: job.routeCoordinates ?? [
@@ -2090,7 +2087,10 @@ function GameMapView({
           jobDestination(job),
         ],
         speedLimits: [],
-        ferryCrossings: job.ferryCrossings ?? [],
+        ferryCrossings: resolveLandsideFerryTerminals(
+          job.routeCoordinates ?? [jobPickup(job), jobDestination(job)],
+          job.ferryCrossings ?? [],
+        ),
       };
       const fallbackSpeedKmh =
         job.durationMinutes > 0

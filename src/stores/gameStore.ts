@@ -1156,13 +1156,9 @@ const generationTaxi = selectJobGenerationTaxi(state)
     const cost = 5_000
     const id = harbourId(route.originCoordinates)
     if (!state.company || state.company.cash < cost || (state.purchasedHarbours ?? []).some((harbour) => harbour.id === id)) return state
-    const firstHarbour = !(state.purchasedHarbours ?? []).length
-    const ownedHarbourIds = new Set((state.purchasedHarbours ?? []).map((harbour) => harbour.id))
-    const connectedToOwnedHarbour = (state.discoveredFerryRoutes ?? []).some((candidate) =>
-      ownedHarbourIds.has(harbourId(candidate.originCoordinates)) && harbourId(candidate.destinationCoordinates) === id)
     const territoryCenters = unlockedTerritoryCenters(state)
     const insideUnlockedTerritory = territoryCenters.some((center) => distanceKmBetween(center.coordinates, route.originCoordinates) <= 8)
-    if (!firstHarbour && (!connectedToOwnedHarbour || !insideUnlockedTerritory)) return state
+    if (!insideUnlockedTerritory) return state
     const purchasedAt = new Date().toISOString()
     return {
       company: { ...state.company, cash: state.company.cash - cost },

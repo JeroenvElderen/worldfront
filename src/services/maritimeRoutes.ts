@@ -9,7 +9,17 @@ const OVERPASS_ENDPOINTS = [
 const HARBOUR_SEARCH_RADIUS_METRES = 50_000
 const MAX_LOCAL_TERMINAL_DISTANCE_KM = 45
 
-interface OsmTags { name?: string; from?: string; to?: string; destination?: string; duration?: string }
+interface OsmTags {
+  name?: string
+  'name:en'?: string
+  from?: string
+  'from:en'?: string
+  to?: string
+  'to:en'?: string
+  destination?: string
+  'destination:en'?: string
+  duration?: string
+}
 interface OsmGeometryPoint { lon: number; lat: number }
 interface OsmElement { id: number; type: 'node' | 'way'; lat?: number; lon?: number; tags?: OsmTags; geometry?: OsmGeometryPoint[] }
 
@@ -58,11 +68,18 @@ const terminalCoordinates = (element: OsmElement): Coordinates | undefined =>
     ? [element.lon!, element.lat!]
     : undefined
 
+// OpenStreetMap commonly stores a local label in `name` and an English label
+// in `name:en`. Prefer the latter anywhere a harbour name is player-facing.
+const englishName = (tags: OsmTags | undefined) => tags?.['name:en'] ?? tags?.name
+const englishRoutePlace = (tags: OsmTags | undefined, key: 'from' | 'to' | 'destination') =>
+  tags?.[`${key}:en`] ?? tags?.[key]
+
 const nearestTerminalName = (coordinate: Coordinates, terminals: OsmElement[]) => {
   const nearest = terminals
     .flatMap((terminal) => {
       const position = terminalCoordinates(terminal)
-      return position && terminal.tags?.name ? [{ name: terminal.tags.name, distance: distanceKmBetween(coordinate, position) }] : []
+      const name = englishName(terminal.tags)
+      return position && name ? [{ name, distance: distanceKmBetween(coordinate, position) }] : []
     })
     .sort((left, right) => left.distance - right.distance)[0]
   return nearest && nearest.distance <= 2 ? nearest.name : undefined
@@ -107,13 +124,15 @@ const parseRoutes = (elements: OsmElement[], cityCoordinates: Coordinates): Ferr
 
     const originTerminal = nearestTerminalName(coordinates[0], terminals)
     const destinationTerminal = nearestTerminalName(coordinates.at(-1)!, terminals)
-    const originName = originTerminal ?? (reversed ? element.tags?.to : element.tags?.from) ?? 'Local harbour'
+    const originName = originTerminal
+      ?? englishRoutePlace(element.tags, reversed ? 'to' : 'from')
+      ?? 'Local harbour'
     const destinationName = destinationTerminal
-      ?? (reversed ? element.tags?.from : element.tags?.to)
-      ?? element.tags?.destination
-      ?? element.tags?.name
+      ?? englishRoutePlace(element.tags, reversed ? 'from' : 'to')
+      ?? englishRoutePlace(element.tags, 'destination')
+      ?? englishName(element.tags)
       ?? 'Ferry destination'
-    const routeName = element.tags?.name ?? `${originName} → ${destinationName}`
+    const routeName = englishName(element.tags) ?? `${originName} → ${destinationName}`
 
     return [{
       id: `osm-ferry-${element.id}`,

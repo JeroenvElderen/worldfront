@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { BottomNav } from './components/game/BottomNav'
 import { OperationsControlCentre } from './components/game/OperationsControlCentre'
@@ -13,7 +13,7 @@ import { getCity } from './data/cities'
 import { moneyFormatterForCity } from './services/localization'
 import { HOTEL_PURCHASE_COST } from './services/hotelEconomy'
 import { CurrencyProvider } from './components/game/CurrencyContext'
-import { discoverFerryRoutes } from './services/maritimeRoutes'
+import { allFerryRoutes, discoverFerryRoutes } from './services/maritimeRoutes'
 
 const JOB_REFRESH_INTERVAL_MS = 60_000
 
@@ -41,6 +41,10 @@ export default function App() {
   const activeCity = getCity(game.activeCityId ?? game.startingCityId, game.customCities ?? [])
   const activeCityId = activeCity?.id
   const discoveredLocalFerryRoutes = (game.discoveredFerryRoutes ?? []).filter((route) => route.cityId === activeCityId)
+  const globalFerryRoutes = useMemo(() => [...new Map([
+    ...allFerryRoutes(),
+    ...(game.discoveredFerryRoutes ?? []),
+  ].map((route) => [route.id, route])).values()], [game.discoveredFerryRoutes])
   const saveDiscoveredFerryRoutes = game.saveDiscoveredFerryRoutes
   const money = moneyFormatterForCity(activeCity)
   const maintenanceAlert = (game.maintenanceAlerts ?? []).find((alert) => !alert.dismissed)
@@ -357,7 +361,8 @@ export default function App() {
         jobs={game.jobs}
         transportAssets={game.transportAssets ?? []}
         transportRoutes={game.transportRoutes ?? []}
-        discoveredFerryRoutes={game.discoveredFerryRoutes ?? []}
+        globalFerryRoutes={globalFerryRoutes}
+        purchasedHarbours={game.purchasedHarbours ?? []}
         trafficIncidents={game.trafficIncidents ?? []}
         vehicleIncidents={game.incidents ?? []}
         focusedJobId={game.focusedJobId}
@@ -367,6 +372,7 @@ export default function App() {
         onBuildStation={handleBuildStation}
         onExpandTerritory={handleExpandTerritory}
         onBuildHotel={handleBuildHotel}
+        onBuyHarbour={game.buyHarbour}
         onOpenJob={game.openJob}
         onSaveJobPickupRoute={game.saveJobPickupRoute}
         onSaveJobRoute={game.saveJobRoute}
@@ -411,7 +417,7 @@ export default function App() {
             <FerryDispatch
               company={game.company}
               purchasedHarbours={game.purchasedHarbours ?? []}
-              discoveredRoutes={discoveredLocalFerryRoutes}
+              discoveredRoutes={globalFerryRoutes}
               branches={game.branches}
               territoryExpansions={game.territoryExpansions ?? []}
               transportAssets={game.transportAssets ?? []}

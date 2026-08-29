@@ -19,6 +19,7 @@ const JOB_REFRESH_INTERVAL_MS = 60_000
 
 const CitySetup = lazy(() => import('./screens/CitySetup').then(({ CitySetup: component }) => ({ default: component })))
 const TaxiCallPopup = lazy(() => import('./components/game/TaxiCallPopup').then(({ TaxiCallPopup: component }) => ({ default: component })))
+const PostalDashboard = lazy(() => import('./components/game/PostalDashboard').then(({ PostalDashboard: component }) => ({ default: component })))
 const FerryDispatch = lazy(() => import('./components/game/FerryDispatch').then(({ FerryDispatch: component }) => ({ default: component })))
 const SectionSheet = lazy(() => import('./components/game/SectionSheet').then(({ SectionSheet: component }) => ({ default: component })))
 const FinancialDashboard = lazy(() => import('./components/game/FinancialDashboard').then(({ FinancialDashboard: component }) => ({ default: component })))
@@ -432,8 +433,31 @@ export default function App() {
             />
           )}
 
+          {game.activeSection === 'postal' && (
+            <PostalDashboard
+              company={game.company}
+              activeCityId={game.activeCityId ?? game.startingCityId!}
+              customCities={game.customCities ?? []}
+              vehicles={game.vehicles}
+              drivers={game.drivers}
+              branches={game.branches ?? []}
+              completedResearch={game.completedResearch ?? []}
+              garageLevel={game.garageLevel ?? 0}
+              contracts={game.contracts ?? []}
+              performance={game.postalPerformance}
+              onClose={() => game.setSection('map')}
+              onShowMap={() => game.setSection('map')}
+              onOpenFleet={() => game.setSection('fleet')}
+              onOpenCompany={() => game.setSection('company')}
+              onBuyVehicle={game.buyPostVehicle}
+              onStartRoute={game.startPostalRoute}
+              onAcceptContract={game.acceptContract}
+            />
+          )}
+
           {game.activeSection !== 'map' &&
             game.activeSection !== 'jobs' &&
+            game.activeSection !== 'postal' &&
             game.activeSection !== 'ferries' &&
             game.activeSection !== 'operations' &&
             game.activeSection !== 'hotels' &&

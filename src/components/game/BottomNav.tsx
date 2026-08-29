@@ -4,6 +4,7 @@ import { useCurrency } from './CurrencyContext'
 const items: { id: Section; label: string; hint: string; icon: string }[] = [
   { id: 'map', label: 'Map', hint: 'Live operations', icon: '◇' },
   { id: 'jobs', label: 'Dispatch', hint: 'Travel operations', icon: '▣' },
+  { id: 'postal', label: 'Postal', hint: 'Rounds & tenders', icon: '📮' },
   { id: 'ferries', label: 'Ferries', hint: 'Harbours & routes', icon: '⛴' },
   { id: 'operations', label: 'Control', hint: 'Live incidents', icon: '⚠' },
   { id: 'fleet', label: 'Fleet', hint: 'Vehicles', icon: '▱' },

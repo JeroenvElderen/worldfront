@@ -8,7 +8,6 @@ import { taxiModels } from "../data/taxis";
 import type {
   Branch,
   Coordinates,
-  FerryRouteOption,
   Hotel,
   PurchasedHarbour,
   TaxiFerryCrossing,
@@ -57,7 +56,6 @@ interface GameMapProps {
   jobs: TaxiJob[];
   transportAssets: TransportAsset[];
   transportRoutes: TransportRoute[];
-  globalFerryRoutes: FerryRouteOption[];
   purchasedHarbours: PurchasedHarbour[];
   trafficIncidents: TrafficIncident[];
   vehicleIncidents: VehicleIncident[];
@@ -65,10 +63,11 @@ interface GameMapProps {
   placingStation: boolean;
   placingTerritory: boolean;
   placingHotel: boolean;
+  placingHarbour: boolean;
   onBuildStation: (coordinates: Coordinates) => void;
   onExpandTerritory: (coordinates: Coordinates) => void;
   onBuildHotel: (coordinates: Coordinates) => void;
-  onBuyHarbour: (route: FerryRouteOption) => void;
+  onPlaceHarbour: (coordinates: Coordinates) => void;
   onOpenJob: (jobId: string) => void;
   onSaveJobPickupRoute: (
     jobId: string,
@@ -556,7 +555,6 @@ function GameMapView({
   jobs,
   transportAssets,
   transportRoutes,
-  globalFerryRoutes,
   purchasedHarbours,
   trafficIncidents,
   vehicleIncidents,
@@ -564,10 +562,11 @@ function GameMapView({
   placingStation,
   placingTerritory,
   placingHotel,
+  placingHarbour,
   onBuildStation,
   onExpandTerritory,
   onBuildHotel,
-  onBuyHarbour,
+  onPlaceHarbour,
   onOpenJob,
   onSaveJobPickupRoute,
   onSaveJobRoute,
@@ -725,13 +724,14 @@ function GameMapView({
       .getCanvas()
       .classList.toggle(
         "placing-depot",
-        placingStation || placingTerritory || placingHotel,
+        placingStation || placingTerritory || placingHotel || placingHarbour,
       );
     const handlePlacement = (event: mapboxgl.MapMouseEvent) => {
       const coordinates: Coordinates = [event.lngLat.lng, event.lngLat.lat];
       if (placingStation) onBuildStation(coordinates);
       else if (placingTerritory) onExpandTerritory(coordinates);
       else if (placingHotel) onBuildHotel(coordinates);
+      else if (placingHarbour) onPlaceHarbour(coordinates);
     };
     instance.on("click", handlePlacement);
     return () => {
@@ -742,9 +742,11 @@ function GameMapView({
     placingStation,
     placingTerritory,
     placingHotel,
+    placingHarbour,
     onBuildStation,
     onExpandTerritory,
     onBuildHotel,
+    onPlaceHarbour,
   ]);
 
   useEffect(() => {
@@ -1813,58 +1815,34 @@ function GameMapView({
     realTerritories,
   ]);
 
-  // The offline passenger-terminal catalogue is always visible at world scale.
-  // A marker popup is the harbour marketplace, so players never have to hunt
-  // through a separate list to purchase the place they are looking at.
+  // Harbours exist only where the player explicitly placed them.
   useEffect(() => {
     const instance = map.current;
     if (!instance) return;
     harbourMarkers.current.forEach((marker) => marker.remove());
-    const seen = new Set<string>();
-    const markers: mapboxgl.Marker[] = [];
-    const ownedIds = new Set(purchasedHarbours.map((harbour) => harbour.id));
-    const territoryCenters = [
-      ...branches.flatMap((branch) => branch.coordinates ? [branch.coordinates] : []),
-      ...territoryExpansions.filter((area) => area.source !== "taxi-discovery").map((area) => area.coordinates),
-    ];
-    const addHarbour = (route: FerryRouteOption) => {
-      const { originCoordinates: coordinates, originName: name } = route;
-      const key = coordinates.map((part) => part.toFixed(4)).join(",");
-      if (seen.has(key)) return;
-      seen.add(key);
-      const id = `harbour:${key}`;
-      const owned = ownedIds.has(id);
-      const available = territoryCenters.some((center) => distanceKmBetween(center, coordinates) <= 8);
+    const markers = purchasedHarbours.map((harbour) => {
       const element = document.createElement("div");
-      element.className = `harbour-map-marker${owned ? " owned" : ""}${available ? " available" : " locked"}`;
+      element.className = "harbour-map-marker owned";
       element.textContent = "⚓";
-      element.setAttribute("aria-label", name);
+      element.setAttribute("aria-label", harbour.name);
       const popupContent = document.createElement("div");
       popupContent.className = "harbour-popup";
       const title = document.createElement("strong");
-      title.textContent = name;
+      title.textContent = harbour.name;
       const status = document.createElement("small");
-      status.textContent = owned ? "Harbour owned" : available ? "Inside your owned territory" : "Unlock this territory to purchase";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.disabled = owned || !available;
-      button.textContent = owned ? "Purchased" : available ? "Buy harbour · €5,000" : "Territory locked";
-      button.addEventListener("click", () => onBuyHarbour(route));
-      popupContent.append(title, status, button);
-      markers.push(
-        new mapboxgl.Marker({ element, anchor: "center" })
-          .setLngLat(coordinates)
-          .setPopup(new mapboxgl.Popup({ offset: 16, className: "harbour-map-popup" }).setDOMContent(popupContent))
-          .addTo(instance),
-      );
-    };
-    globalFerryRoutes.forEach(addHarbour);
+      status.textContent = "Owned harbour";
+      popupContent.append(title, status);
+      return new mapboxgl.Marker({ element, anchor: "center" })
+        .setLngLat(harbour.coordinates)
+        .setPopup(new mapboxgl.Popup({ offset: 16, className: "harbour-map-popup" }).setDOMContent(popupContent))
+        .addTo(instance);
+    });
     harbourMarkers.current = markers;
     return () => {
       markers.forEach((marker) => marker.remove());
       if (harbourMarkers.current === markers) harbourMarkers.current = [];
     };
-  }, [branches, globalFerryRoutes, mapRevision, onBuyHarbour, purchasedHarbours, territoryExpansions]);
+  }, [mapRevision, purchasedHarbours]);
 
   useEffect(() => {
     const instance = map.current;
@@ -2908,15 +2886,15 @@ export const GameMap = memo(
     previous.vehicles === next.vehicles &&
     previous.transportAssets === next.transportAssets &&
     previous.transportRoutes === next.transportRoutes &&
-    previous.globalFerryRoutes === next.globalFerryRoutes &&
     previous.purchasedHarbours === next.purchasedHarbours &&
     previous.placingStation === next.placingStation &&
     previous.placingTerritory === next.placingTerritory &&
     previous.placingHotel === next.placingHotel &&
+    previous.placingHarbour === next.placingHarbour &&
     previous.onBuildStation === next.onBuildStation &&
     previous.onExpandTerritory === next.onExpandTerritory &&
     previous.onBuildHotel === next.onBuildHotel &&
-    previous.onBuyHarbour === next.onBuyHarbour &&
+    previous.onPlaceHarbour === next.onPlaceHarbour &&
     previous.focusedJobId === next.focusedJobId &&
     previous.onOpenJob === next.onOpenJob &&
     previous.onSaveJobPickupRoute === next.onSaveJobPickupRoute &&

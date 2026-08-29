@@ -623,11 +623,31 @@ const generationTaxi = selectJobGenerationTaxi(state)
   coordinates,
   ferryCrossings,
   durationMinutes,
-) => set((state) => ({
-  jobs: state.jobs.map((job) =>
-    job.id === jobId && job.status === 'accepted'
+) => set((state) => {
+  const job = state.jobs.find((candidate) => candidate.id === jobId)
+  if (job?.status === 'accepted' && ferryCrossings.length && !ferryCrossingsHaveActiveService(ferryCrossings, state.transportRoutes ?? [], state.transportAssets ?? [])) {
+    const vehicle = state.vehicles.find((candidate) => candidate.id === job.assignedVehicleId)
+    return {
+      jobs: state.jobs.map((candidate) => candidate.id === jobId ? {
+        ...candidate,
+        status: 'offered' as const,
+        assignedVehicleId: undefined,
+        acceptedAt: undefined,
+        dispatchOrigin: undefined,
+        pickupRouteCoordinates: undefined,
+        pickupFerryCrossings: undefined,
+      } : candidate),
+      vehicles: state.vehicles.map((candidate) => candidate.id === job.assignedVehicleId ? { ...candidate, status: 'available' as const } : candidate),
+      drivers: state.drivers.map((candidate) => candidate.id === vehicle?.driverId ? { ...candidate, status: 'available' as const } : candidate),
+      jobsError: 'That taxi cannot reach this pickup with your currently operating ferry routes.',
+      updatedAt: new Date().toISOString(),
+    }
+  }
+  return {
+  jobs: state.jobs.map((candidate) =>
+    candidate.id === jobId && candidate.status === 'accepted'
       ? {
-          ...job,
+          ...candidate,
           pickupRouteCoordinates: coordinates,
           pickupFerryCrossings: ferryCrossings,
           completedPickupFerryCrossings: [],
@@ -635,10 +655,11 @@ const generationTaxi = selectJobGenerationTaxi(state)
           pickupDurationMinutes: durationMinutes,
           acceptedAt: new Date().toISOString(),
         }
-      : job
+      : candidate
   ),
   updatedAt: new Date().toISOString(),
-})),
+  }
+}),
   saveJobRoute: (
   jobId,
   coordinates,
@@ -1385,7 +1406,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
   resetGame: () => set({ ...blankSave, activeSection: 'map', hasHydrated: true }),
 }), {
   name: 'save:autosave', storage: createJSONStorage(() => indexedDbStorage),
-  version: 25,
+  version: 26,
   // Structural migration is performed in merge below because it needs Turf
   // helpers. Supplying migrate preserves version-16 saves instead of letting
   // Zustand reject them before merge receives the persisted state.
@@ -1447,12 +1468,21 @@ const generationTaxi = selectJobGenerationTaxi(state)
     // Version 22 could persist island offers that were routed over an unowned
     // ferry edge. Drop only unaccepted offers once so the new board is rebuilt
     // from currently operating player-owned ferry services.
-    const jobs = savedVersion < 23
+    let jobs = savedVersion < 23
       ? (saved.jobs ?? []).filter((job) => job.status !== 'offered')
       : saved.jobs ?? []
+    const strandedJobVehicleIds = new Set<string>()
+    if (savedVersion < 26) {
+      jobs = jobs.map((job) => {
+        if (job.status !== 'accepted' || !job.pickupFerryCrossings?.length || ferryCrossingsHaveActiveService(job.pickupFerryCrossings, saved.transportRoutes ?? [], saved.transportAssets ?? [])) return job
+        if (job.assignedVehicleId) strandedJobVehicleIds.add(job.assignedVehicleId)
+        return { ...job, status: 'offered' as const, assignedVehicleId: undefined, acceptedAt: undefined, dispatchOrigin: undefined, pickupRouteCoordinates: undefined, pickupFerryCrossings: undefined }
+      })
+    }
     const hotels = (saved.hotels ?? []).map((hotel) => ({ ...hotel, coordinates: hotel.coordinates ?? getCity(hotel.cityId, customCities)?.coordinates }))
     const company = saved.company ? { ...saved.company, level: levelForReputation(saved.company.reputation) } : null
-    return { ...current, ...saved, version: 25, company, customCities, territoryExpansions, exploredTerritory, hotels, cityEconomies, territoryLicenses: saved.territoryLicenses ?? [], countryLicenses: saved.countryLicenses ?? [], discoveredFerryRoutes, purchasedHarbours, jobs, completedResearch: saved.completedResearch ?? [], competitors: saved.competitors ?? [], difficulty: saved.difficulty ?? 'standard', worldCondition: saved.worldCondition ?? createWorldCondition(), incidents: saved.incidents ?? [], mechanics: saved.mechanics ?? [], dispatchers: saved.dispatchers ?? [], automationEmployees: saved.automationEmployees ?? [], maintenanceAlerts: saved.maintenanceAlerts ?? [], customerReviews: saved.customerReviews ?? [], brandStrategy: { ...defaultBrandStrategy, ...(saved.brandStrategy ?? {}) }, automation: { ...current.automation, ...(saved.automation ?? {}), activity: saved.automation?.activity ?? [] }, vehicles: (saved.vehicles ?? []).map((vehicle) => ({ cleanliness: 100, tireCondition: 100, tireType: 'touring' as const, tireInstalledAtKm: vehicle.odometerKm ?? 0, ...vehicle })), drivers: (saved.drivers ?? []).map((driver) => ({ experience: 0, morale: 80, certifications: [], completedTrips: 0, careerEarnings: 0, ...driver })), branches: (saved.branches ?? []).map((branch, index) => ({ ...branch, name: branch.isHeadquarters ? `Station ${index + 1}` : branch.name, isHeadquarters: undefined, coordinates: branch.coordinates ?? getCity(branch.cityId, saved.customCities ?? [])?.coordinates })) }
+    const strandedDriverIds = new Set((saved.vehicles ?? []).filter((vehicle) => strandedJobVehicleIds.has(vehicle.id)).flatMap((vehicle) => vehicle.driverId ? [vehicle.driverId] : []))
+    return { ...current, ...saved, version: 26, company, customCities, territoryExpansions, exploredTerritory, hotels, cityEconomies, territoryLicenses: saved.territoryLicenses ?? [], countryLicenses: saved.countryLicenses ?? [], discoveredFerryRoutes, purchasedHarbours, jobs, completedResearch: saved.completedResearch ?? [], competitors: saved.competitors ?? [], difficulty: saved.difficulty ?? 'standard', worldCondition: saved.worldCondition ?? createWorldCondition(), incidents: saved.incidents ?? [], mechanics: saved.mechanics ?? [], dispatchers: saved.dispatchers ?? [], automationEmployees: saved.automationEmployees ?? [], maintenanceAlerts: saved.maintenanceAlerts ?? [], customerReviews: saved.customerReviews ?? [], brandStrategy: { ...defaultBrandStrategy, ...(saved.brandStrategy ?? {}) }, automation: { ...current.automation, ...(saved.automation ?? {}), activity: saved.automation?.activity ?? [] }, vehicles: (saved.vehicles ?? []).map((vehicle) => ({ cleanliness: 100, tireCondition: 100, tireType: 'touring' as const, tireInstalledAtKm: vehicle.odometerKm ?? 0, ...vehicle, status: strandedJobVehicleIds.has(vehicle.id) ? 'available' as const : vehicle.status })), drivers: (saved.drivers ?? []).map((driver) => ({ experience: 0, morale: 80, certifications: [], completedTrips: 0, careerEarnings: 0, ...driver, status: strandedDriverIds.has(driver.id) ? 'available' as const : driver.status })), branches: (saved.branches ?? []).map((branch, index) => ({ ...branch, name: branch.isHeadquarters ? `Station ${index + 1}` : branch.name, isHeadquarters: undefined, coordinates: branch.coordinates ?? getCity(branch.cityId, saved.customCities ?? [])?.coordinates })) }
   },
   partialize: ({ activeSection, focusedJobId, hasHydrated, jobsLoading, jobsError, ...save }) => {
     void activeSection

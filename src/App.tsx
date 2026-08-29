@@ -13,6 +13,7 @@ import { getCity } from './data/cities'
 import { moneyFormatterForCity } from './services/localization'
 import { HOTEL_PURCHASE_COST } from './services/hotelEconomy'
 import { CurrencyProvider } from './components/game/CurrencyContext'
+import { discoverFerryRoutes } from './services/maritimeRoutes'
 
 const JOB_REFRESH_INTERVAL_MS = 60_000
 
@@ -38,6 +39,9 @@ export default function App() {
   const researchFleetSlots = (hasResearch(game.completedResearch ?? [], 'autonomous-operations') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'global-network') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'regional-hubs') ? game.branches.length : 0)
   const stationFleetFull = game.vehicles.length >= fleetSlotCapacity(game.company?.level ?? 1, game.garageLevel ?? 0, game.branches) + researchFleetSlots
   const activeCity = getCity(game.activeCityId ?? game.startingCityId, game.customCities ?? [])
+  const activeCityId = activeCity?.id
+  const discoveredLocalFerryRoutes = (game.discoveredFerryRoutes ?? []).filter((route) => route.cityId === activeCityId)
+  const saveDiscoveredFerryRoutes = game.saveDiscoveredFerryRoutes
   const money = moneyFormatterForCity(activeCity)
   const maintenanceAlert = (game.maintenanceAlerts ?? []).find((alert) => !alert.dismissed)
   const territoryExpansionPrice = territoryExpansionCost === 0 ? 'Free' : money.format(territoryExpansionCost)
@@ -75,6 +79,17 @@ export default function App() {
   }, [])
 
   const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, runAutomation, hasHydrated } = game
+
+  useEffect(() => {
+    if (game.activeSection !== 'ferries' || !activeCity || discoveredLocalFerryRoutes.length) return
+    const controller = new AbortController()
+    discoverFerryRoutes(activeCity.coordinates, controller.signal)
+      .then((routes) => saveDiscoveredFerryRoutes(activeCity.id, routes))
+      .catch((error: unknown) => {
+        if ((error as Error).name !== 'AbortError') console.warn('Unable to discover nearby ferry POIs', error)
+      })
+    return () => controller.abort()
+  }, [activeCity, discoveredLocalFerryRoutes.length, game.activeSection, saveDiscoveredFerryRoutes])
 
   const availableOfferCapacity = jobOfferCapacity(game.vehicles, game.drivers)
 
@@ -396,6 +411,7 @@ export default function App() {
             <FerryDispatch
               company={game.company}
               purchasedHarbours={game.purchasedHarbours ?? []}
+              discoveredRoutes={discoveredLocalFerryRoutes}
               branches={game.branches}
               territoryExpansions={game.territoryExpansions ?? []}
               transportAssets={game.transportAssets ?? []}

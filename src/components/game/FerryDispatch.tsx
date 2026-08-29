@@ -1,12 +1,13 @@
 import { transportModels } from '../../data/transport'
 import type { Branch, Company, FerryRouteOption, PurchasedHarbour, TerritoryExpansion, TransportAsset, TransportRoute } from '../../models/game'
-import { allFerryRoutes, harbourId } from '../../services/maritimeRoutes'
+import { harbourId } from '../../services/maritimeRoutes'
 import { distanceKmBetween } from '../../services/jobEngine'
 import { useCurrency } from './CurrencyContext'
 
 interface FerryDispatchProps {
   company: Company
   purchasedHarbours: PurchasedHarbour[]
+  discoveredRoutes: FerryRouteOption[]
   branches: Branch[]
   territoryExpansions: TerritoryExpansion[]
   transportAssets: TransportAsset[]
@@ -21,9 +22,9 @@ interface FerryDispatchProps {
 
 const HARBOUR_PRICE = 5_000
 
-export function FerryDispatch({ company, purchasedHarbours, branches, territoryExpansions, transportAssets, transportRoutes, onBuyHarbour, onBuyFerry, onCreateRoute, onDispatch, onSetTimetable, onClose }: FerryDispatchProps) {
+export function FerryDispatch({ company, purchasedHarbours, discoveredRoutes, branches, territoryExpansions, transportAssets, transportRoutes, onBuyHarbour, onBuyFerry, onCreateRoute, onDispatch, onSetTimetable, onClose }: FerryDispatchProps) {
   const { money } = useCurrency()
-  const catalog = allFerryRoutes()
+  const catalog = discoveredRoutes
   const allHarbours = [...new Map(catalog.map((route) => [harbourId(route.originCoordinates), route])).values()]
   const ownedHarbourIds = new Set(purchasedHarbours.map((harbour) => harbour.id))
   const availableRoutes = catalog.filter((route) => ownedHarbourIds.has(harbourId(route.originCoordinates)))
@@ -44,7 +45,7 @@ export function FerryDispatch({ company, purchasedHarbours, branches, territoryE
     <div className="sheet-handle" />
     <button className="sheet-close" onClick={onClose} aria-label="Close ferry dispatch">×</button>
     <header className="ferry-heading">
-      <div><small>MARITIME OPERATIONS</small><h2 id="ferry-dispatch-title">Ferry dispatch</h2><p>Purchase a harbour, open its destinations, then expand the network one coast at a time.</p></div>
+      <div><small>MARITIME OPERATIONS</small><h2 id="ferry-dispatch-title">Ferry dispatch</h2><p>Purchase a mapped ferry-terminal POI to open every passenger route discovered there.</p></div>
       <span className="ferry-heading-icon" aria-hidden="true">⛴</span>
     </header>
 
@@ -61,6 +62,7 @@ export function FerryDispatch({ company, purchasedHarbours, branches, territoryE
         const available = !purchasedHarbours.length || territoryCenters.some((center) => distanceKmBetween(center, route.originCoordinates) <= 8)
         return <article key={harbourId(route.originCoordinates)}><span aria-hidden="true">⚓</span><div><strong>{route.originName}</strong><small>{owned ? 'Owned · its destinations are open' : available ? 'Available in unlocked territory' : 'Purchase after unlocking this territory'}</small></div><button disabled={owned || !available || company.cash < HARBOUR_PRICE} onClick={() => onBuyHarbour(route)}>{owned ? 'Purchased' : !available ? 'Territory locked' : `Buy · ${money.format(HARBOUR_PRICE)}`}</button></article>
       })}
+      {!visibleHarbours.length && <div className="ferry-empty"><strong>Finding ferry terminals…</strong><small>Nearby terminal POIs and their mapped routes will appear here.</small></div>}
     </div>
 
     <article className={`mode-card harbour-card ${purchasedHarbours.length ? 'available' : ''}`}>

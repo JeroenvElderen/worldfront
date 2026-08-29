@@ -1,18 +1,15 @@
 import { transportModels } from '../../data/transport'
-import type { Branch, Company, FerryRouteOption, PurchasedHarbour, TerritoryExpansion, TransportAsset, TransportRoute } from '../../models/game'
+import type { Company, FerryRouteOption, PurchasedHarbour, TransportAsset, TransportRoute } from '../../models/game'
 import { harbourId } from '../../services/maritimeRoutes'
-import { distanceKmBetween } from '../../services/jobEngine'
 import { useCurrency } from './CurrencyContext'
 
 interface FerryDispatchProps {
   company: Company
   purchasedHarbours: PurchasedHarbour[]
   discoveredRoutes: FerryRouteOption[]
-  branches: Branch[]
-  territoryExpansions: TerritoryExpansion[]
   transportAssets: TransportAsset[]
   transportRoutes: TransportRoute[]
-  onBuyHarbour: (route: FerryRouteOption) => void
+  onPlaceHarbour: () => void
   onBuyFerry: () => void
   onCreateRoute: (route: FerryRouteOption) => void
   onDispatch: (routeId: string, assetId: string) => void
@@ -22,22 +19,16 @@ interface FerryDispatchProps {
 
 const HARBOUR_PRICE = 5_000
 
-export function FerryDispatch({ company, purchasedHarbours, discoveredRoutes, branches, territoryExpansions, transportAssets, transportRoutes, onBuyHarbour, onBuyFerry, onCreateRoute, onDispatch, onSetTimetable, onClose }: FerryDispatchProps) {
+export function FerryDispatch({ company, purchasedHarbours, discoveredRoutes, transportAssets, transportRoutes, onPlaceHarbour, onBuyFerry, onCreateRoute, onDispatch, onSetTimetable, onClose }: FerryDispatchProps) {
   const { money } = useCurrency()
-  const catalog = discoveredRoutes
-  const allHarbours = [...new Map(catalog.map((route) => [harbourId(route.originCoordinates), route])).values()]
   const ownedHarbourIds = new Set(purchasedHarbours.map((harbour) => harbour.id))
-  const availableRoutes = catalog.filter((route) => ownedHarbourIds.has(harbourId(route.originCoordinates)))
-  const connectedHarbourIds = new Set(availableRoutes.map((route) => harbourId(route.destinationCoordinates)))
-  const visibleHarbours = purchasedHarbours.length
-    ? allHarbours.filter((route) => ownedHarbourIds.has(harbourId(route.originCoordinates)) || connectedHarbourIds.has(harbourId(route.originCoordinates)))
-    : allHarbours
+  const routeHarbourId = (route: FerryRouteOption) => route.harbourId ?? harbourId(route.originCoordinates)
+  const availableRoutes = discoveredRoutes.filter((route) => ownedHarbourIds.has(routeHarbourId(route)))
   const localRoutes = transportRoutes.filter((route) => route.mode === 'ferry')
   const ferries = transportAssets.filter((asset) => asset.mode === 'ferry')
   const availableFerries = ferries.filter((asset) => asset.status === 'available')
   const activeFerries = ferries.filter((asset) => asset.journey)
   const activeRouteIds = new Set(activeFerries.flatMap((asset) => asset.journey ? [asset.journey.routeId] : []))
-  const territoryCenters = [...branches.flatMap((branch) => branch.coordinates ? [branch.coordinates] : []), ...territoryExpansions.filter((area) => area.source !== 'taxi-discovery').map((area) => area.coordinates)]
   const model = transportModels.ferry
   const routeAlreadyOwned = (route: FerryRouteOption) => localRoutes.some((owned) => owned.sourceRouteId === route.id)
 
@@ -45,7 +36,7 @@ export function FerryDispatch({ company, purchasedHarbours, discoveredRoutes, br
     <div className="sheet-handle" />
     <button className="sheet-close" onClick={onClose} aria-label="Close ferry dispatch">×</button>
     <header className="ferry-heading">
-      <div><small>MARITIME OPERATIONS</small><h2 id="ferry-dispatch-title">Ferry dispatch</h2><p>Purchase a mapped ferry-terminal POI to open every passenger route discovered there.</p></div>
+      <div><small>MARITIME OPERATIONS</small><h2 id="ferry-dispatch-title">Ferry dispatch</h2><p>Place your own harbour marker, then operate only the routes found at that point.</p></div>
       <span className="ferry-heading-icon" aria-hidden="true">⛴</span>
     </header>
 
@@ -55,15 +46,12 @@ export function FerryDispatch({ company, purchasedHarbours, discoveredRoutes, br
       <article><small>ACTIVE</small><strong>{activeFerries.length} underway</strong></article>
     </div>
 
-    <h3>{purchasedHarbours.length ? 'Connected harbours' : 'Choose your first harbour'}</h3>
+    <h3>Your harbours</h3>
     <div className="ferry-destinations harbour-market">
-      {visibleHarbours.map((route) => {
-        const owned = ownedHarbourIds.has(harbourId(route.originCoordinates))
-        const available = territoryCenters.some((center) => distanceKmBetween(center, route.originCoordinates) <= 8)
-        return <article key={harbourId(route.originCoordinates)}><span aria-hidden="true">⚓</span><div><strong>{route.originName}</strong><small>{owned ? 'Owned · its destinations are open' : available ? 'Available in unlocked territory' : 'Purchase after unlocking this territory'}</small></div><button disabled={owned || !available || company.cash < HARBOUR_PRICE} onClick={() => onBuyHarbour(route)}>{owned ? 'Purchased' : !available ? 'Territory locked' : `Buy · ${money.format(HARBOUR_PRICE)}`}</button></article>
-      })}
-      {!visibleHarbours.length && <div className="ferry-empty"><strong>Finding ferry terminals…</strong><small>Nearby terminal POIs and their mapped routes will appear here.</small></div>}
+      {purchasedHarbours.map((harbour) => <article key={harbour.id}><span aria-hidden="true">⚓</span><div><strong>{harbour.name}</strong><small>{availableRoutes.filter((route) => routeHarbourId(route) === harbour.id).length} routes discovered from this point</small></div><button disabled>Placed</button></article>)}
+      {!purchasedHarbours.length && <div className="ferry-empty"><strong>No harbours placed</strong><small>Place your first harbour inside owned territory to discover its routes.</small></div>}
     </div>
+    <button disabled={company.cash < HARBOUR_PRICE} onClick={onPlaceHarbour}>{company.cash < HARBOUR_PRICE ? 'Not enough cash' : `Place harbour on map · ${money.format(HARBOUR_PRICE)}`}</button>
 
     <article className={`mode-card harbour-card ${purchasedHarbours.length ? 'available' : ''}`}>
       <header><span>⛴</span><div><strong>Ferry fleet</strong><small>Ferries serve routes created from harbours you own.</small></div></header>
@@ -76,7 +64,7 @@ export function FerryDispatch({ company, purchasedHarbours, discoveredRoutes, br
       {availableRoutes.length ? availableRoutes.map((route) => {
         const owned = routeAlreadyOwned(route)
         return <article key={route.id}><span aria-hidden="true">⚓</span><div><strong>{route.destinationName}</strong><small>from {route.originName} · {route.distanceKm.toFixed(1)} km{route.durationMinutes ? ` · ${Math.round(route.durationMinutes)} min` : ''}</small></div><button disabled={owned} onClick={() => onCreateRoute(route)}>{owned ? 'Route created' : 'Create route'}</button></article>
-      }) : <div className="ferry-empty"><strong>Purchase a harbour to reveal routes</strong><small>Reaching a destination unlocks its territory, but the harbour still has to be purchased.</small></div>}
+      }) : <div className="ferry-empty"><strong>Place a harbour to discover routes</strong><small>Only routes starting near one of your placed harbour points become available.</small></div>}
     </div>
 
     <h3>Route dispatch</h3>

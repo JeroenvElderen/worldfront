@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { BottomNav } from './components/game/BottomNav'
 import { OperationsControlCentre } from './components/game/OperationsControlCentre'
@@ -13,7 +13,7 @@ import { getCity } from './data/cities'
 import { moneyFormatterForCity } from './services/localization'
 import { HOTEL_PURCHASE_COST } from './services/hotelEconomy'
 import { CurrencyProvider } from './components/game/CurrencyContext'
-import { allFerryRoutes, discoverFerryRoutes } from './services/maritimeRoutes'
+import { discoverFerryRoutes } from './services/maritimeRoutes'
 
 const JOB_REFRESH_INTERVAL_MS = 60_000
 
@@ -31,6 +31,7 @@ export default function App() {
   const [placingStation, setPlacingStation] = useState(false)
   const [placingTerritory, setPlacingTerritory] = useState(false)
   const [placingHotel, setPlacingHotel] = useState(false)
+  const [placingHarbour, setPlacingHarbour] = useState(false)
   const [showExpansionMenu, setShowExpansionMenu] = useState(false)
   const purchasedTerritories = (game.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery' && area.source !== 'ferry-discovery').length
   const unlockedTerritories = (game.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery').length
@@ -39,13 +40,6 @@ export default function App() {
   const researchFleetSlots = (hasResearch(game.completedResearch ?? [], 'autonomous-operations') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'global-network') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'regional-hubs') ? game.branches.length : 0)
   const stationFleetFull = game.vehicles.length >= fleetSlotCapacity(game.company?.level ?? 1, game.garageLevel ?? 0, game.branches) + researchFleetSlots
   const activeCity = getCity(game.activeCityId ?? game.startingCityId, game.customCities ?? [])
-  const activeCityId = activeCity?.id
-  const discoveredLocalFerryRoutes = (game.discoveredFerryRoutes ?? []).filter((route) => route.cityId === activeCityId)
-  const globalFerryRoutes = useMemo(() => [...new Map([
-    ...allFerryRoutes(),
-    ...(game.discoveredFerryRoutes ?? []),
-  ].map((route) => [route.id, route])).values()], [game.discoveredFerryRoutes])
-  const saveDiscoveredFerryRoutes = game.saveDiscoveredFerryRoutes
   const money = moneyFormatterForCity(activeCity)
   const maintenanceAlert = (game.maintenanceAlerts ?? []).find((alert) => !alert.dismissed)
   const territoryExpansionPrice = territoryExpansionCost === 0 ? 'Free' : money.format(territoryExpansionCost)
@@ -84,16 +78,24 @@ export default function App() {
 
   const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, runAutomation, hasHydrated } = game
 
-  useEffect(() => {
-    if (game.activeSection !== 'ferries' || !activeCity || discoveredLocalFerryRoutes.length) return
-    const controller = new AbortController()
-    discoverFerryRoutes(activeCity.coordinates, controller.signal)
-      .then((routes) => saveDiscoveredFerryRoutes(activeCity.id, routes))
-      .catch((error: unknown) => {
-        if ((error as Error).name !== 'AbortError') console.warn('Unable to discover nearby ferry POIs', error)
-      })
-    return () => controller.abort()
-  }, [activeCity, discoveredLocalFerryRoutes.length, game.activeSection, saveDiscoveredFerryRoutes])
+  const placeHarbour = game.placeHarbour
+  const setSection = game.setSection
+  const handlePlaceHarbour = useCallback(async (coordinates: Parameters<typeof placeHarbour>[0]) => {
+    setPlacingHarbour(false)
+    try {
+      const routes = await discoverFerryRoutes(coordinates)
+      const harbourCount = useGameStore.getState().purchasedHarbours.length
+      placeHarbour(coordinates, routes)
+      if (useGameStore.getState().purchasedHarbours.length === harbourCount) {
+        setPlacingHarbour(true)
+        return
+      }
+      setSection('ferries')
+    } catch (error) {
+      console.warn('Unable to discover routes from this harbour point', error)
+      setPlacingHarbour(true)
+    }
+  }, [placeHarbour, setSection])
 
   const availableOfferCapacity = jobOfferCapacity(game.vehicles, game.drivers)
 
@@ -361,7 +363,6 @@ export default function App() {
         jobs={game.jobs}
         transportAssets={game.transportAssets ?? []}
         transportRoutes={game.transportRoutes ?? []}
-        globalFerryRoutes={globalFerryRoutes}
         purchasedHarbours={game.purchasedHarbours ?? []}
         trafficIncidents={game.trafficIncidents ?? []}
         vehicleIncidents={game.incidents ?? []}
@@ -369,10 +370,11 @@ export default function App() {
         placingStation={placingStation}
         placingTerritory={placingTerritory}
         placingHotel={placingHotel}
+        placingHarbour={placingHarbour}
         onBuildStation={handleBuildStation}
         onExpandTerritory={handleExpandTerritory}
         onBuildHotel={handleBuildHotel}
-        onBuyHarbour={game.buyHarbour}
+        onPlaceHarbour={handlePlaceHarbour}
         onOpenJob={game.openJob}
         onSaveJobPickupRoute={game.saveJobPickupRoute}
         onSaveJobRoute={game.saveJobRoute}
@@ -384,9 +386,10 @@ export default function App() {
         <>
           <TopHud company={game.company} />
 
-          {game.activeSection === 'map' && !placingStation && !placingTerritory && !placingHotel && <><aside className="territory-guide" aria-live="polite"><b>Village borders unlocked: {game.branches.length + unlockedTerritories}</b><small>{territoryProgressMessage}</small></aside>{showExpansionMenu && <aside className="expansion-menu"><b>Expand your network</b><button disabled={game.company.cash < territoryExpansionCost} onClick={() => { setPlacingTerritory(true); setShowExpansionMenu(false) }}><span>◎</span><div><strong>Unlock village territory</strong><small>Choose a village border · {territoryExpansionPrice}</small></div></button><button disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => { setPlacingStation(true); setShowExpansionMenu(false) }} title={stationBuildMessage}><span>＋</span><div><strong>Build a station</strong><small>Start a separate service area · {money.format(stationPackageCost)}</small></div></button></aside>}<button className="station-add-button" onClick={() => setShowExpansionMenu((open) => !open)} aria-label="Territory expansion options" aria-expanded={showExpansionMenu}>＋</button></>}
+          {game.activeSection === 'map' && !placingStation && !placingTerritory && !placingHotel && !placingHarbour && <><aside className="territory-guide" aria-live="polite"><b>Village borders unlocked: {game.branches.length + unlockedTerritories}</b><small>{territoryProgressMessage}</small></aside>{showExpansionMenu && <aside className="expansion-menu"><b>Expand your network</b><button disabled={game.company.cash < territoryExpansionCost} onClick={() => { setPlacingTerritory(true); setShowExpansionMenu(false) }}><span>◎</span><div><strong>Unlock village territory</strong><small>Choose a village border · {territoryExpansionPrice}</small></div></button><button disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => { setPlacingStation(true); setShowExpansionMenu(false) }} title={stationBuildMessage}><span>＋</span><div><strong>Build a station</strong><small>Start a separate service area · {money.format(stationPackageCost)}</small></div></button></aside>}<button className="station-add-button" onClick={() => setShowExpansionMenu((open) => !open)} aria-label="Territory expansion options" aria-expanded={showExpansionMenu}>＋</button></>}
           {placingStation && <aside className="depot-placement-banner"><span>⌖</span><div><b>Place Station {game.branches.length + 1}</b><small>Tap the map to build a station with one taxi for {money.format(stationPackageCost)}.</small></div><button onClick={() => setPlacingStation(false)}>Cancel</button></aside>}
           {placingTerritory && <aside className="depot-placement-banner"><span>◎</span><div><b>Unlock a village territory</b><small>Tap a village on the map to purchase its organic border for {territoryExpansionPrice.toLocaleLowerCase()}. No station will be built.</small></div><button onClick={() => setPlacingTerritory(false)}>Cancel</button></aside>}
+          {placingHarbour && <aside className="depot-placement-banner"><span>⚓</span><div><b>Place harbour</b><small>Tap inside owned territory. Routes starting within 5 km of this point will be discovered.</small></div><button onClick={() => setPlacingHarbour(false)}>Cancel</button></aside>}
           {placingHotel && <aside className="depot-placement-banner hotel-placement-banner"><span>🏨</span><div><b>Place hotel {(game.hotels ?? []).filter((hotel) => hotel.cityId === (game.activeCityId ?? game.startingCityId)).length + 1}</b><small>Tap the exact map location to build this property for {money.format(HOTEL_PURCHASE_COST)}.</small></div><button onClick={() => setPlacingHotel(false)}>Cancel</button></aside>}
 
           {game.worldCondition && game.worldCondition.weather !== 'clear' && (
@@ -417,12 +420,10 @@ export default function App() {
             <FerryDispatch
               company={game.company}
               purchasedHarbours={game.purchasedHarbours ?? []}
-              discoveredRoutes={globalFerryRoutes}
-              branches={game.branches}
-              territoryExpansions={game.territoryExpansions ?? []}
+              discoveredRoutes={game.discoveredFerryRoutes ?? []}
               transportAssets={game.transportAssets ?? []}
               transportRoutes={game.transportRoutes ?? []}
-              onBuyHarbour={game.buyHarbour}
+              onPlaceHarbour={() => { setPlacingHarbour(true); game.setSection('map') }}
               onBuyFerry={() => game.buyTransportAsset('ferry')}
               onCreateRoute={game.createFerryRoute}
               onDispatch={game.dispatchTransport}

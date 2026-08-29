@@ -7,7 +7,7 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
 ]
 const HARBOUR_SEARCH_RADIUS_METRES = 50_000
-const MAX_LOCAL_TERMINAL_DISTANCE_KM = 45
+const MAX_LOCAL_TERMINAL_DISTANCE_KM = 5
 
 interface OsmTags {
   name?: string
@@ -33,26 +33,6 @@ const routeDistanceKm = (coordinates: Coordinates[]) => coordinates.slice(1).red
 
 export const harbourId = (coordinates: Coordinates) =>
   `harbour:${coordinates.map((part) => part.toFixed(4)).join(',')}`
-
-/** The complete offline harbour network. Every corridor is available in both directions. */
-export const allFerryRoutes = (): FerryRouteOption[] => curatedFerryRoutes.flatMap((route) => {
-  const option = (reversed: boolean): FerryRouteOption => {
-    const routeCoordinates = reversed ? [...route.coordinates].reverse() : route.coordinates
-    return {
-      id: `curated-ferry-${route.id}${reversed ? '-reverse' : ''}`,
-      name: route.name,
-      originName: reversed ? route.destinationName : route.originName,
-      destinationName: reversed ? route.originName : route.destinationName,
-      originCoordinates: routeCoordinates[0],
-      destinationCoordinates: routeCoordinates.at(-1)!,
-      routeCoordinates,
-      distanceKm: Math.round(routeDistanceKm(routeCoordinates) * 10) / 10,
-      durationMinutes: route.durationMinutes,
-      source: 'curated',
-    }
-  }
-  return [option(false), option(true)]
-})
 
 const durationMinutes = (duration: string | undefined) => {
   if (!duration) return undefined
@@ -156,12 +136,12 @@ const parseRoutes = (elements: OsmElement[], cityCoordinates: Coordinates): Ferr
     .slice(0, 12)
 }
 
-/** Find passenger services whose mapped OSM ferry line starts near this station. */
-export async function discoverFerryRoutes(cityCoordinates: Coordinates, signal?: AbortSignal) {
-  const [longitude, latitude] = cityCoordinates
+/** Find passenger services whose mapped ferry line starts near a placed harbour. */
+export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signal?: AbortSignal) {
+  const [longitude, latitude] = harbourCoordinates
   const query = `[out:json][timeout:25];way(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["route"="ferry"]->.routes;(.routes;node(w.routes)["amenity"="ferry_terminal"];);out tags geom;`
   let lastError: unknown
-  const curated = nearbyCuratedRoutes(cityCoordinates)
+  const curated = nearbyCuratedRoutes(harbourCoordinates)
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
     const requestController = new AbortController()
@@ -177,7 +157,7 @@ export async function discoverFerryRoutes(cityCoordinates: Coordinates, signal?:
       })
       if (!response.ok) throw new Error(`OpenStreetMap ferry lookup failed (${response.status})`)
       const result = await response.json() as { elements?: OsmElement[] }
-      const routes = parseRoutes(result.elements ?? [], cityCoordinates)
+      const routes = parseRoutes(result.elements ?? [], harbourCoordinates)
       return routes.length ? routes : curated
     } catch (error) {
       if (signal?.aborted) throw error

@@ -59,7 +59,7 @@ export function FerryDispatch({ company, purchasedHarbours, discoveredRoutes, br
     <div className="ferry-destinations harbour-market">
       {visibleHarbours.map((route) => {
         const owned = ownedHarbourIds.has(harbourId(route.originCoordinates))
-        const available = !purchasedHarbours.length || territoryCenters.some((center) => distanceKmBetween(center, route.originCoordinates) <= 8)
+        const available = territoryCenters.some((center) => distanceKmBetween(center, route.originCoordinates) <= 8)
         return <article key={harbourId(route.originCoordinates)}><span aria-hidden="true">⚓</span><div><strong>{route.originName}</strong><small>{owned ? 'Owned · its destinations are open' : available ? 'Available in unlocked territory' : 'Purchase after unlocking this territory'}</small></div><button disabled={owned || !available || company.cash < HARBOUR_PRICE} onClick={() => onBuyHarbour(route)}>{owned ? 'Purchased' : !available ? 'Territory locked' : `Buy · ${money.format(HARBOUR_PRICE)}`}</button></article>
       })}
       {!visibleHarbours.length && <div className="ferry-empty"><strong>Finding ferry terminals…</strong><small>Nearby terminal POIs and their mapped routes will appear here.</small></div>}

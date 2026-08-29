@@ -8,8 +8,9 @@ import { taxiModels } from "../data/taxis";
 import type {
   Branch,
   Coordinates,
-  DiscoveredFerryRoute,
+  FerryRouteOption,
   Hotel,
+  PurchasedHarbour,
   TaxiFerryCrossing,
   TaxiJob,
   TerritoryExpansion,
@@ -56,7 +57,8 @@ interface GameMapProps {
   jobs: TaxiJob[];
   transportAssets: TransportAsset[];
   transportRoutes: TransportRoute[];
-  discoveredFerryRoutes: DiscoveredFerryRoute[];
+  globalFerryRoutes: FerryRouteOption[];
+  purchasedHarbours: PurchasedHarbour[];
   trafficIncidents: TrafficIncident[];
   vehicleIncidents: VehicleIncident[];
   focusedJobId: string | null;
@@ -66,6 +68,7 @@ interface GameMapProps {
   onBuildStation: (coordinates: Coordinates) => void;
   onExpandTerritory: (coordinates: Coordinates) => void;
   onBuildHotel: (coordinates: Coordinates) => void;
+  onBuyHarbour: (route: FerryRouteOption) => void;
   onOpenJob: (jobId: string) => void;
   onSaveJobPickupRoute: (
     jobId: string,
@@ -553,7 +556,8 @@ function GameMapView({
   jobs,
   transportAssets,
   transportRoutes,
-  discoveredFerryRoutes,
+  globalFerryRoutes,
+  purchasedHarbours,
   trafficIncidents,
   vehicleIncidents,
   focusedJobId,
@@ -563,6 +567,7 @@ function GameMapView({
   onBuildStation,
   onExpandTerritory,
   onBuildHotel,
+  onBuyHarbour,
   onOpenJob,
   onSaveJobPickupRoute,
   onSaveJobRoute,
@@ -1808,43 +1813,58 @@ function GameMapView({
     realTerritories,
   ]);
 
-  // Harbour discovery is durable game state. Render compact permanent markers
-  // for both ends without depending on another OpenStreetMap lookup.
+  // The offline passenger-terminal catalogue is always visible at world scale.
+  // A marker popup is the harbour marketplace, so players never have to hunt
+  // through a separate list to purchase the place they are looking at.
   useEffect(() => {
     const instance = map.current;
     if (!instance) return;
     harbourMarkers.current.forEach((marker) => marker.remove());
     const seen = new Set<string>();
     const markers: mapboxgl.Marker[] = [];
-    const addHarbour = (
-      coordinates: Coordinates,
-      name: string,
-      destination: boolean,
-    ) => {
-      const key = `${destination ? "destination" : "origin"}:${coordinates.map((part) => part.toFixed(5)).join(",")}`;
+    const ownedIds = new Set(purchasedHarbours.map((harbour) => harbour.id));
+    const territoryCenters = [
+      ...branches.flatMap((branch) => branch.coordinates ? [branch.coordinates] : []),
+      ...territoryExpansions.filter((area) => area.source !== "taxi-discovery").map((area) => area.coordinates),
+    ];
+    const addHarbour = (route: FerryRouteOption) => {
+      const { originCoordinates: coordinates, originName: name } = route;
+      const key = coordinates.map((part) => part.toFixed(4)).join(",");
       if (seen.has(key)) return;
       seen.add(key);
+      const id = `harbour:${key}`;
+      const owned = ownedIds.has(id);
+      const available = territoryCenters.some((center) => distanceKmBetween(center, coordinates) <= 8);
       const element = document.createElement("div");
-      element.className = `harbour-map-marker${destination ? " destination" : ""}`;
+      element.className = `harbour-map-marker${owned ? " owned" : ""}${available ? " available" : " locked"}`;
       element.textContent = "⚓";
       element.setAttribute("aria-label", name);
+      const popupContent = document.createElement("div");
+      popupContent.className = "harbour-popup";
+      const title = document.createElement("strong");
+      title.textContent = name;
+      const status = document.createElement("small");
+      status.textContent = owned ? "Harbour owned" : available ? "Inside your owned territory" : "Unlock this territory to purchase";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.disabled = owned || !available;
+      button.textContent = owned ? "Purchased" : available ? "Buy harbour · €5,000" : "Territory locked";
+      button.addEventListener("click", () => onBuyHarbour(route));
+      popupContent.append(title, status, button);
       markers.push(
         new mapboxgl.Marker({ element, anchor: "center" })
           .setLngLat(coordinates)
-          .setPopup(new mapboxgl.Popup({ offset: 16 }).setText(name))
+          .setPopup(new mapboxgl.Popup({ offset: 16, className: "harbour-map-popup" }).setDOMContent(popupContent))
           .addTo(instance),
       );
     };
-    discoveredFerryRoutes.forEach((route) => {
-      addHarbour(route.originCoordinates, route.originName, false);
-      addHarbour(route.destinationCoordinates, route.destinationName, true);
-    });
+    globalFerryRoutes.forEach(addHarbour);
     harbourMarkers.current = markers;
     return () => {
       markers.forEach((marker) => marker.remove());
       if (harbourMarkers.current === markers) harbourMarkers.current = [];
     };
-  }, [discoveredFerryRoutes, mapRevision]);
+  }, [branches, globalFerryRoutes, mapRevision, onBuyHarbour, purchasedHarbours, territoryExpansions]);
 
   useEffect(() => {
     const instance = map.current;
@@ -2888,13 +2908,15 @@ export const GameMap = memo(
     previous.vehicles === next.vehicles &&
     previous.transportAssets === next.transportAssets &&
     previous.transportRoutes === next.transportRoutes &&
-    previous.discoveredFerryRoutes === next.discoveredFerryRoutes &&
+    previous.globalFerryRoutes === next.globalFerryRoutes &&
+    previous.purchasedHarbours === next.purchasedHarbours &&
     previous.placingStation === next.placingStation &&
     previous.placingTerritory === next.placingTerritory &&
     previous.placingHotel === next.placingHotel &&
     previous.onBuildStation === next.onBuildStation &&
     previous.onExpandTerritory === next.onExpandTerritory &&
     previous.onBuildHotel === next.onBuildHotel &&
+    previous.onBuyHarbour === next.onBuyHarbour &&
     previous.focusedJobId === next.focusedJobId &&
     previous.onOpenJob === next.onOpenJob &&
     previous.onSaveJobPickupRoute === next.onSaveJobPickupRoute &&

@@ -8,7 +8,7 @@ export const VILLAGE_TERRITORY_RADIUS_KM = 6
 // save-data volume that a street-scale 100 m radius would require.
 export const TAXI_DISCOVERY_RADIUS_KM = 1
 
-export interface VillageTerritoryCenter { id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; source?: 'village' | 'taxi-discovery'; radiusKm?: number }
+export interface VillageTerritoryCenter { id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; source?: 'village' | 'taxi-discovery' | 'ferry-discovery'; radiusKm?: number }
 export type { TerritoryFeature } from '../models/game'
 
 const realBoundaryCache = new Map<string, Promise<TerritoryFeature | null>>()
@@ -167,6 +167,10 @@ export const resolveVillageTerritories = async (centers: VillageTerritoryCenter[
       ? center.routeCoordinates && center.routeCoordinates.length >= 2
         ? taxiDiscoveryRouteTerritory(center.id, center.routeCoordinates, center.radiusKm)
         : taxiDiscoveryTerritory(center.id, center.coordinates, center.radiusKm)
+      : center.source === 'ferry-discovery'
+        ? center.routeCoordinates && center.routeCoordinates.length >= 2
+          ? taxiDiscoveryRouteTerritory(center.id, center.routeCoordinates, center.radiusKm)
+          : taxiDiscoveryTerritory(center.id, center.coordinates, center.radiusKm)
       : await realVillageTerritory(center.id, center.coordinates)
         ?? villageTerritory(center.id, center.coordinates, VILLAGE_TERRITORY_RADIUS_KM)))
 

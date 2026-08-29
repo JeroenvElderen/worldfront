@@ -137,10 +137,12 @@ const hasFleetSlot = (state: Pick<GameState, 'company' | 'garageLevel' | 'vehicl
   Boolean(state.company && state.vehicles.length < fleetSlotCapacity(state.company.level, state.garageLevel ?? 0, state.branches) + researchFleetSlots(state))
 const unlockedTerritoryCenters = (state: Pick<GameState, 'branches' | 'territoryExpansions'>): VillageTerritoryCenter[] => [
   ...state.branches.flatMap((branch) => branch.coordinates ? [{ id: branch.id, coordinates: branch.coordinates }] : []),
-  ...(state.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery').map(({ id, coordinates }) => ({
+  ...(state.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery').map(({ id, coordinates, routeCoordinates, radiusKm, source }) => ({
     id,
     coordinates,
-    source: 'village' as const,
+    routeCoordinates,
+    radiusKm,
+    source: source === 'ferry-discovery' ? 'ferry-discovery' as const : 'village' as const,
   })),
 ]
 const completedJobRoute = (job: TaxiJob, start?: Coordinates) => {
@@ -876,6 +878,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
           territoryExpansions = [...territoryExpansions, {
             id: ferryDiscoveryId,
             coordinates: route.destinationCoordinates,
+            routeCoordinates: route.routeCoordinates,
             purchasedAt: new Date(firstDestinationArrival).toISOString(),
             source: 'ferry-discovery' as const,
           }]
@@ -1393,7 +1396,12 @@ const generationTaxi = selectJobGenerationTaxi(state)
     const savedVersion = saved.version ?? 0
     const savedExpansions = saved.territoryExpansions ?? []
     const legacyDiscoveries = savedExpansions.filter((area) => area.source === 'taxi-discovery')
-    let territoryExpansions = savedExpansions.filter((area) => area.source !== 'taxi-discovery')
+    let territoryExpansions = savedExpansions.filter((area) => area.source !== 'taxi-discovery').map((area) => {
+      if (area.source !== 'ferry-discovery' || area.routeCoordinates?.length) return area
+      const routeId = area.id.startsWith('ferry-discovery:') ? area.id.slice('ferry-discovery:'.length) : null
+      const route = routeId ? (saved.transportRoutes ?? []).find((candidate) => candidate.id === routeId) : undefined
+      return route?.routeCoordinates?.length ? { ...area, routeCoordinates: route.routeCoordinates } : area
+    })
     const exploredTerritory = compactLegacyDiscoveries(saved.exploredTerritory, legacyDiscoveries)
     const licensedCities = [...customCities, ...cities.filter((city) => (saved.countryLicenses ?? []).includes(city.countryCode))]
     const cityEconomies = [...(saved.cityEconomies ?? [])]
@@ -1430,6 +1438,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
         territoryExpansions = [...territoryExpansions, {
           id,
           coordinates: route.destinationCoordinates,
+          routeCoordinates: route.routeCoordinates,
           purchasedAt: asset.journey?.startedAt ?? saved.updatedAt ?? new Date().toISOString(),
           source: 'ferry-discovery' as const,
         }]

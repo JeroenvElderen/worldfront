@@ -33,6 +33,8 @@ import {
   lockedTerritoryMask,
   mergeVillageTerritories,
   realVillageTerritory,
+  taxiDiscoveryRouteTerritory,
+  taxiDiscoveryTerritory,
   villageTerritory,
   VILLAGE_TERRITORY_RADIUS_KM,
 } from "../services/territoryGeometry";
@@ -686,7 +688,11 @@ function GameMapView({
         return coordinates ? [{ id: station.id, coordinates }] : [];
       }),
       ...territoryExpansions
-        .filter((area) => area.source !== "taxi-discovery")
+        .filter(
+          (area) =>
+            area.source !== "taxi-discovery" &&
+            area.source !== "ferry-discovery",
+        )
         .map(({ id, coordinates }) => ({ id, coordinates })),
     ];
     // Taxi discoveries update territoryExpansions after every completed trip,
@@ -1661,12 +1667,25 @@ function GameMapView({
           .filter((expansion) => expansion.source !== "taxi-discovery")
           .map(
             (expansion) =>
-              realTerritories[expansion.id] ??
-              villageTerritory(
-                expansion.id,
-                expansion.coordinates,
-                VILLAGE_TERRITORY_RADIUS_KM,
-              ),
+              expansion.source === "ferry-discovery"
+                ? expansion.routeCoordinates &&
+                  expansion.routeCoordinates.length >= 2
+                  ? taxiDiscoveryRouteTerritory(
+                      expansion.id,
+                      expansion.routeCoordinates,
+                      expansion.radiusKm,
+                    )
+                  : taxiDiscoveryTerritory(
+                      expansion.id,
+                      expansion.coordinates,
+                      expansion.radiusKm,
+                    )
+                : realTerritories[expansion.id] ??
+                  villageTerritory(
+                    expansion.id,
+                    expansion.coordinates,
+                    VILLAGE_TERRITORY_RADIUS_KM,
+                  ),
           ),
       ];
       // Taxi exploration is already buffered, simplified, and compacted by the

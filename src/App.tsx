@@ -395,12 +395,12 @@ export default function App() {
           {game.activeSection === 'ferries' && (
             <FerryDispatch
               company={game.company}
-              activeCityId={game.activeCityId ?? game.startingCityId!}
-              customCities={game.customCities ?? []}
-              discoveredRoutes={game.discoveredFerryRoutes ?? []}
+              purchasedHarbours={game.purchasedHarbours ?? []}
+              branches={game.branches}
+              territoryExpansions={game.territoryExpansions ?? []}
               transportAssets={game.transportAssets ?? []}
               transportRoutes={game.transportRoutes ?? []}
-              onSaveDiscovery={game.saveDiscoveredFerryRoutes}
+              onBuyHarbour={game.buyHarbour}
               onBuyFerry={() => game.buyTransportAsset('ferry')}
               onCreateRoute={game.createFerryRoute}
               onDispatch={game.dispatchTransport}

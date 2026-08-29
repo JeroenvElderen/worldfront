@@ -21,6 +21,29 @@ const routeDistanceKm = (coordinates: Coordinates[]) => coordinates.slice(1).red
   0,
 )
 
+export const harbourId = (coordinates: Coordinates) =>
+  `harbour:${coordinates.map((part) => part.toFixed(4)).join(',')}`
+
+/** The complete offline harbour network. Every corridor is available in both directions. */
+export const allFerryRoutes = (): FerryRouteOption[] => curatedFerryRoutes.flatMap((route) => {
+  const option = (reversed: boolean): FerryRouteOption => {
+    const routeCoordinates = reversed ? [...route.coordinates].reverse() : route.coordinates
+    return {
+      id: `curated-ferry-${route.id}${reversed ? '-reverse' : ''}`,
+      name: route.name,
+      originName: reversed ? route.destinationName : route.originName,
+      destinationName: reversed ? route.originName : route.destinationName,
+      originCoordinates: routeCoordinates[0],
+      destinationCoordinates: routeCoordinates.at(-1)!,
+      routeCoordinates,
+      distanceKm: Math.round(routeDistanceKm(routeCoordinates) * 10) / 10,
+      durationMinutes: route.durationMinutes,
+      source: 'curated',
+    }
+  }
+  return [option(false), option(true)]
+})
+
 const durationMinutes = (duration: string | undefined) => {
   if (!duration) return undefined
   const parts = duration.split(':').map(Number)

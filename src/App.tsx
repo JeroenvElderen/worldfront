@@ -14,6 +14,7 @@ import { moneyFormatterForCity } from './services/localization'
 import { HOTEL_PURCHASE_COST } from './services/hotelEconomy'
 import { CurrencyProvider } from './components/game/CurrencyContext'
 import { discoverFerryRoutes } from './services/maritimeRoutes'
+import { POSTAL_DEPOT_BUILD_COST } from './services/postalDepots'
 
 const JOB_REFRESH_INTERVAL_MS = 60_000
 
@@ -33,13 +34,14 @@ export default function App() {
   const [placingTerritory, setPlacingTerritory] = useState(false)
   const [placingHotel, setPlacingHotel] = useState(false)
   const [placingHarbour, setPlacingHarbour] = useState(false)
+  const [placingPostalDepot, setPlacingPostalDepot] = useState(false)
   const [showExpansionMenu, setShowExpansionMenu] = useState(false)
   const purchasedTerritories = (game.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery' && area.source !== 'ferry-discovery').length
   const unlockedTerritories = (game.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery').length
   const territoryExpansionCost = 5_000 * purchasedTerritories
   const stationPackageCost = Math.round(15_000 * (game.specialization === 'mobility' ? .9 : 1) * (hasResearch(game.completedResearch ?? [], 'prefab-depots') ? .8 : 1)) + getTaxiModel('toyota-corolla').price
   const researchFleetSlots = (hasResearch(game.completedResearch ?? [], 'autonomous-operations') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'global-network') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'regional-hubs') ? game.branches.length : 0)
-  const stationFleetFull = game.vehicles.length >= fleetSlotCapacity(game.company?.level ?? 1, game.garageLevel ?? 0, game.branches) + researchFleetSlots
+  const stationFleetFull = game.vehicles.filter((vehicle) => vehicle.type !== 'post').length >= fleetSlotCapacity(game.company?.level ?? 1, game.garageLevel ?? 0, game.branches) + researchFleetSlots
   const activeCity = getCity(game.activeCityId ?? game.startingCityId, game.customCities ?? [])
   const money = moneyFormatterForCity(activeCity)
   const maintenanceAlert = (game.maintenanceAlerts ?? []).find((alert) => !alert.dismissed)
@@ -69,6 +71,12 @@ export default function App() {
     buyHotel(coordinates)
     if (useGameStore.getState().hotels.length > hotelCount) setPlacingHotel(false)
   }, [buyHotel])
+  const buildPostalDepot = game.buildPostalDepot
+  const handleBuildPostalDepot = useCallback((coordinates: Parameters<typeof buildPostalDepot>[0]) => {
+    const depotCount = useGameStore.getState().postalDepots.length
+    buildPostalDepot(coordinates)
+    if (useGameStore.getState().postalDepots.length > depotCount) setPlacingPostalDepot(false)
+  }, [buildPostalDepot])
 
   const handleTaxiArrived = useCallback((jobId: string) => {
     const state = useGameStore.getState()
@@ -357,6 +365,7 @@ export default function App() {
         cityId={game.activeCityId ?? game.startingCityId}
         customCities={game.customCities ?? []}
         branches={game.branches ?? []}
+        postalDepots={game.postalDepots ?? []}
         hotels={game.hotels ?? []}
         territoryExpansions={game.territoryExpansions ?? []}
         exploredTerritory={game.exploredTerritory}
@@ -372,10 +381,12 @@ export default function App() {
         placingTerritory={placingTerritory}
         placingHotel={placingHotel}
         placingHarbour={placingHarbour}
+        placingPostalDepot={placingPostalDepot}
         onBuildStation={handleBuildStation}
         onExpandTerritory={handleExpandTerritory}
         onBuildHotel={handleBuildHotel}
         onPlaceHarbour={handlePlaceHarbour}
+        onBuildPostalDepot={handleBuildPostalDepot}
         onOpenJob={game.openJob}
         onSaveJobPickupRoute={game.saveJobPickupRoute}
         onSaveJobRoute={game.saveJobRoute}
@@ -387,10 +398,11 @@ export default function App() {
         <>
           <TopHud company={game.company} />
 
-          {game.activeSection === 'map' && !placingStation && !placingTerritory && !placingHotel && !placingHarbour && <><aside className="territory-guide" aria-live="polite"><b>Village borders unlocked: {game.branches.length + unlockedTerritories}</b><small>{territoryProgressMessage}</small></aside>{showExpansionMenu && <aside className="expansion-menu"><b>Expand your network</b><button disabled={game.company.cash < territoryExpansionCost} onClick={() => { setPlacingTerritory(true); setShowExpansionMenu(false) }}><span>◎</span><div><strong>Unlock village territory</strong><small>Choose a village border · {territoryExpansionPrice}</small></div></button><button disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => { setPlacingStation(true); setShowExpansionMenu(false) }} title={stationBuildMessage}><span>＋</span><div><strong>Build a station</strong><small>Start a separate service area · {money.format(stationPackageCost)}</small></div></button></aside>}<button className="station-add-button" onClick={() => setShowExpansionMenu((open) => !open)} aria-label="Territory expansion options" aria-expanded={showExpansionMenu}>＋</button></>}
+          {game.activeSection === 'map' && !placingStation && !placingTerritory && !placingHotel && !placingHarbour && !placingPostalDepot && <><aside className="territory-guide" aria-live="polite"><b>Village borders unlocked: {game.branches.length + unlockedTerritories}</b><small>{territoryProgressMessage}</small></aside>{showExpansionMenu && <aside className="expansion-menu"><b>Expand your network</b><button disabled={game.company.cash < territoryExpansionCost} onClick={() => { setPlacingTerritory(true); setShowExpansionMenu(false) }}><span>◎</span><div><strong>Unlock village territory</strong><small>Choose a village border · {territoryExpansionPrice}</small></div></button><button disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => { setPlacingStation(true); setShowExpansionMenu(false) }} title={stationBuildMessage}><span>＋</span><div><strong>Build a station</strong><small>Start a separate service area · {money.format(stationPackageCost)}</small></div></button></aside>}<button className="station-add-button" onClick={() => setShowExpansionMenu((open) => !open)} aria-label="Territory expansion options" aria-expanded={showExpansionMenu}>＋</button></>}
           {placingStation && <aside className="depot-placement-banner"><span>⌖</span><div><b>Place Station {game.branches.length + 1}</b><small>Tap the map to build a station with one taxi for {money.format(stationPackageCost)}.</small></div><button onClick={() => setPlacingStation(false)}>Cancel</button></aside>}
           {placingTerritory && <aside className="depot-placement-banner"><span>◎</span><div><b>Unlock a village territory</b><small>Tap a village on the map to purchase its organic border for {territoryExpansionPrice.toLocaleLowerCase()}. No station will be built.</small></div><button onClick={() => setPlacingTerritory(false)}>Cancel</button></aside>}
           {placingHarbour && <aside className="depot-placement-banner"><span>⚓</span><div><b>Place harbour</b><small>Tap inside owned territory. Routes starting within 5 km of this point will be discovered.</small></div><button onClick={() => setPlacingHarbour(false)}>Cancel</button></aside>}
+          {placingPostalDepot && <aside className="depot-placement-banner postal-placement-banner"><span>📮</span><div><b>Place Postal Depot {(game.postalDepots ?? []).length + 1}</b><small>Tap inside owned territory to build a dedicated 3-bay postal garage for {money.format(POSTAL_DEPOT_BUILD_COST)}.</small></div><button onClick={() => setPlacingPostalDepot(false)}>Cancel</button></aside>}
           {placingHotel && <aside className="depot-placement-banner hotel-placement-banner"><span>🏨</span><div><b>Place hotel {(game.hotels ?? []).filter((hotel) => hotel.cityId === (game.activeCityId ?? game.startingCityId)).length + 1}</b><small>Tap the exact map location to build this property for {money.format(HOTEL_PURCHASE_COST)}.</small></div><button onClick={() => setPlacingHotel(false)}>Cancel</button></aside>}
 
           {game.worldCondition && game.worldCondition.weather !== 'clear' && (
@@ -440,9 +452,7 @@ export default function App() {
               customCities={game.customCities ?? []}
               vehicles={game.vehicles}
               drivers={game.drivers}
-              branches={game.branches ?? []}
-              completedResearch={game.completedResearch ?? []}
-              garageLevel={game.garageLevel ?? 0}
+              postalDepots={game.postalDepots ?? []}
               contracts={game.contracts ?? []}
               performance={game.postalPerformance}
               onClose={() => game.setSection('map')}
@@ -450,6 +460,8 @@ export default function App() {
               onOpenFleet={() => game.setSection('fleet')}
               onOpenCompany={() => game.setSection('company')}
               onBuyVehicle={game.buyPostVehicle}
+              onBuildDepot={() => { setPlacingPostalDepot(true); game.setSection('map') }}
+              onUpgradeDepot={game.upgradePostalDepot}
               onStartRoute={game.startPostalRoute}
               onAcceptContract={game.acceptContract}
             />

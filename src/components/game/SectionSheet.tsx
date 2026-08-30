@@ -83,11 +83,12 @@ export function SectionSheet({ section, company, activeCityId, branches, customC
   const [vehiclePanel, setVehiclePanel] = useState<'overview' | 'performance' | 'service' | 'upgrades' | 'style'>('overview')
   const researchCapacity = (hasResearch(completedResearch, 'autonomous-operations') ? 4 : 0) + (hasResearch(completedResearch, 'global-network') ? 4 : 0) + (hasResearch(completedResearch, 'regional-hubs') ? branches.length : 0)
   const fleetCapacity = fleetSlotCapacity(company.level, garageLevel ?? 0, branches) + researchCapacity
+  const roadFleetCount = vehicles.filter((vehicle) => vehicle.type !== 'post').length
   const serviceRadiusKm = maxJobDistanceForFleet(company.level, vehicles.filter((vehicle) => vehicle.type === 'taxi').length) * (hasResearch(completedResearch, 'predictive-demand') ? 1.25 : 1)
   const stationConstructionCost = Math.round(15_000 * (specialization === 'mobility' ? .9 : 1) * (hasResearch(completedResearch, 'prefab-depots') ? .8 : 1))
   const stationVehicle = taxiModels.find((model) => model.id === 'toyota-corolla') ?? taxiModels[0]
   const stationPackageCost = stationConstructionCost + stationVehicle.price
-  const fleetFull = vehicles.length >= fleetCapacity
+  const fleetFull = roadFleetCount >= fleetCapacity
   const nextGarageCost = garageUpgradeCost(garageLevel ?? 0)
   const content = {
     fleet: [`${vehicles.length} vehicle${vehicles.length === 1 ? '' : 's'} in your fleet`, vehicles[0] ? `${vehicles[0].name} · ${vehicles[0].condition}% condition · ${vehicles[0].status}` : 'Purchase your first vehicle.'],
@@ -114,7 +115,7 @@ export function SectionSheet({ section, company, activeCityId, branches, customC
         <article><span className="fleet-summary-icon working">⌁</span><strong>{activeVehicles}</strong><small>On a job</small></article>
         <article><span className="fleet-summary-icon service">⚒</span><strong>{maintenanceVehicles}</strong><small>Maintenance</small></article>
       </div>
-      <div className="fleet-roster"><header><small>YOUR VEHICLES</small><span>{vehicles.length} / {fleetCapacity} slots</span></header>{vehicles.map((vehicle) => { const driver = drivers.find((candidate) => candidate.id === vehicle.driverId); const activity = vehicle.rentalJourney ? 'Customer driving' : vehicle.postalRoute ? 'Delivering' : vehicle.scheduledJourney?.kind === 'tour' ? 'Running tour' : vehicle.scheduledJourney?.kind === 'coach' ? 'Intercity service' : vehicle.status === 'on-job' ? 'On a job' : vehicle.serviceTrip ? `To ${vehicle.serviceTrip.label}` : vehicle.status === 'maintenance' ? 'Maintenance' : 'In service'; return <button className={`fleet-row ${selectedVehicle?.id === vehicle.id ? 'selected' : ''}`} onClick={() => setCustomizingVehicleId(vehicle.id)} key={vehicle.id}>
+      <div className="fleet-roster"><header><small>YOUR VEHICLES</small><span>{roadFleetCount} / {fleetCapacity} road slots · postal separate</span></header>{vehicles.map((vehicle) => { const driver = drivers.find((candidate) => candidate.id === vehicle.driverId); const activity = vehicle.rentalJourney ? 'Customer driving' : vehicle.postalRoute ? 'Delivering' : vehicle.scheduledJourney?.kind === 'tour' ? 'Running tour' : vehicle.scheduledJourney?.kind === 'coach' ? 'Intercity service' : vehicle.status === 'on-job' ? 'On a job' : vehicle.serviceTrip ? `To ${vehicle.serviceTrip.label}` : vehicle.status === 'maintenance' ? 'Maintenance' : 'In service'; return <button className={`fleet-row ${selectedVehicle?.id === vehicle.id ? 'selected' : ''}`} onClick={() => setCustomizingVehicleId(vehicle.id)} key={vehicle.id}>
         <i className={`vehicle-status-dot ${vehicle.status}`} />
         <span className="vehicle-visual" aria-hidden="true">{vehicle.type === 'coach' ? '🚌' : vehicle.type === 'post' ? '🚐' : '🚕'}</span>
         <span className="vehicle-identity"><span><strong>{vehicleMakeAndModel(vehicle)}</strong><b className={`vehicle-state ${vehicle.status}`}>{activity}</b></span><small className="fleet-license-plate">{licensePlateForVehicle(vehicle)}</small><em>⛽ {Math.round(vehicle.fuel)}% <i /> ◴ {Math.round(vehicle.odometerKm ?? 0).toLocaleString()} km</em></span>
@@ -130,7 +131,7 @@ export function SectionSheet({ section, company, activeCityId, branches, customC
       </>}
       <button className="fleet-add-button" onClick={() => setFleetView('market')}>＋ <strong>Add vehicle</strong></button>
     </>}
-    {fleetView === 'market' && <div className="fleet-market"><div className="garage-card"><span>🏢</span><div><strong>Depot garage · level {garageLevel ?? 0}</strong><small>{vehicles.length}/{fleetCapacity} slots used · each company level adds 2, each garage upgrade adds 3</small></div><button disabled={cash < nextGarageCost} onClick={onUpgradeGarage}>Upgrade · {money.format(nextGarageCost)}</button></div><small className="purchase-label">CHOOSE YOUR NEXT TAXI</small>
+    {fleetView === 'market' && <div className="fleet-market"><div className="garage-card"><span>🏢</span><div><strong>Road fleet garage · level {garageLevel ?? 0}</strong><small>{roadFleetCount}/{fleetCapacity} slots used · postal vans use their own depot garages</small></div><button disabled={cash < nextGarageCost} onClick={onUpgradeGarage}>Upgrade · {money.format(nextGarageCost)}</button></div><small className="purchase-label">CHOOSE YOUR NEXT TAXI</small>
     <div className="taxi-shop">{taxiModels.filter((model) => !model.collection).map((model) => <button className={selectedTaxi === model.id ? 'selected' : ''} key={model.id} onClick={() => setSelectedTaxi(model.id)}>
       <img className="brand-logo" src={model.logoUrl} alt={`${model.brand} logo`} loading="lazy" /><strong>{model.brand} {model.name}</strong><small>{model.description}<br />{model.powertrain} · {model.capacity} seats · {model.topSpeedKmh} km/h</small><b>{money.format(model.price)}</b>
     </button>)}</div>

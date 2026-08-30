@@ -14,6 +14,10 @@ export interface RoadRouteDetails {
   destination: Coordinates
 }
 
+export interface RoadRouteOptions {
+  excludeFerries?: boolean
+}
+
 type MapboxStep = {
   mode?: string
   name?: string
@@ -80,6 +84,7 @@ export async function resolveRoadRoute(
   to: Coordinates,
   signal?: AbortSignal,
   profiles: Array<'driving-traffic' | 'driving'> = ['driving-traffic', 'driving'],
+  options: RoadRouteOptions = {},
 ): Promise<RoadRouteDetails | null> {
   if (!mapboxAccessToken) return null
   for (const profile of profiles) {
@@ -92,18 +97,20 @@ export async function resolveRoadRoute(
       annotations: 'maxspeed',
       access_token: mapboxAccessToken,
     })
+    if (options.excludeFerries) query.set('exclude', 'ferry')
     const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/${profile}/${from.join(',')};${to.join(',')}?${query}`, { signal })
     if (!response.ok) continue
     const result = await response.json() as {
       waypoints?: Array<{ location?: unknown }>
       routes?: MapboxRoute[]
     }
-    const validRoutes = (result.routes ?? []).filter((route) =>
-      typeof route.duration === 'number' &&
-      Array.isArray(route.geometry?.coordinates) &&
-      route.geometry.coordinates.length >= 2 &&
-      route.geometry.coordinates.every(isCoordinates),
-    )
+    const validRoutes = (result.routes ?? []).filter((route) => {
+      if (options.excludeFerries && route.legs?.some((leg) => leg.steps?.some((step) => step.mode === 'ferry'))) return false
+      return typeof route.duration === 'number' &&
+        Array.isArray(route.geometry?.coordinates) &&
+        route.geometry.coordinates.length >= 2 &&
+        route.geometry.coordinates.every(isCoordinates)
+    })
     const route = validRoutes.reduce<MapboxRoute | null>((fastest, candidate) =>
       !fastest || candidate.duration! < fastest.duration! ? candidate : fastest, null)
     if (!route) continue

@@ -9,6 +9,7 @@ import type {
   Branch,
   Coordinates,
   Hotel,
+  PostalDepot,
   PurchasedHarbour,
   TaxiFerryCrossing,
   TaxiJob,
@@ -46,12 +47,14 @@ import {
 } from "../services/roadRoutes";
 import { activeFerryServiceForCrossing } from "../services/ferryService";
 import { resolveLandsideFerryTerminals } from "../services/ferryTerminals";
+import { postalDepotCapacity } from "../services/postalDepots";
 
 interface GameMapProps {
   layoutKey: string;
   cityId: string | null;
   customCities: import("../models/game").City[];
   branches: Branch[];
+  postalDepots: PostalDepot[];
   hotels: Hotel[];
   territoryExpansions: TerritoryExpansion[];
   exploredTerritory: TerritoryFeature | null;
@@ -67,10 +70,12 @@ interface GameMapProps {
   placingTerritory: boolean;
   placingHotel: boolean;
   placingHarbour: boolean;
+  placingPostalDepot: boolean;
   onBuildStation: (coordinates: Coordinates) => void;
   onExpandTerritory: (coordinates: Coordinates) => void;
   onBuildHotel: (coordinates: Coordinates) => void;
   onPlaceHarbour: (coordinates: Coordinates) => void;
+  onBuildPostalDepot: (coordinates: Coordinates) => void;
   onOpenJob: (jobId: string) => void;
   onSaveJobPickupRoute: (
     jobId: string,
@@ -313,13 +318,20 @@ const createRouteMotion = (
 const resolveRoadRouteThrough = async (
   waypoints: Coordinates[],
   signal?: AbortSignal,
+  excludeFerries = false,
 ): Promise<RouteDetails | null> => {
   if (waypoints.length < 2) return null;
   const segments = await Promise.all(
     waypoints
       .slice(1)
       .map((destination, index) =>
-        resolveRoadRoute(waypoints[index], destination, signal),
+        resolveRoadRoute(
+          waypoints[index],
+          destination,
+          signal,
+          undefined,
+          { excludeFerries },
+        ),
       ),
   );
   if (segments.some((segment) => !segment)) return null;
@@ -353,7 +365,7 @@ const vehicleColor = {
   waitingForFerry: "#f59e0b",
   onFerry: "#38bdf8",
   maintenance: "#8b5cf6",
-  postal: "#8b5cf6",
+  postal: "#f97316",
   rental: "#8b5cf6",
 } as const;
 
@@ -394,6 +406,46 @@ const ensureFerryWaitLabel = (instance: mapboxgl.Map, sourceId: string) => {
 
 type RouteMotionState = ReturnType<ReturnType<typeof createRouteMotion>>;
 
+type FerryTerminalPair = {
+  boardAt: Coordinates;
+  disembarkAt: Coordinates;
+};
+
+const ferryTerminalPair = (
+  crossing: TaxiFerryCrossing,
+  routes: TransportRoute[],
+): FerryTerminalPair | null => {
+  let best: { pair: FerryTerminalPair; score: number } | null = null;
+
+  for (const route of routes) {
+    if (
+      route.mode !== "ferry" ||
+      !route.originCoordinates ||
+      !route.destinationCoordinates
+    )
+      continue;
+
+    for (const direction of ["outbound", "returning"] as const) {
+      const pair =
+        direction === "outbound"
+          ? {
+              boardAt: route.originCoordinates,
+              disembarkAt: route.destinationCoordinates,
+            }
+          : {
+              boardAt: route.destinationCoordinates,
+              disembarkAt: route.originCoordinates,
+            };
+      const score =
+        distanceKmBetween(crossing.boardAt, pair.boardAt) +
+        distanceKmBetween(crossing.disembarkAt, pair.disembarkAt);
+      if (!best || score < best.score) best = { pair, score };
+    }
+  }
+
+  return best?.pair ?? null;
+};
+
 const positionVehicleOnOwnedFerry = (
   key: string,
   route: RouteDetails,
@@ -425,25 +477,45 @@ const positionVehicleOnOwnedFerry = (
   const crossing = route.ferryCrossings[crossingIndex];
   const crossingKey = `${key}:${crossingIndex}`;
   if (!crossing) return null;
+  const service = activeFerryServiceForCrossing(
+    crossing,
+    transportRoutes,
+    transportAssets,
+  );
+  const matchedTerminals = service
+    ? service.direction === "outbound"
+      ? {
+          boardAt: service.route.originCoordinates!,
+          disembarkAt: service.route.destinationCoordinates!,
+        }
+      : {
+          boardAt: service.route.destinationCoordinates!,
+          disembarkAt: service.route.originCoordinates!,
+        }
+    : ferryTerminalPair(crossing, transportRoutes);
+  // Never show a queued road vehicle on Directions' offshore ferry geometry.
+  // Owned route endpoints are real terminals; a route without a usable match
+  // falls back to its known road origin/destination rather than the sea point.
+  const waitingPosition =
+    matchedTerminals?.boardAt ?? route.coordinates[0] ?? crossing.boardAt;
+  const arrivalPosition =
+    matchedTerminals?.disembarkAt ??
+    route.coordinates.at(-1) ??
+    crossing.disembarkAt;
   if (completed.has(crossingKey)) {
     return motion.ferryCrossingIndex === crossingIndex
       ? {
-          position: crossing.disembarkAt,
+          position: arrivalPosition,
           state: null,
           crossingIndex,
           completedNow: false,
         }
       : null;
   }
-  const service = activeFerryServiceForCrossing(
-    crossing,
-    transportRoutes,
-    transportAssets,
-  );
 
   if (!service?.asset.journey || !service.route.routeCoordinates?.length) {
     return {
-      position: crossing.boardAt,
+      position: waitingPosition,
       state: "waiting" as const,
       crossingIndex,
       completedNow: false,
@@ -467,7 +539,7 @@ const positionVehicleOnOwnedFerry = (
     completed.add(crossingKey);
 
     return {
-      position: crossing.disembarkAt,
+      position: arrivalPosition,
       state: null,
       crossingIndex,
       completedNow: true,
@@ -479,7 +551,7 @@ const positionVehicleOnOwnedFerry = (
   if (!isBoarded) {
     if (journeyDirection !== service.direction || progress > 0.08) {
       return {
-        position: crossing.boardAt,
+        position: waitingPosition,
         state: "waiting" as const,
         crossingIndex,
         completedNow: false,
@@ -499,7 +571,7 @@ const positionVehicleOnOwnedFerry = (
   const ferryPosition =
     ferryCoordinates.length >= 2
       ? routePosition(ferryCoordinates, progress)
-      : crossing.boardAt;
+      : waitingPosition;
 
   return {
     position: ferryPosition,
@@ -544,6 +616,7 @@ function GameMapView({
   cityId,
   customCities,
   branches,
+  postalDepots,
   hotels,
   territoryExpansions,
   exploredTerritory,
@@ -559,10 +632,12 @@ function GameMapView({
   placingTerritory,
   placingHotel,
   placingHarbour,
+  placingPostalDepot,
   onBuildStation,
   onExpandTerritory,
   onBuildHotel,
   onPlaceHarbour,
+  onBuildPostalDepot,
   onOpenJob,
   onSaveJobPickupRoute,
   onSaveJobRoute,
@@ -589,6 +664,8 @@ function GameMapView({
   const incidentMarkers = useRef<mapboxgl.Marker[]>([]);
   const harbourMarkers = useRef<mapboxgl.Marker[]>([]);
   const hotelMarkers = useRef<mapboxgl.Marker[]>([]);
+  const postalDepotMarkers = useRef<mapboxgl.Marker[]>([]);
+  const postalRouteRunners = useRef(new Map<string, string>());
   const ferryMarkers = useRef(new Map<string, mapboxgl.Marker>());
   const boardedFerryCrossings = useRef(new Set<string>());
   const completedFerryCrossings = useRef(new Set<string>());
@@ -724,7 +801,7 @@ function GameMapView({
       .getCanvas()
       .classList.toggle(
         "placing-depot",
-        placingStation || placingTerritory || placingHotel || placingHarbour,
+        placingStation || placingTerritory || placingHotel || placingHarbour || placingPostalDepot,
       );
     const handlePlacement = (event: mapboxgl.MapMouseEvent) => {
       const coordinates: Coordinates = [event.lngLat.lng, event.lngLat.lat];
@@ -732,6 +809,7 @@ function GameMapView({
       else if (placingTerritory) onExpandTerritory(coordinates);
       else if (placingHotel) onBuildHotel(coordinates);
       else if (placingHarbour) onPlaceHarbour(coordinates);
+      else if (placingPostalDepot) onBuildPostalDepot(coordinates);
     };
     instance.on("click", handlePlacement);
     return () => {
@@ -743,10 +821,12 @@ function GameMapView({
     placingTerritory,
     placingHotel,
     placingHarbour,
+    placingPostalDepot,
     onBuildStation,
     onExpandTerritory,
     onBuildHotel,
     onPlaceHarbour,
+    onBuildPostalDepot,
   ]);
 
   useEffect(() => {
@@ -984,6 +1064,7 @@ function GameMapView({
           }
           if (vehicle.postalRoute) {
             const postal = vehicle.postalRoute;
+            postalRouteRunners.current.set(vehicle.id, postal.startedAt);
             const sourceId = vehicleSourceId(vehicle.id);
             const postalWaypoints = postal.stops.map(
               (stop) => stop.coordinates,
@@ -1003,6 +1084,7 @@ function GameMapView({
               void resolveRoadRouteThrough(
                 postalWaypoints,
                 abortController.signal,
+                true,
               )
                 .then((resolved) => {
                   if (!resolved || abortController.signal.aborted) return;
@@ -1016,31 +1098,6 @@ function GameMapView({
                 })
                 .catch(() => undefined);
             }
-            postal.stops.slice(1, -1).forEach((stop, stopIndex) => {
-              const stopId = `${sourceId}-post-stop-${stopIndex}`;
-              instance.addSource(stopId, {
-                type: "geojson",
-                data: point(stop.coordinates),
-              });
-              instance.addLayer({
-                id: stopId,
-                type: "circle",
-                source: stopId,
-                paint: {
-                  "circle-radius": 7,
-                  "circle-color": "#fbbf24",
-                  "circle-stroke-width": 2,
-                  "circle-stroke-color": "#fff",
-                },
-              });
-              instance.addLayer({
-                id: `${stopId}-label`,
-                type: "symbol",
-                source: stopId,
-                layout: { "text-field": `${stopIndex + 1}`, "text-size": 9 },
-                paint: { "text-color": "#422006" },
-              });
-            });
             instance.addSource(sourceId, {
               type: "geojson",
               data: point(start),
@@ -1889,6 +1946,28 @@ function GameMapView({
 
   useEffect(() => {
     const instance = map.current;
+    if (!instance) return;
+    postalDepotMarkers.current.forEach((marker) => marker.remove());
+    const markers = postalDepots.map((depot) => {
+      const element = document.createElement("div");
+      element.className = "postal-depot-map-marker";
+      element.textContent = "📮";
+      element.setAttribute("aria-label", depot.name);
+      const used = vehicles.filter((vehicle) => vehicle.type === "post" && vehicle.postalDepotId === depot.id).length;
+      return new mapboxgl.Marker({ element, anchor: "bottom" })
+        .setLngLat(depot.coordinates)
+        .setPopup(new mapboxgl.Popup({ offset: 18 }).setText(`${depot.name} · Level ${depot.level} · ${used}/${postalDepotCapacity(depot)} van bays`))
+        .addTo(instance);
+    });
+    postalDepotMarkers.current = markers;
+    return () => {
+      markers.forEach((marker) => marker.remove());
+      if (postalDepotMarkers.current === markers) postalDepotMarkers.current = [];
+    };
+  }, [mapRevision, postalDepots, vehicles]);
+
+  useEffect(() => {
+    const instance = map.current;
     if (!instance?.isStyleLoaded()) return;
     const selected = getCity(cityId, customCities);
 
@@ -2446,6 +2525,94 @@ function GameMapView({
     onTaxiArrived,
   ]);
 
+  // Postal rounds can be dispatched after the persistent map was created.
+  // Keep their marker at the depot until a ferry-free road route is ready;
+  // raw radial waypoints may be over water and must never be drawn directly.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance?.isStyleLoaded()) return;
+    const abortController = new AbortController();
+    const timers = new Set<number>();
+    const ownedRoutes = new Map<string, string>();
+    const ownedOverlaySources = new Set<string>();
+    const routeRunners = postalRouteRunners.current;
+
+    vehicles.filter((vehicle) => vehicle.postalRoute).forEach((vehicle) => {
+      const postal = vehicle.postalRoute!;
+      if (routeRunners.get(vehicle.id) === postal.startedAt) return;
+      routeRunners.set(vehicle.id, postal.startedAt);
+      ownedRoutes.set(vehicle.id, postal.startedAt);
+
+      const vehicleId = vehicleSourceId(vehicle.id);
+      const waypoints = postal.stops.map((stop) => stop.coordinates);
+      const depotPosition = waypoints[0];
+      let routeReady = false;
+      let roadRoute: RouteDetails = { coordinates: [depotPosition, depotPosition], speedLimits: [], ferryCrossings: [] };
+      let roadMotion = createRouteMotion(roadRoute, 35, vehicle.topSpeedKmh ?? 110);
+      const routeSourceId = `${vehicleId}-postal-route`;
+
+      if (!instance.getSource(routeSourceId)) {
+        instance.addSource(routeSourceId, { type: "geojson", data: lineString([depotPosition, depotPosition]) });
+        instance.addLayer({ id: `${routeSourceId}-glow`, type: "line", source: routeSourceId, paint: { "line-color": vehicleColor.postal, "line-width": 8, "line-opacity": 0.13, "line-blur": 5 } });
+        instance.addLayer({ id: routeSourceId, type: "line", source: routeSourceId, paint: { "line-color": vehicleColor.postal, "line-width": 2.4, "line-opacity": 0.75, "line-dasharray": [1.5, 1.2] } });
+        ownedOverlaySources.add(routeSourceId);
+      }
+
+      if (instance.getLayer(vehicleId)) instance.setPaintProperty(vehicleId, "circle-color", vehicleColor.postal);
+      ensureFerryWaitLabel(instance, vehicleId);
+
+      if (token) void resolveRoadRouteThrough(waypoints, abortController.signal, true).then((resolved) => {
+        if (!resolved || abortController.signal.aborted) return;
+        roadRoute = resolved;
+        roadMotion = createRouteMotion(roadRoute, 35, vehicle.topSpeedKmh ?? 110);
+        routeReady = true;
+        (instance.getSource(routeSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(lineString(roadRoute.coordinates));
+      }).catch(() => undefined);
+
+      let timer: number | undefined;
+      let lastFerryState: "waiting" | "aboard" | null | undefined;
+      const animate = () => {
+        if (timer !== undefined) timers.delete(timer);
+        const progress = postalRouteProgress(postal);
+        const motion = routeReady
+          ? roadMotion(progress)
+          : { progress: 0, waitingForFerry: false, onFerry: false, ferryCrossingIndex: null, ferryCrossingEndElapsed: null };
+        let ferryState: "waiting" | "aboard" | null = motion.waitingForFerry ? "waiting" : motion.onFerry ? "aboard" : null;
+        let currentPosition = routePosition(roadRoute.coordinates, motion.progress);
+        const ferryPosition = positionVehicleOnOwnedFerry(`${vehicle.id}:postal:${postal.startedAt}`, roadRoute, motion, transportRoutesRef.current, transportAssetsRef.current, boardedFerryCrossings.current, completedFerryCrossings.current, Date.now());
+        if (ferryPosition) {
+          currentPosition = ferryPosition.position;
+          ferryState = ferryPosition.state;
+        }
+        (instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(currentPosition, { ferryStatus: ferryState === "waiting" ? "Waiting for ferry" : ferryState === "aboard" ? "On ferry" : "" }));
+        if (ferryState !== lastFerryState && instance.getLayer(vehicleId)) {
+          instance.setPaintProperty(vehicleId, "circle-color", ferryState === "waiting" ? vehicleColor.waitingForFerry : ferryState === "aboard" ? vehicleColor.onFerry : vehicleColor.postal);
+          lastFerryState = ferryState;
+        }
+        instance.triggerRepaint();
+        if (progress < 1 && document.visibilityState !== "hidden") {
+          timer = scheduleMapFrame(animate);
+          timers.add(timer);
+        }
+      };
+      animate();
+    });
+
+    return () => {
+      abortController.abort();
+      timers.forEach(cancelMapFrame);
+      ownedRoutes.forEach((startedAt, vehicleId) => {
+        if (routeRunners.get(vehicleId) === startedAt) routeRunners.delete(vehicleId);
+      });
+      ownedOverlaySources.forEach((sourceId) => {
+        if (instance.getLayer(`${sourceId}-label`)) instance.removeLayer(`${sourceId}-label`);
+        if (instance.getLayer(`${sourceId}-glow`)) instance.removeLayer(`${sourceId}-glow`);
+        if (instance.getLayer(sourceId)) instance.removeLayer(sourceId);
+        if (instance.getSource(sourceId)) instance.removeSource(sourceId);
+      });
+    };
+  }, [vehicles, mapRevision]);
+
   // Recovery trips can begin long after Mapbox was constructed. Animate them
   // in their own synchronized effect so a newly tired driver drives away
   // immediately instead of having the marker jump when tickJobs settles it.
@@ -2899,6 +3066,7 @@ export const GameMap = memo(
     previous.cityId === next.cityId &&
     previous.customCities === next.customCities &&
     previous.branches === next.branches &&
+    previous.postalDepots === next.postalDepots &&
     previous.hotels === next.hotels &&
     previous.territoryExpansions === next.territoryExpansions &&
     previous.exploredTerritory === next.exploredTerritory &&
@@ -2910,10 +3078,12 @@ export const GameMap = memo(
     previous.placingTerritory === next.placingTerritory &&
     previous.placingHotel === next.placingHotel &&
     previous.placingHarbour === next.placingHarbour &&
+    previous.placingPostalDepot === next.placingPostalDepot &&
     previous.onBuildStation === next.onBuildStation &&
     previous.onExpandTerritory === next.onExpandTerritory &&
     previous.onBuildHotel === next.onBuildHotel &&
     previous.onPlaceHarbour === next.onPlaceHarbour &&
+    previous.onBuildPostalDepot === next.onBuildPostalDepot &&
     previous.focusedJobId === next.focusedJobId &&
     previous.onOpenJob === next.onOpenJob &&
     previous.onSaveJobPickupRoute === next.onSaveJobPickupRoute &&

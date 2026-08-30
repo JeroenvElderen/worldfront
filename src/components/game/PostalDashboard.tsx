@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getCity } from '../../data/cities'
 import { postVehicleModels } from '../../data/postVehicles'
-import type { Branch, BusinessContract, City, Company, Driver, PostalPerformance, PostalRoute, PostalRoutePlan, PostalServiceLevel, ResearchId, Vehicle } from '../../models/game'
-import { fleetSlotCapacity } from '../../services/companyProgression'
+import type { BusinessContract, City, Company, Driver, PostalDepot, PostalPerformance, PostalRoute, PostalRoutePlan, PostalServiceLevel, Vehicle } from '../../models/game'
 import { createPostalRoute, defaultPostalRoutePlan, postalRouteProgress } from '../../services/postalEngine'
-import { hasResearch } from '../../services/research'
+import { POSTAL_DEPOT_BUILD_COST, POSTAL_DEPOT_MAX_LEVEL, postalDepotCapacity, postalDepotUpgradeCost } from '../../services/postalDepots'
 import { licensePlateForVehicle } from '../../services/vehicleIdentity'
 import { useCurrency } from './CurrencyContext'
 
@@ -16,9 +15,7 @@ interface PostalDashboardProps {
   customCities: City[]
   vehicles: Vehicle[]
   drivers: Driver[]
-  branches: Branch[]
-  completedResearch: ResearchId[]
-  garageLevel: number
+  postalDepots: PostalDepot[]
   contracts: BusinessContract[]
   performance: PostalPerformance
   onClose: () => void
@@ -26,6 +23,8 @@ interface PostalDashboardProps {
   onOpenFleet: () => void
   onOpenCompany: () => void
   onBuyVehicle: (modelId: string) => void
+  onBuildDepot: () => void
+  onUpgradeDepot: (depotId: string) => void
   onStartRoute: (vehicleId: string, plan: PostalRoutePlan) => void
   onAcceptContract: (contractId: string) => void
 }
@@ -58,7 +57,7 @@ const timeRemaining = (arrivesAt: string, now: number) => {
   return minutes < 1 ? '<1 min' : minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
 
-export function PostalDashboard({ company, activeCityId, customCities, vehicles, drivers, branches, completedResearch, garageLevel, contracts, performance, onClose, onShowMap, onOpenFleet, onOpenCompany, onBuyVehicle, onStartRoute, onAcceptContract }: PostalDashboardProps) {
+export function PostalDashboard({ company, activeCityId, customCities, vehicles, drivers, postalDepots, contracts, performance, onClose, onShowMap, onOpenFleet, onOpenCompany, onBuyVehicle, onBuildDepot, onUpgradeDepot, onStartRoute, onAcceptContract }: PostalDashboardProps) {
   const { money } = useCurrency()
   const [view, setView] = useState<PostalView>('overview')
   const postalVehicles = vehicles.filter((vehicle) => vehicle.type === 'post')
@@ -66,12 +65,12 @@ export function PostalDashboard({ company, activeCityId, customCities, vehicles,
   const [plan, setPlan] = useState<PostalRoutePlan>(() => defaultPostalRoutePlan())
   const [now, setNow] = useState(Date.now())
   const selectedVehicle = postalVehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? postalVehicles[0]
+  const selectedDepot = postalDepots.find((depot) => depot.id === selectedVehicle?.postalDepotId) ?? postalDepots.find((depot) => depot.cityId === activeCityId) ?? postalDepots[0]
   const selectedCity = getCity(selectedVehicle?.cityId ?? activeCityId, customCities)
   const activeRounds = postalVehicles.filter((vehicle) => vehicle.postalRoute)
   const availableVans = postalVehicles.filter((vehicle) => vehicle.status === 'available')
-  const researchCapacity = (hasResearch(completedResearch, 'autonomous-operations') ? 4 : 0) + (hasResearch(completedResearch, 'global-network') ? 4 : 0) + (hasResearch(completedResearch, 'regional-hubs') ? branches.length : 0)
-  const fleetCapacity = fleetSlotCapacity(company.level, garageLevel, branches) + researchCapacity
-  const fleetFull = vehicles.length >= fleetCapacity
+  const fleetCapacity = postalDepots.reduce((sum, depot) => sum + postalDepotCapacity(depot), 0)
+  const fleetFull = postalVehicles.length >= fleetCapacity
   const onTimePercent = performance.completedRounds ? Math.round(performance.onTimeRounds / performance.completedRounds * 100) : 100
   const postalContracts = contracts.filter((contract) => contract.category === 'postal')
 
@@ -84,9 +83,9 @@ export function PostalDashboard({ company, activeCityId, customCities, vehicles,
     if (!selectedVehicleId && postalVehicles[0]) setSelectedVehicleId(postalVehicles[0].id)
   }, [postalVehicles, selectedVehicleId])
 
-  const previewRoute = useMemo(() => selectedVehicle && selectedCity
-    ? createPostalRoute(selectedVehicle, selectedCity.coordinates, Date.now(), Math.random, plan)
-    : null, [plan, selectedCity, selectedVehicle])
+  const previewRoute = useMemo(() => selectedVehicle && selectedDepot
+    ? createPostalRoute(selectedVehicle, selectedDepot.coordinates, Date.now(), Math.random, plan)
+    : null, [plan, selectedDepot, selectedVehicle])
   const previewPoints = useMemo(() => previewRoute ? routeSvg(previewRoute) : [], [previewRoute])
   const canDispatch = Boolean(selectedVehicle?.driverId && selectedVehicle.status === 'available' && selectedVehicle.fuel >= 20 && selectedVehicle.condition >= 30)
 
@@ -133,13 +132,14 @@ export function PostalDashboard({ company, activeCityId, customCities, vehicles,
       <div className="postal-quick-grid">
         <button onClick={() => setView('contracts')}><span>▤</span><strong>{postalContracts.filter((contract) => contract.accepted && !contract.completed).length} active tenders</strong><small>View municipal and commercial work</small></button>
         <button onClick={() => setView('fleet')}><span>🚐</span><strong>{postalVehicles.length} postal vans</strong><small>{postalVehicles.filter((vehicle) => !vehicle.driverId).length} still need a driver</small></button>
+        <button onClick={() => setView('fleet')}><span>📮</span><strong>{postalDepots.length} postal depot{postalDepots.length === 1 ? '' : 's'}</strong><small>{postalVehicles.length} / {fleetCapacity} dedicated garage slots used</small></button>
       </div>
     </>}
 
     {view === 'plan' && <div className="postal-planner">
       <div className="postal-planner-controls">
         <div className="postal-section-heading"><div><small>ROUTE BUILDER</small><h3>Configure a delivery round</h3></div></div>
-        {postalVehicles.length ? <>
+        {postalVehicles.length && postalDepots.length ? <>
           <label>Dispatch van<select value={selectedVehicle?.id ?? ''} onChange={(event) => setSelectedVehicleId(event.target.value)}>{postalVehicles.map((vehicle) => <option value={vehicle.id} key={vehicle.id}>{vehicle.name} · {vehicle.status === 'available' ? vehicle.driverId ? 'Ready' : 'Driver required' : 'In service'}</option>)}</select></label>
           <div className="postal-service-picker">{(Object.keys(serviceDetails) as PostalServiceLevel[]).map((service) => <button className={plan.serviceLevel === service ? 'selected' : ''} onClick={() => updatePlan('serviceLevel', service)} key={service}><span>{serviceDetails[service].icon}</span><strong>{serviceDetails[service].label}</strong><small>{serviceDetails[service].description}</small></button>)}</div>
           <label><span>Round duration <b>{plan.plannedHours} hours</b></span><input type="range" min="1" max="8" value={plan.plannedHours} onChange={(event) => updatePlan('plannedHours', Number(event.target.value))} /></label>
@@ -147,7 +147,7 @@ export function PostalDashboard({ company, activeCityId, customCities, vehicles,
           <label><span>Parcel load <b>{plan.loadPercent}% · {Math.round((selectedVehicle?.capacity ?? 0) * plan.loadPercent / 100)} parcels</b></span><input type="range" min="25" max="100" step="5" value={plan.loadPercent} onChange={(event) => updatePlan('loadPercent', Number(event.target.value))} /></label>
           {!selectedVehicle?.driverId && <button className="postal-warning" onClick={onOpenCompany}>⚠ Assign a driver before dispatching <b>Manage staff →</b></button>}
           {selectedVehicle && selectedVehicle.driverId && (selectedVehicle.fuel < 20 || selectedVehicle.condition < 30) && <button className="postal-warning" onClick={onOpenFleet}>⚠ Van requires fuel or maintenance <b>Open Fleet →</b></button>}
-        </> : <div className="postal-empty compact"><span>🚐</span><strong>You need a postal van</strong><small>Buy a purpose-built parcel vehicle to unlock route planning.</small><button onClick={() => setView('fleet')}>Browse postal vans</button></div>}
+        </> : <div className="postal-empty compact"><span>{postalDepots.length ? '🚐' : '📮'}</span><strong>{postalDepots.length ? 'You need a postal van' : 'Build a postal depot first'}</strong><small>{postalDepots.length ? 'Buy a purpose-built parcel vehicle to unlock route planning.' : 'Every postal round starts and finishes at its own dedicated depot.'}</small><button onClick={() => postalDepots.length ? setView('fleet') : onBuildDepot()}>{postalDepots.length ? 'Browse postal vans' : `Place depot · ${money.format(POSTAL_DEPOT_BUILD_COST)}`}</button></div>}
       </div>
 
       <div className="postal-route-preview">
@@ -186,10 +186,11 @@ export function PostalDashboard({ company, activeCityId, customCities, vehicles,
 
     {view === 'fleet' && <>
       <div className="postal-section-heading"><div><small>POSTAL FLEET</small><h3>Vehicles and capacity</h3></div><button onClick={onOpenFleet}>Manage all vehicles</button></div>
-      <div className="postal-capacity"><span><small>GARAGE CAPACITY</small><b>{vehicles.length} / {fleetCapacity} slots</b></span><i><em style={{ width: `${Math.min(100, vehicles.length / fleetCapacity * 100)}%` }} /></i></div>
-      {postalVehicles.length > 0 && <div className="postal-owned-fleet">{postalVehicles.map((vehicle) => { const driver = drivers.find((candidate) => candidate.id === vehicle.driverId); return <article key={vehicle.id}><span>🚐</span><div><strong>{vehicle.name}</strong><small>{licensePlateForVehicle(vehicle)} · {vehicle.capacity} parcels</small><em>{driver?.name ?? '⚠ Driver required'} · {Math.round(vehicle.fuel)}% energy · {Math.round(vehicle.condition)}% condition</em></div><b className={vehicle.status}>{vehicle.postalRoute ? 'Delivering' : vehicle.status === 'available' ? 'Ready' : 'Service'}</b></article> })}</div>}
+      <div className="postal-capacity"><span><small>DEDICATED POSTAL GARAGES</small><b>{postalVehicles.length} / {fleetCapacity} slots</b></span><i><em style={{ width: `${fleetCapacity ? Math.min(100, postalVehicles.length / fleetCapacity * 100) : 0}%` }} /></i></div>
+      <div className="postal-depot-grid">{postalDepots.map((depot) => { const used = postalVehicles.filter((vehicle) => vehicle.postalDepotId === depot.id).length; const capacity = postalDepotCapacity(depot); const upgradeCost = postalDepotUpgradeCost(depot.level); return <article key={depot.id}><span>📮</span><div><small>POSTAL STATION · LEVEL {depot.level}</small><strong>{depot.name}</strong><em>{used} / {capacity} van bays occupied</em><i><b style={{ width: `${Math.min(100, used / capacity * 100)}%` }} /></i></div><button disabled={depot.level >= POSTAL_DEPOT_MAX_LEVEL || company.cash < upgradeCost} onClick={() => onUpgradeDepot(depot.id)}>{depot.level >= POSTAL_DEPOT_MAX_LEVEL ? 'Max level' : `Upgrade · ${money.format(upgradeCost)}`}</button></article> })}<button className="postal-build-depot" disabled={company.cash < POSTAL_DEPOT_BUILD_COST} onClick={onBuildDepot}><span>＋</span><strong>Build another postal depot</strong><small>3 private van bays · {money.format(POSTAL_DEPOT_BUILD_COST)}</small></button></div>
+      {postalVehicles.length > 0 && <div className="postal-owned-fleet">{postalVehicles.map((vehicle) => { const driver = drivers.find((candidate) => candidate.id === vehicle.driverId); const depot = postalDepots.find((candidate) => candidate.id === vehicle.postalDepotId); return <article key={vehicle.id}><span>🚐</span><div><strong>{vehicle.name}</strong><small>{licensePlateForVehicle(vehicle)} · {vehicle.capacity} parcels · {depot?.name ?? 'Depot unassigned'}</small><em>{driver?.name ?? '⚠ Driver required'} · {Math.round(vehicle.fuel)}% energy · {Math.round(vehicle.condition)}% condition</em></div><b className={vehicle.status}>{vehicle.postalRoute ? 'Delivering' : vehicle.status === 'available' ? 'Ready' : 'Service'}</b></article> })}</div>}
       <div className="postal-section-heading marketplace"><div><small>VEHICLE MARKETPLACE</small><h3>Expand postal capacity</h3></div></div>
-      <div className="postal-marketplace">{postVehicleModels.map((model) => <article key={model.id}><div className="postal-van-art"><span>🚐</span><b>{model.powertrain === 'electric' ? 'ELECTRIC' : 'DIESEL'}</b></div><div className="postal-model-copy"><small>{model.brand.toUpperCase()}</small><strong>{model.name}</strong><p>{model.description}</p><div><span><b>{model.capacity}</b><small>PARCELS</small></span><span><b>{model.topSpeedKmh}</b><small>KM/H</small></span><span><b>{model.powertrain === 'electric' ? 'Zero' : 'Standard'}</b><small>TAILPIPE</small></span></div></div><footer><strong>{money.format(model.price)}</strong><button disabled={company.cash < model.price || fleetFull} onClick={() => onBuyVehicle(model.id)}>{fleetFull ? 'Garage full' : company.cash < model.price ? 'Insufficient cash' : 'Buy postal van'}</button></footer></article>)}</div>
+      <div className="postal-marketplace">{postVehicleModels.map((model) => <article key={model.id}><div className="postal-van-art"><span>🚐</span><b>{model.powertrain === 'electric' ? 'ELECTRIC' : 'DIESEL'}</b></div><div className="postal-model-copy"><small>{model.brand.toUpperCase()}</small><strong>{model.name}</strong><p>{model.description}</p><div><span><b>{model.capacity}</b><small>PARCELS</small></span><span><b>{model.topSpeedKmh}</b><small>KM/H</small></span><span><b>{model.powertrain === 'electric' ? 'Zero' : 'Standard'}</b><small>TAILPIPE</small></span></div></div><footer><strong>{money.format(model.price)}</strong><button disabled={company.cash < model.price || fleetFull} onClick={() => onBuyVehicle(model.id)}>{!postalDepots.length ? 'Build a depot first' : fleetFull ? 'Postal garages full' : company.cash < model.price ? 'Insufficient cash' : 'Buy postal van'}</button></footer></article>)}</div>
     </>}
   </section>
 }

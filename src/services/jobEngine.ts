@@ -83,7 +83,7 @@ export function getJobMotionJourney(job: TaxiJob, vehicle: Vehicle) {
     acceptedAt,
     departsAt,
     pickupAt: departsAt + pickupDurationMs,
-    arrivesAt: departsAt + pickupDurationMs + passengerDurationMs,
+    arrivesAt: Math.max(departsAt + pickupDurationMs + passengerDurationMs, (job.rerouteStartedAt ? new Date(job.rerouteStartedAt).getTime() : 0) + (job.rerouteDurationMs ?? 0)),
   }
 }
 

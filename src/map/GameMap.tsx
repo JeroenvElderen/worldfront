@@ -758,10 +758,16 @@ function GameMapView({
   const [containerReady, setContainerReady] = useState(false);
   // Every active taxi route has its own simulated congestion colour.
   // Keep it consistent when a route layer is recreated during a journey.
+  // Each taxi keeps a distinct colour family. Darker shades mean more congestion.
   const trafficColorForJob = (jobId: string): string => {
     const longitude = map.current?.getCenter().lng ?? 0;
     const severity = congestionForJob(jobId, longitude).level;
-    return severity >= 3 ? "#ef4444" : severity === 2 ? "#f97316" : severity === 1 ? "#eab308" : "#22c55e";
+    const vehicleId = jobs.find((job) => job.id === jobId)?.assignedVehicleId ?? jobId;
+    const hash = [...vehicleId].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0);
+    const hues = [325, 210, 275, 175, 35, 145, 15, 255];
+    const hue = hues[hash % hues.length];
+    const lightness = [72, 59, 45, 29][severity];
+    return `hsl(${hue}, 88%, ${lightness}%)`;
   };
   useEffect(() => {
     const instance = map.current;

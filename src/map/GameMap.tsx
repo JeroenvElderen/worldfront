@@ -240,10 +240,14 @@ const createRouteMotion = (
       index = crossing.endIndex;
       continue;
     }
-    const speed = Math.min(
-      topSpeedKmh,
-      speedLimitKmh(route.speedLimits[index]) ?? fallbackSpeedKmh,
-    );
+    // Respect explicit posted limits; where the provider has no limit,
+    // use a conservative 50 km/h rather than the vehicle's maximum speed.
+    // Vehicle specifications are an upper bound, never a target speed.
+    const postedLimit = speedLimitKmh(route.speedLimits[index]);
+    const speed = Math.max(1, Math.min(
+      Math.max(1, topSpeedKmh),
+      postedLimit ?? Math.min(fallbackSpeedKmh, 50),
+    ));
     phases.push({
       duration: lengths[index] / Math.max(1, speed),
       fromDistance: cumulativeLengths[index],

@@ -194,7 +194,7 @@ const speedLimitKmh = (limit: RouteSpeedLimit | undefined) => {
 
 const createRouteMotion = (
   route: RouteDetails,
-  fallbackSpeedKmh: number,
+  _fallbackSpeedKmh: number,
   topSpeedKmh: number,
 ) => {
   const lengths = routeLengths(route.coordinates);
@@ -779,32 +779,6 @@ function GameMapView({
       window.clearInterval(timer);
     };
   }, [jobs, cityId, mapRevision, containerReady]);
-
-  // Use a visible night basemap rather than a subtle canvas brightness filter.
-  // Keep the current map instance, sources and mission layers intact.
-  useEffect(() => {
-    const instance = map.current;
-    if (!instance || !containerReady) return;
-    const updateLighting = () => {
-      const longitude = instance.getCenter().lng;
-      const localHour = ((Date.now() / 3_600_000 + longitude / 15) % 24 + 24) % 24;
-      const isNight = localHour < 7 || localHour >= 19;
-      const canvas = instance.getCanvas();
-      canvas.style.filter = isNight
-        ? "brightness(0.48) saturate(0.65) contrast(1.15)"
-        : "none";
-      canvas.style.transition = "filter 2s ease";
-    };
-    instance.on("moveend", updateLighting);
-    instance.on("load", updateLighting);
-    const timer = window.setInterval(updateLighting, 30_000);
-    updateLighting();
-    return () => {
-      instance.off("moveend", updateLighting);
-      instance.off("load", updateLighting);
-      window.clearInterval(timer);
-    };
-  }, [mapRevision, containerReady]);
 
   // Null is a resolved fallback too. Remember it so a location with no mapped
   // boundary does not trigger another reverse-geocode request after each trip.

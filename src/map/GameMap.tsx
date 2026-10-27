@@ -1053,10 +1053,6 @@ function GameMapView({
       new mapboxgl.AttributionControl({ compact: true }),
       "bottom-right",
     );
-    instance.addControl(
-      new mapboxgl.NavigationControl({ showCompass: false }),
-      "bottom-right",
-    );
     const canvas = instance.getCanvas();
     const handleContextLost = (event: Event) => {
       event.preventDefault();

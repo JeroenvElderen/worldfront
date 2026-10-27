@@ -1671,7 +1671,7 @@ function GameMapView({
                 void resolveRoadRoute(rerouteFrom, jobDestination(job), abortController.signal)
                   .then((detour) => {
                     if (!detour || abortController.signal.aborted || map.current !== instance) return;
-                    const started = new Date().toISOString();
+                    const started = new Date(getJobMotionTime(job, Date.now())).toISOString();
                     rerouteStartedAt = new Date(started).getTime();
                     passengerRoute = detour;
                     passengerMotion = createRouteMotion(detour, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130);

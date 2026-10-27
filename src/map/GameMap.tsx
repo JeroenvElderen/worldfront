@@ -2404,12 +2404,38 @@ function GameMapView({
       if (!start) continue;
       const taxiSourceId = vehicleSourceId(vehicle.id);
 
-      // Already running: don't touch its Mapbox route again.
-      if (liveJobIds.current.has(job.id)) continue;
-
       const routeSourceId = jobRouteSourceId(job.id);
 
-      instance.addSource(routeSourceId, {
+      // Automatic dispatch can accept a job before its layers are mounted.
+      // Restore missing route layers after style reloads without restarting
+      // an already running journey animation.
+      if (liveJobIds.current.has(job.id)) {
+        if (!instance.getSource(routeSourceId)) {
+          instance.addSource(routeSourceId, {
+            type: "geojson",
+            data: lineString(job.pickupRouteCoordinates?.length
+              ? job.pickupRouteCoordinates
+              : [start, jobPickup(job), jobDestination(job)]),
+          });
+        }
+        if (!instance.getLayer(routeSourceId)) {
+          instance.addLayer({
+            id: routeSourceId,
+            type: "line",
+            source: routeSourceId,
+            layout: { "line-cap": "round", "line-join": "round" },
+            paint: {
+              "line-color": missionColor(job.id),
+              "line-width": 2,
+              "line-opacity": 0.7,
+            },
+          }, instance.getLayer(taxiSourceId) ? taxiSourceId : undefined);
+        }
+        if (instance.getLayer(taxiSourceId)) instance.moveLayer(routeSourceId, taxiSourceId);
+        continue;
+      }
+
+      if (!instance.getSource(routeSourceId)) instance.addSource(routeSourceId, {
         type: "geojson",
         data: lineString([
           start,

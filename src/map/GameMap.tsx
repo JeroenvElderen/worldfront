@@ -24,6 +24,7 @@ import type {
 import {
   distanceKmBetween,
   getJobMotionJourney,
+  getJobJourney,
   SIMULATED_MINUTE_MS,
   getJobMotionTime,
   jobDestination,
@@ -2295,7 +2296,7 @@ function GameMapView({
     // Keep accepted calls and the offer currently being previewed legible
     // without cluttering the map with every dispatch-board offer.
     const visibleJobs = jobs.filter(
-      (job) => job.status === "accepted" || job.id === focusedJobId,
+      (job) => job.status !== "complete",
     );
     const visibleIds = new Set(visibleJobs.map((job) => job.id));
 
@@ -2321,8 +2322,23 @@ function GameMapView({
     for (const job of visibleJobs) {
       const sourceId = `pickup-${job.id}`;
       const color = missionColor(job.id);
-      if (pickupJobIds.current.has(job.id)) {
+      if (pickupJobIds.current.has(job.id) && instance.getLayer(sourceId) && instance.getLayer(`destination-${job.id}`)) {
         continue;
+      }
+      // A style reload can remove Mapbox layers without clearing React refs.
+      if (pickupJobIds.current.has(job.id)) {
+        const old = pickupHandlers.current.get(job.id);
+        if (old) {
+          instance.off("mouseenter", sourceId, old.enter);
+          instance.off("mouseleave", sourceId, old.leave);
+          instance.off("click", sourceId, old.click);
+        }
+        for (const id of [sourceId, `destination-${job.id}`]) {
+          if (instance.getLayer(id)) instance.removeLayer(id);
+          if (instance.getSource(id)) instance.removeSource(id);
+        }
+        pickupJobIds.current.delete(job.id);
+        pickupHandlers.current.delete(job.id);
       }
       instance.addSource(sourceId, {
         type: "geojson",
@@ -2809,6 +2825,30 @@ function GameMapView({
     onJobFerryCrossingComplete,
     onTaxiArrived,
   ]);
+
+  // Mission markers are driven by mission lifecycle, never by route availability.
+  // Pickup remains until the actual pickup deadline (including ferry delays);
+  // destination remains until the mission is completed and removed above.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    const synchronizePickupVisibility = () => {
+      if (!instance.isStyleLoaded()) return;
+      const now = Date.now();
+      for (const job of jobs) {
+        if (job.status === "complete") continue;
+        const layerId = `pickup-${job.id}`;
+        if (!instance.getLayer(layerId)) continue;
+        const vehicle = vehicles.find((candidate) => candidate.id === job.assignedVehicleId);
+        const collected = job.status === "accepted" && vehicle != null &&
+          now >= getJobJourney(job, vehicle).pickupAt;
+        instance.setLayoutProperty(layerId, "visibility", collected ? "none" : "visible");
+      }
+    };
+    synchronizePickupVisibility();
+    const timer = window.setInterval(synchronizePickupVisibility, 1000);
+    return () => window.clearInterval(timer);
+  }, [jobs, vehicles, mapRevision]);
 
   // Postal rounds can be dispatched after the persistent map was created.
   // Keep their marker at the depot until a ferry-free road route is ready;

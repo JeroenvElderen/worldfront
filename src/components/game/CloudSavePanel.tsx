@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { loadCompanyFromCloud, saveCompanyToCloud, signInWithEmail, signUpWithEmail } from "../../services/cloudSaves";
 import { useGameStore } from "../../stores/gameStore";
@@ -15,13 +15,47 @@ export function CloudSavePanel() {
   const [password, setPassword] = useState("");
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [autoSave, setAutoSave] = useState(false);
+  const [lastSaved, setLastSaved] = useState<string | null>(null);
+  const saving = useRef(false);
   const [message, setMessage] = useState("");
   useEffect(() => {
     if (!supabase) return;
     void supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? null));
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => setUserEmail(session?.user?.email ?? null));
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => { setUserEmail(session?.user?.email ?? null); setAutoSave(false); });
     return () => data.subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    if (!autoSave || !userEmail) return;
+    let stopped = false;
+    let previous = "";
+    const tick = async () => {
+      if (stopped || saving.current) return;
+      const current = useGameStore.getState();
+      if (!current.hasHydrated || !current.company) return;
+      const snapshot = saveSnapshot();
+      const serialized = JSON.stringify(snapshot);
+      if (serialized === previous) return;
+      saving.current = true;
+      try {
+        await saveCompanyToCloud(snapshot);
+        if (!stopped) { previous = serialized; setLastSaved(new Date().toLocaleTimeString()); }
+      } catch (error) {
+        if (!stopped) { setAutoSave(false); setMessage(error instanceof Error ? error.message : "Automatic backup failed"); }
+      } finally { saving.current = false; }
+    };
+    const timer = window.setInterval(() => void tick(), 45_000);
+    void tick();
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [autoSave, userEmail]);
+  const enableAutoSave = async () => {
+    const current = useGameStore.getState();
+    if (!current.hasHydrated || !current.company) throw new Error("Create or load a company first.");
+    const existing = await loadCompanyFromCloud();
+    if (existing && !window.confirm("A cloud save already exists. Enable automatic backup and REPLACE that cloud save with this device's current progress? Restore it first if you want to keep it.")) return;
+    setAutoSave(true);
+    setMessage("Automatic backup enabled for this session (every 45 seconds).");
+  };
   const execute = async (operation: () => Promise<void>) => {
     setBusy(true); setMessage("");
     try { await operation(); } catch (error) { setMessage(error instanceof Error ? error.message : "Cloud operation failed"); }
@@ -33,13 +67,16 @@ export function CloudSavePanel() {
       <strong>WorldFront cloud saves</strong>
       {!supabase ? <p>Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel.</p> : userEmail ? <>
         <p>Signed in: {userEmail}</p>
-        <button disabled={busy} onClick={() => void execute(async () => { await saveCompanyToCloud(saveSnapshot()); setMessage("Cloud backup saved."); })}>Save to cloud</button>
+        <button disabled={busy} onClick={() => void execute(async () => { await saveCompanyToCloud(saveSnapshot()); setLastSaved(new Date().toLocaleTimeString()); setMessage("Cloud backup saved."); })}>Save to cloud</button>
+        <button disabled={busy} onClick={() => void execute(async () => { if (autoSave) { setAutoSave(false); setMessage("Automatic backup disabled."); } else await enableAutoSave(); })}>{autoSave ? "Disable auto backup" : "Enable auto backup"}</button>
+        {lastSaved && <p>Last backup: {lastSaved}</p>}
         <button disabled={busy} onClick={() => void execute(async () => {
           const saved = await loadCompanyFromCloud();
           if (!saved || !saved.save_data || typeof saved.save_data !== "object" || Array.isArray(saved.save_data)) { setMessage("No valid cloud save found."); return; }
           const state = saved.save_data as Record<string, unknown>;
           if (!("company" in state) || !("vehicles" in state) || !("jobs" in state)) throw new Error("Cloud save has an invalid format.");
           if (!window.confirm("Replace your current local game with the cloud save? Your current local progress will be overwritten. Back it up first.")) return;
+          setAutoSave(false);
           useGameStore.setState(state as Partial<ReturnType<typeof useGameStore.getState>>);
           setMessage("Cloud save restored. Refresh the page to reload map layers.");
         })}>Restore cloud save</button>
@@ -51,7 +88,7 @@ export function CloudSavePanel() {
         <button disabled={busy} onClick={() => void execute(async () => { await signUpWithEmail(email, password); setMessage("Account created. Check your email if confirmation is enabled."); })}>Register</button>
       </>}
       {message && <p role="status">{message}</p>}
-      <p style={{ opacity: 0.7 }}>Manual backups only. Local progress remains your primary save.</p>
+      <p style={{ opacity: 0.7 }}>Local progress remains your primary save. Auto backup is opt-in and stops when you sign out or reload.</p>
     </section>}
   </div>;
 }

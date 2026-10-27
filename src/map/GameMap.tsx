@@ -731,7 +731,7 @@ function GameMapView({
       (incident) => !incident.resolved && incident.cityId === cityId,
     );
     activeClosurePoints = trafficIncidents
-      .filter((incident) => !incident.resolved && incident.kind === "closure" && new Date(incident.expiresAt).getTime() > Date.now())
+      .filter((incident) => !incident.resolved && incident.kind === "closure" && new Date(incident.expiresAt).getTime() > Date.now() && !closureGeometryCache.has(incident.id))
       .map((incident) => incident.coordinates);
     const activeVehicles = vehicleIncidents
       .filter((incident) => !incident.resolved)
@@ -752,6 +752,9 @@ function GameMapView({
         const segment = await resolveClosedRoadSegment(incident.coordinates);
         if (closureLookupDisposed || !segment) return;
         closureGeometryCache.set(incident.id, segment);
+        activeClosurePoints = closureIncidents
+          .filter((entry) => !closureGeometryCache.has(entry.id))
+          .map((entry) => entry.coordinates);
         activeClosedRoadSegments = closureIncidents
           .map((entry) => closureGeometryCache.get(entry.id))
           .filter((entry): entry is ClosedRoadSegment => Boolean(entry));

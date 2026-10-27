@@ -55,10 +55,10 @@ type TilequeryFeature = {
   properties?: Record<string, unknown>;
   geometry?: { type?: string; coordinates?: unknown };
 }
-const tilequery = async (coordinates: Coordinates, layers: string, radius: number, signal?: AbortSignal): Promise<TilequeryFeature[]> => {
+const tilequery = async (coordinates: Coordinates, layers: string, radius: number, geometry: 'linestring' | 'polygon', signal?: AbortSignal): Promise<TilequeryFeature[]> => {
   if (!mapboxAccessToken) return []
   const query = new URLSearchParams({
-    layers, geometry: 'point', radius: String(radius), limit: '25',
+    layers, geometry, radius: String(radius), limit: '25',
     access_token: mapboxAccessToken,
   })
   const response = await fetch(
@@ -72,14 +72,17 @@ const tilequery = async (coordinates: Coordinates, layers: string, radius: numbe
 
 const isSafePassengerStop = async (coordinates: Coordinates, signal?: AbortSignal): Promise<boolean> => {
   if (!mapboxAccessToken) return false
+  // Require nearby buildings so remote mountain roads and forest trails are
+  // not treated as passenger pickup points merely because they are drivable.
   // Streets-v8 uses road.class, road.type, and landuse.class. Tilequery may
   // return several overlapping features, so reject any motorway/trunk hit.
-  const [roads, landuse, water] = await Promise.all([
-    tilequery(coordinates, 'road', STOP_TILEQUERY_RADIUS_M, signal),
-    tilequery(coordinates, 'landuse', 0, signal),
+  const [roads, landuse, buildings, water] = await Promise.all([
+    tilequery(coordinates, 'road', STOP_TILEQUERY_RADIUS_M, 'linestring', signal),
+    tilequery(coordinates, 'landuse', 0, 'polygon', signal),
+    tilequery(coordinates, 'building', 200, 'polygon', signal),
     isWaterCoordinate(coordinates, signal),
   ])
-  if (water) return false
+  if (water || !buildings.length) return false
   const roadClasses = roads.map((feature) => String(feature.properties?.class ?? '').toLowerCase())
   if (!roadClasses.length || roadClasses.some((roadClass) => FORBIDDEN_ROAD_CLASSES.has(roadClass))) return false
   // Allow only ordinary vehicle-accessible roads rather than accepting an

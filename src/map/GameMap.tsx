@@ -39,7 +39,6 @@ import {
   taxiDiscoveryTerritory,
   villageTerritory,
   VILLAGE_TERRITORY_RADIUS_KM,
-  STARTING_TERRITORY_RADIUS_KM,
 } from "../services/territoryGeometry";
 import { cancelMapFrame, scheduleMapFrame } from "../services/frameScheduler";
 import {
@@ -932,7 +931,7 @@ function GameMapView({
   useEffect(() => {
     let active = true;
     const centers = [
-      ...branches.slice(1).flatMap((station) => {
+      ...branches.flatMap((station) => {
         const coordinates =
           station.coordinates ??
           getCity(station.cityId, customCities)?.coordinates;
@@ -942,7 +941,7 @@ function GameMapView({
         .filter(
           (area) =>
             area.source !== "taxi-discovery" &&
-            area.source !== "ferry-discovery" && !area.regionId,
+            area.source !== "ferry-discovery",
         )
         .map(({ id, coordinates }) => ({ id, coordinates })),
     ];
@@ -1202,7 +1201,6 @@ function GameMapView({
                 currentPosition = ferryPosition.position;
                 ferryState = ferryPosition.state;
               }
-              // Discover only road movement, never ferry crossings or unresolved routes.
               (
                 instance.getSource(sourceId) as
                   | mapboxgl.GeoJSONSource
@@ -1332,7 +1330,6 @@ function GameMapView({
                 currentPosition = ferryPosition.position;
                 ferryState = ferryPosition.state;
               }
-              // Discover only road movement, never ferry crossings or unresolved routes.
               (
                 instance.getSource(sourceId) as
                   | mapboxgl.GeoJSONSource
@@ -1921,17 +1918,16 @@ function GameMapView({
       const data = featureCollection(features);
       const ownedTerritories = [
         ...stationCoordinates.map(
-          ({ station, coordinates }, index) =>
-            index === 0
-              ? villageTerritory(station.id, coordinates, STARTING_TERRITORY_RADIUS_KM)
-              : realTerritories[station.id] ?? villageTerritory(
-                  station.id,
-                  coordinates,
-                  VILLAGE_TERRITORY_RADIUS_KM,
-                ),
+          ({ station, coordinates }) =>
+            realTerritories[station.id] ??
+            villageTerritory(
+              station.id,
+              coordinates,
+              VILLAGE_TERRITORY_RADIUS_KM,
+            ),
         ),
         ...territoryExpansions
-          .filter((expansion) => expansion.source !== "taxi-discovery" && !expansion.regionId)
+          .filter((expansion) => expansion.source !== "taxi-discovery")
           .map(
             (expansion) =>
               expansion.source === "ferry-discovery"
@@ -1962,17 +1958,6 @@ function GameMapView({
         ...ownedTerritories,
         ...(liveExploredTerritory ? [liveExploredTerritory] : []),
       ]);
-      // Region ownership is a separate overlay; it never opens the exploration fog.
-      const administrativeBorders = featureCollection(
-        territoryExpansions.filter(area => area.regionId && area.regionGeometry)
-          .map(area => ({
-            type: "Feature" as const,
-            properties: { id: area.regionId, name: area.regionName },
-            geometry: area.regionGeometry!,
-          })),
-      );
-      const administrativeSource = instance.getSource("administrative-ownership") as mapboxgl.GeoJSONSource | undefined;
-      if (administrativeSource) administrativeSource.setData(administrativeBorders);
       const coverageData = featureCollection(
         unlockedTerritory ? [unlockedTerritory] : [],
       );
@@ -2027,13 +2012,6 @@ function GameMapView({
           "line-width": 2,
           "line-opacity": 0.85,
         },
-      });
-      instance.addSource("administrative-ownership", { type: "geojson", data: administrativeBorders });
-      instance.addLayer({
-        id: "administrative-ownership-line",
-        type: "line",
-        source: "administrative-ownership",
-        paint: { "line-color": "#fbbf24", "line-width": 2, "line-opacity": 0.85, "line-dasharray": [3, 2] },
       });
       instance.addSource("depot-network", { type: "geojson", data });
       instance.addLayer({
@@ -2713,6 +2691,7 @@ function GameMapView({
             );
           }
         }
+        recordLiveDiscovery(vehicle.id, currentPosition);
         (instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(
           movingVehiclePoint(taxiSourceId, currentPosition, {
             ferryStatus:

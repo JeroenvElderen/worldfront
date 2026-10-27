@@ -60,6 +60,24 @@ export function jobTrafficFactor(job: TaxiJob) {
   return [1, 0.75, 0.5, 0.25][level]
 }
 
+/** Travel hours calculated from the road geometry and its posted speed limits. */
+function routeTravelHours(job: TaxiJob, vehicle: Vehicle): number | null {
+  const points = job.routeCoordinates
+  const limits = job.routeSpeedLimits
+  if (!points || points.length < 2 || !limits?.length) return null
+  const traffic = jobTrafficFactor(job)
+  let hours = 0
+  for (let i = 0; i < points.length - 1; i++) {
+    const limit = limits[i]
+    const posted = limit && 'speed' in limit
+      ? limit.speed * (limit.unit === 'mph' ? 1.609344 : 1)
+      : 30
+    const speed = Math.max(1, Math.min(vehicle.topSpeedKmh ?? 130, posted) * traffic)
+    hours += distanceKmBetween(points[i], points[i + 1]) / speed
+  }
+  return hours
+}
+
 /** Base road-motion timings. Ferry timing offsets are applied separately. */
 export function getJobMotionJourney(job: TaxiJob, vehicle: Vehicle) {
   const acceptedAt = job.acceptedAt ? new Date(job.acceptedAt).getTime() : Date.now()
@@ -83,7 +101,8 @@ export function getJobMotionJourney(job: TaxiJob, vehicle: Vehicle) {
   )
   const passengerDurationMs = Math.max(
     3_000,
-    (job.distanceKm / trafficSpeed) * 60 * SIMULATED_MINUTE_MS / speedMultiplier,
+    (routeTravelHours(job, vehicle) ?? (job.distanceKm / trafficSpeed)) *
+      60 * SIMULATED_MINUTE_MS / speedMultiplier,
   )
 
   return {

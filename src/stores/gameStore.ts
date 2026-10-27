@@ -21,7 +21,7 @@ import { canResearch, hasResearch, researchNodes } from '../services/research'
 import { calculateJobOutcome, createDriverCandidates, createGoals, energyMultiplier, jobOfferCapacity, pickupSpeedMultiplier, updateGoals, upgradeAppliesToVehicle, upgradeDetails, upgradeFareMultiplier, vehicleCanTakeJob, vehicleComfortScore } from '../services/earlyGameEngine'
 import { cityDemandMultiplier, createCityEconomy, HOTEL_PURCHASE_COST, hotelUpgradeCost, pendingHotelRevenue } from '../services/hotelEconomy'
 import { competitorGrowth, createCompetitors, createWorldCondition, defaultBrandStrategy, fareMultiplier, marketingDemandMultiplier } from '../services/worldSystems'
-import { compactLegacyDiscoveries, extendExploredTerritory, isInsideVillageTerritories, type VillageTerritoryCenter } from '../services/territoryGeometry'
+import { STARTING_TERRITORY_RADIUS_KM, compactLegacyDiscoveries, extendExploredTerritory, isInsideVillageTerritories, type VillageTerritoryCenter } from '../services/territoryGeometry'
 import { createTrafficIncident, trafficImpactForJob } from '../services/operationsIncidents'
 import { cleaningDetails, createAutomationEmployee, createCustomerReview, createStarterDispatcher, createStarterMechanic, maintenanceAdvisories, maintenanceQuote, recruitDispatcher, recruitMechanic, tireDetails, tireWearForDistance } from '../services/fleetOperations'
 import { ferryCrossingsHaveActiveService } from '../services/ferryService'
@@ -144,7 +144,7 @@ const postalVehiclesAtDepot = (state: Pick<GameState, 'vehicles'>, depotId: stri
 const availablePostalDepot = (state: Pick<GameState, 'postalDepots' | 'vehicles'>, cityId?: string | null) =>
   (state.postalDepots ?? []).find((depot) => (!cityId || depot.cityId === cityId) && postalVehiclesAtDepot(state, depot.id).length < postalDepotCapacity(depot))
 const unlockedTerritoryCenters = (state: Pick<GameState, 'branches' | 'territoryExpansions'>): VillageTerritoryCenter[] => [
-  ...state.branches.flatMap((branch) => branch.coordinates ? [{ id: branch.id, coordinates: branch.coordinates }] : []),
+  ...state.branches.flatMap((branch, index) => branch.coordinates ? [{ id: branch.id, coordinates: branch.coordinates, ...(index === 0 ? { radiusKm: STARTING_TERRITORY_RADIUS_KM } : {}) }] : []),
   ...(state.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery').map(({ id, coordinates, routeCoordinates, radiusKm, source }) => ({
     id,
     coordinates,

@@ -39,6 +39,7 @@ import {
   taxiDiscoveryTerritory,
   villageTerritory,
   VILLAGE_TERRITORY_RADIUS_KM,
+  STARTING_TERRITORY_RADIUS_KM,
 } from "../services/territoryGeometry";
 import { cancelMapFrame, scheduleMapFrame } from "../services/frameScheduler";
 import {
@@ -931,7 +932,7 @@ function GameMapView({
   useEffect(() => {
     let active = true;
     const centers = [
-      ...branches.flatMap((station) => {
+      ...branches.slice(1).flatMap((station) => {
         const coordinates =
           station.coordinates ??
           getCity(station.cityId, customCities)?.coordinates;
@@ -1924,13 +1925,14 @@ function GameMapView({
       const data = featureCollection(features);
       const ownedTerritories = [
         ...stationCoordinates.map(
-          ({ station, coordinates }) =>
-            realTerritories[station.id] ??
-            villageTerritory(
-              station.id,
-              coordinates,
-              VILLAGE_TERRITORY_RADIUS_KM,
-            ),
+          ({ station, coordinates }, index) =>
+            index === 0
+              ? villageTerritory(station.id, coordinates, STARTING_TERRITORY_RADIUS_KM)
+              : realTerritories[station.id] ?? villageTerritory(
+                  station.id,
+                  coordinates,
+                  VILLAGE_TERRITORY_RADIUS_KM,
+                ),
         ),
         ...territoryExpansions
           .filter((expansion) => expansion.source !== "taxi-discovery")

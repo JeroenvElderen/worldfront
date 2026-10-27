@@ -4,6 +4,7 @@ import type { Coordinates, TerritoryFeature, TerritoryGeometry } from '../models
 
 const EARTH_KM_PER_LATITUDE_DEGREE = 110.574
 export const VILLAGE_TERRITORY_RADIUS_KM = 6
+export const STARTING_TERRITORY_RADIUS_KM = 1
 // Reveal only a narrow corridor beside roads actually travelled.
 // This radius applies to live taxi exploration and completed-trip backfill;
 // manually purchased village territory retains its separate 6 km radius.
@@ -154,7 +155,7 @@ export const compactLegacyDiscoveries = (
 export const isInsideVillageTerritories = (coordinates: Coordinates, centers: VillageTerritoryCenter[]) =>
   centers.some((center) => booleanPointInPolygon(
     coordinates,
-    villageTerritory(center.id, center.coordinates, VILLAGE_TERRITORY_RADIUS_KM),
+    villageTerritory(center.id, center.coordinates, center.radiusKm ?? VILLAGE_TERRITORY_RADIUS_KM),
   ))
 
 /**
@@ -172,8 +173,10 @@ export const resolveVillageTerritories = async (centers: VillageTerritoryCenter[
         ? center.routeCoordinates && center.routeCoordinates.length >= 2
           ? taxiDiscoveryRouteTerritory(center.id, center.routeCoordinates, center.radiusKm)
           : taxiDiscoveryTerritory(center.id, center.coordinates, center.radiusKm)
-      : await realVillageTerritory(center.id, center.coordinates)
-        ?? villageTerritory(center.id, center.coordinates, VILLAGE_TERRITORY_RADIUS_KM)))
+      : center.radiusKm !== undefined
+        ? villageTerritory(center.id, center.coordinates, center.radiusKm)
+        : await realVillageTerritory(center.id, center.coordinates)
+          ?? villageTerritory(center.id, center.coordinates, VILLAGE_TERRITORY_RADIUS_KM)))
 
 /** True when a location belongs to one of the supplied map territory features. */
 export const isInsideTerritoryFeatures = (coordinates: Coordinates, territories: TerritoryFeature[]) =>

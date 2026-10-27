@@ -418,31 +418,15 @@ const resolveRoadRoute: typeof resolveBaseRoadRoute = (
 if (typeof window !== "undefined") {
   window.addEventListener("pagehide", persistTaxiPositions);
 }
-// Throttle geometry unions and indexedDB writes; only actual taxi travel
-// contributes to discovery, never a proposed route.
-const liveDiscoveryCheckpoints = new Map<string, { position: Coordinates; at: number }>();
-const recordLiveDiscovery = (vehicleId: string, position: Coordinates) => {
+// Capture observed taxi animation positions for the active job. Exploration
+// is not changed here: recorded checkpoints are committed after drop-off.
+const journeyCheckpointTimes = new Map<string, number>();
+const recordJourneyCheckpoint = (jobId: string, vehicleId: string, position: Coordinates) => {
+  const key = `${vehicleId}:${jobId}`;
   const now = Date.now();
-  const previous = liveDiscoveryCheckpoints.get(vehicleId);
-  if (!previous) {
-    liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
-    return;
-  }
-  if (now - previous.at < 1_500) return;
-  const distance = distanceKmBetween(previous.position, position);
-  if (distance < 0.015) return;
-  // Avoid connecting teleportation, city switching, or stale positions with
-  // a fictional discovered road across the map.
-  if (distance > 10) {
-    liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
-    return;
-  }
-  liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
-  try {
-    useGameStore.getState().discoverLiveRoute([previous.position, position]);
-  } catch (error) {
-    console.warn("[exploration] Live territory update failed", error);
-  }
+  if (now - (journeyCheckpointTimes.get(key) ?? 0) < 1000) return;
+  journeyCheckpointTimes.set(key, now);
+  useGameStore.getState().recordJourneyPoint(jobId, vehicleId, position);
 };
 const TAXI_SVG_IMAGE = "worldfront-taxi-svg";
 const TAXI_SVG_URL = `${import.meta.env.BASE_URL}vehicles/taxi-topview.svg`;
@@ -1709,7 +1693,7 @@ function GameMapView({
               }),
             );
             recordTaxiPosition(vehicle.id, currentPosition);
-            recordLiveDiscovery(vehicle.id, currentPosition);
+            if (!ferryState) recordJourneyCheckpoint(job.id, vehicle.id, currentPosition);
             // Check active OSM closure edges while driving. Persist the new route
             // and its clock anchor so a page refresh resumes the same detour.
             if (!pickingUp && !ferryState && !reroutePending &&

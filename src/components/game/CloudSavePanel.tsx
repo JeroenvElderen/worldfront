@@ -21,11 +21,12 @@ export function CloudSavePanel() {
   const [lastBackup, setLastBackup] = useState<string | null>(null);
   const backupInProgress = useRef(false);
   const cloudSavedAt = useRef(0);
+  const cloudRevision = useRef<number | null>(null);
   const [message, setMessage] = useState("");
   useEffect(() => {
     if (!supabase) return;
     void supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? null));
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => { setUserEmail(session?.user?.email ?? null); if (!session) setAutoBackup(false); });
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => { setUserEmail(session?.user?.email ?? null); if (!session) { setAutoBackup(false); cloudRevision.current = null; } });
     return () => data.subscription.unsubscribe();
   }, []);
   useEffect(() => {
@@ -40,7 +41,8 @@ export function CloudSavePanel() {
       if (serialized === previousSnapshot) return;
       backupInProgress.current = true;
       try {
-        await saveCompanyToCloud(snapshot);
+        if (cloudRevision.current === null) throw new Error("Cloud revision unknown. Restart automatic backup.");
+        cloudRevision.current = await saveCompanyToCloud(snapshot, cloudRevision.current);
         cloudSavedAt.current = Date.now();
         if (!cancelled) { previousSnapshot = serialized; setLastBackup(new Date().toLocaleTimeString()); }
       } catch (error) {
@@ -60,7 +62,7 @@ export function CloudSavePanel() {
         const remote = await loadCompanyFromCloud();
         if (disposed || !remote) return;
         const timestamp = new Date(remote.saved_at).getTime();
-        if (Number.isFinite(timestamp) && timestamp > cloudSavedAt.current + 2_000) {
+        if (remote.revision !== cloudRevision.current || (Number.isFinite(timestamp) && timestamp > cloudSavedAt.current + 2_000)) {
           setAutoBackup(false);
           setMessage("Another device updated this cloud save. Automatic backup paused to prevent overwriting it. Restore or manually save after reviewing your progress.");
         }
@@ -74,6 +76,7 @@ export function CloudSavePanel() {
     if (!game.hasHydrated || !game.company) throw new Error("Load a company before enabling backup.");
     const previous = await loadCompanyFromCloud();
     cloudSavedAt.current = previous ? new Date(previous.saved_at).getTime() : 0;
+    cloudRevision.current = previous?.revision ?? 0;
     if (previous && !window.confirm("A cloud save already exists. Replace it with this device's progress and enable automatic backup?")) return;
     setAutoBackup(true);
     setMessage("Automatic Supabase backup enabled for this session.");
@@ -89,7 +92,7 @@ export function CloudSavePanel() {
       <strong>WorldFront cloud saves</strong>
       {!supabase ? <p>Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel.</p> : userEmail ? <>
         <p>Signed in: {userEmail}</p>
-        <button disabled={busy} onClick={() => void execute(async () => { await saveCompanyToCloud(saveSnapshot()); cloudSavedAt.current = Date.now(); setLastBackup(new Date().toLocaleTimeString()); setMessage("Cloud backup saved."); })}>Save to cloud</button>
+        <button disabled={busy} onClick={() => void execute(async () => { const current = await loadCompanyFromCloud(); if (current && current.revision !== cloudRevision.current && !window.confirm("Cloud save has changed or has not been loaded in this session. Replace the remote progress?")) return; cloudRevision.current = await saveCompanyToCloud(saveSnapshot(), current?.revision ?? 0); cloudSavedAt.current = Date.now(); setLastBackup(new Date().toLocaleTimeString()); setMessage("Cloud backup saved."); })}>Save to cloud</button>
         <button disabled={busy} onClick={() => void execute(async () => { if (autoBackup) { setAutoBackup(false); setMessage("Automatic backup stopped."); } else await startAutoBackup(); })}>{autoBackup ? "Stop auto backup" : "Start auto backup"}</button>
         {lastBackup && <p>Last cloud backup: {lastBackup}</p>}
         <button disabled={busy} onClick={() => void execute(async () => {
@@ -99,6 +102,8 @@ export function CloudSavePanel() {
           if (!("company" in state) || !("vehicles" in state) || !("jobs" in state)) throw new Error("Cloud save has an invalid format.");
           if (!window.confirm("Replace your current local game with the cloud save? Your current local progress will be overwritten. Back it up first.")) return;
           setAutoBackup(false);
+          cloudRevision.current = saved.revision;
+          cloudSavedAt.current = new Date(saved.saved_at).getTime();
           useGameStore.setState(state as Partial<ReturnType<typeof useGameStore.getState>>);
           setMessage("Cloud save restored. Refresh the page to reload map layers.");
         })}>Restore cloud save</button>

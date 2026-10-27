@@ -4,7 +4,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { featureCollection, lineString, point } from "@turf/helpers";
 import { mapboxAccessToken } from "../config/mapbox";
 import { getCity, worldOverview } from "../data/cities";
-import { taxiModels } from "../data/taxis";
+import { taxiModels, taxiTripSpeedMultiplier } from "../data/taxis";
 import type {
   Branch,
   Coordinates,
@@ -24,6 +24,7 @@ import type {
 import {
   distanceKmBetween,
   getJobMotionJourney,
+  SIMULATED_MINUTE_MS,
   getJobMotionTime,
   jobDestination,
   jobPickup,
@@ -48,6 +49,8 @@ import {
 import { activeFerryServiceForCrossing } from "../services/ferryService";
 import { resolveLandsideFerryTerminals } from "../services/ferryTerminals";
 import { postalDepotCapacity } from "../services/postalDepots";
+import { resolveClosedRoadSegment, routeIntersectsClosedSegment, type ClosedRoadSegment } from "../services/closedRoadSegments";
+import { useGameStore } from "../stores/gameStore";
 import { recordTaxiPosition, taxiPosition, persistTaxiPositions } from "../services/liveTaxiPositions";
 
 interface GameMapProps {
@@ -400,11 +403,14 @@ const movingVehiclePoint = (id: string, position: Coordinates, properties: Recor
 // Closure-aware road routing: Mapbox alternatives are filtered against active
 // road closure coordinates. A route is never silently allowed through a closure.
 let activeClosurePoints: Coordinates[] = [];
+let activeClosedRoadSegments: ClosedRoadSegment[] = [];
+const closureGeometryCache = new Map<string, ClosedRoadSegment>();
 const resolveRoadRoute: typeof resolveBaseRoadRoute = (
   from, to, signal, profiles, options = {},
 ) => resolveBaseRoadRoute(from, to, signal, profiles, {
   ...options,
   closedRoadPoints: [...(options.closedRoadPoints ?? []), ...activeClosurePoints],
+  closedRoadSegments: [...(options.closedRoadSegments ?? []), ...activeClosedRoadSegments],
 });
 
 // Persist animated taxi positions independently of React render frequency.
@@ -725,7 +731,7 @@ function GameMapView({
       (incident) => !incident.resolved && incident.cityId === cityId,
     );
     activeClosurePoints = trafficIncidents
-      .filter((incident) => !incident.resolved && incident.kind === "closure" && new Date(incident.expiresAt).getTime() > Date.now())
+      .filter((incident) => !incident.resolved && incident.kind === "closure" && new Date(incident.expiresAt).getTime() > Date.now() && !closureGeometryCache.has(incident.id))
       .map((incident) => incident.coordinates);
     const activeVehicles = vehicleIncidents
       .filter((incident) => !incident.resolved)
@@ -736,6 +742,25 @@ function GameMapView({
             ?.position;
         return coordinates ? [{ ...incident, coordinates }] : [];
       });
+    let closureLookupDisposed = false;
+    const closureIncidents = activeTraffic.filter((incident) => incident.kind === "closure");
+    activeClosedRoadSegments = closureIncidents
+      .map((incident) => closureGeometryCache.get(incident.id))
+      .filter((segment): segment is ClosedRoadSegment => Boolean(segment));
+    void Promise.all(closureIncidents.map(async (incident) => {
+      try {
+        const segment = await resolveClosedRoadSegment(incident.coordinates);
+        if (closureLookupDisposed || !segment) return;
+        closureGeometryCache.set(incident.id, segment);
+        activeClosurePoints = closureIncidents
+          .filter((entry) => !closureGeometryCache.has(entry.id))
+          .map((entry) => entry.coordinates);
+        activeClosedRoadSegments = closureIncidents
+          .map((entry) => closureGeometryCache.get(entry.id))
+          .filter((entry): entry is ClosedRoadSegment => Boolean(entry));
+        updateClosureRoads();
+      } catch (error) { console.warn("OSM closure lookup unavailable:", error); }
+    }));
     // Snap closure warnings to actual road geometry in the currently loaded map tiles.
     // Never draw an invented straight line: if no road geometry is available,
     // the existing incident pin remains visible without a misleading closure.
@@ -746,6 +771,15 @@ function GameMapView({
       const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
       for (const incident of activeTraffic) {
         if (incident.kind !== "closure") continue;
+        const osmSegment = closureGeometryCache.get(incident.id);
+        if (osmSegment) {
+          features.push({
+            type: "Feature",
+            properties: { title: incident.title, incidentId: incident.id, osmWaySegment: osmSegment.id },
+            geometry: { type: "LineString", coordinates: osmSegment.coordinates },
+          });
+          continue;
+        }
         const point = instance.project(incident.coordinates);
         const nearby = instance.queryRenderedFeatures(
           [[point.x - 14, point.y - 14], [point.x + 14, point.y + 14]],
@@ -810,6 +844,7 @@ function GameMapView({
       ),
     ];
     return () => {
+      closureLookupDisposed = true;
       instance.off("style.load", updateClosureRoads);
       instance.off("moveend", updateClosureRoads);
       instance.off("idle", updateClosureRoads);
@@ -1461,6 +1496,10 @@ function GameMapView({
           let lastPickingUp: boolean | null = null;
           let lastFerryState: "waiting" | "aboard" | null | undefined;
           let localFerryDelayMs = 0;
+          let rerouteStartedAt = job.rerouteStartedAt ? new Date(job.rerouteStartedAt).getTime() : 0;
+          let rerouteArrivesAt = rerouteStartedAt + (job.rerouteDurationMs ?? 0);
+          let reroutePending = false;
+          let lastRerouteCheck = 0;
 
           let frozenFerryMotionTime: number | null = null;
           const scheduleAnimation = () => {
@@ -1522,8 +1561,8 @@ function GameMapView({
                   0,
                   Math.min(
                     1,
-                    (time - currentJourney.pickupAt) /
-                      (currentJourney.arrivesAt - currentJourney.pickupAt),
+                    (time - Math.max(currentJourney.pickupAt, rerouteStartedAt)) /
+                      Math.max(1, Math.max(currentJourney.arrivesAt, rerouteArrivesAt) - Math.max(currentJourney.pickupAt, rerouteStartedAt)),
                   ),
                 );
             const activeRoute = pickingUp ? pickupRoute : passengerRoute;
@@ -1623,9 +1662,40 @@ function GameMapView({
               }),
             );
             recordTaxiPosition(vehicle.id, currentPosition);
+            // Check active OSM closure edges while driving. Persist the new route
+            // and its clock anchor so a page refresh resumes the same detour.
+            if (!pickingUp && !ferryState && !reroutePending &&
+                now - lastRerouteCheck > 10_000 && time < Math.max(currentJourney.arrivesAt, rerouteArrivesAt)) {
+              lastRerouteCheck = now;
+              const remaining = remainingRoute(passengerRoute.coordinates, progress) as Coordinates[];
+              const blocked = activeClosedRoadSegments.some((segment) =>
+                routeIntersectsClosedSegment(remaining, segment));
+              if (blocked) {
+                reroutePending = true;
+                const rerouteFrom = currentPosition;
+                void resolveRoadRoute(rerouteFrom, jobDestination(job), abortController.signal)
+                  .then((detour) => {
+                    if (!detour || abortController.signal.aborted || map.current !== instance) return;
+                    const started = new Date(getJobMotionTime(job, Date.now())).toISOString();
+                    const rerouteDurationMs = Math.max(3_000, detour.durationMinutes * SIMULATED_MINUTE_MS / taxiTripSpeedMultiplier(vehicle.modelId));
+                    rerouteStartedAt = new Date(started).getTime();
+                    rerouteArrivesAt = rerouteStartedAt + rerouteDurationMs;
+                    passengerRoute = detour;
+                    passengerMotion = createRouteMotion(detour, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130);
+                    onSaveJobRoute(job.id, detour.coordinates, detour.ferryCrossings);
+                    useGameStore.setState((state) => ({
+                      jobs: state.jobs.map((entry) => entry.id === job.id
+                        ? { ...entry, rerouteStartedAt: started, rerouteDurationMs } : entry),
+                    }));
+                  })
+                  .catch((error) => console.warn("Unable to reroute taxi around closure:", error))
+                  .finally(() => { reroutePending = false; });
+              }
+            }
+
             if (
               now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS ||
-              time >= currentJourney.arrivesAt
+              time >= Math.max(currentJourney.arrivesAt, rerouteArrivesAt)
             ) {
               const routeAhead = pickingUp
                 ? [

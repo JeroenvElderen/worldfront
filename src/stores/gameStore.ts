@@ -159,15 +159,25 @@ const finishRecordedJourney = (
   job: GameSave['jobs'][number],
   completedAt: string,
 ): { explored: GameSave['exploredTerritory']; history: VehicleJourney[] } => {
-  const points = job.recordedRoute ?? []
+  // The completed navigation route is authoritative; animation samples may be
+  // sparse or missing when the browser was suspended.
+  const pickup = job.pickupRouteCoordinates ?? []
+  const passenger = job.routeCoordinates ?? []
+  const navigation = [...pickup, ...passenger]
+  const points = navigation.length >= 2 ? navigation : (job.recordedRoute ?? [])
   if (!job.assignedVehicleId || points.length < 2 || history.some((trip) => trip.jobId === job.id)) {
     return { explored, history }
   }
   // Reject discontinuities instead of revealing a straight-line shortcut.
   const segments: Coordinates[][] = []
   let segment: Coordinates[] = [points[0]]
+  const ferryEdges = new Set<number>()
+  for (const crossing of job.pickupFerryCrossings ?? [])
+    for (let i = crossing.startIndex; i < crossing.endIndex; i++) ferryEdges.add(i)
+  for (const crossing of job.ferryCrossings ?? [])
+    for (let i = crossing.startIndex; i < crossing.endIndex; i++) ferryEdges.add(pickup.length + i)
   for (let i = 1; i < points.length; i++) {
-    if (distanceKmBetween(points[i - 1], points[i]) > 1.5) {
+    if (ferryEdges.has(i - 1) || distanceKmBetween(points[i - 1], points[i]) > 1.5) {
       if (segment.length > 1) segments.push(segment)
       segment = [points[i]]
     } else {
@@ -185,29 +195,6 @@ const finishRecordedJourney = (
     history: [...history, { id: crypto.randomUUID(), vehicleId: job.assignedVehicleId, jobId: job.id, completedAt, coordinates: points, distanceKm }].slice(-1000),
   }
 }
-// Commit the most recent travelled road samples before opening new territory
-// to mission generation. The map and the generator then share one snapshot.
-const flushPendingExploration = (state: GameState): GameSave['exploredTerritory'] => {
-  let explored = state.exploredTerritory
-  for (const job of state.jobs) {
-    if (job.status !== 'accepted' || !job.assignedVehicleId) continue
-    const points = job.recordedRoute ?? []
-    if (points.length < 2) continue
-    const pending = points.slice(-Math.min(points.length, 100))
-    const segments: Coordinates[][] = []
-    let segment: Coordinates[] = [pending[0]]
-    for (let i = 1; i < pending.length; i++) {
-      if (distanceKmBetween(pending[i - 1], pending[i]) > 1.5) {
-        if (segment.length > 1) segments.push(segment)
-        segment = [pending[i]]
-      } else segment.push(pending[i])
-    }
-    if (segment.length > 1) segments.push(segment)
-    if (segments.length) explored = extendExploredTerritorySegments(explored, segments, job.id)
-  }
-  return explored
-}
-const lastExplorationRevealPosition = new Map<string, Coordinates>()
 const advanceContracts = (contracts: GameSave['contracts'], category: GameSave['contracts'][number]['category']) => contracts.map((contract) => {
   if (!contract.accepted || contract.completed || contract.category !== category) return contract
   const progress = Math.min(contract.target, contract.progress + 1)
@@ -231,23 +218,6 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     const updated = [...previous.slice(-4999), [point[0], point[1]] as Coordinates]
     const jobs = state.jobs.slice()
     jobs[index] = { ...job, recordedRoute: updated }
-    // Reveal each observed road segment as soon as the taxi has travelled
-    // roughly five metres. Never reveal an unobserved jump across the map.
-    const lastRevealed = lastExplorationRevealPosition.get(job.id)
-    const movedSinceReveal = lastRevealed
-      ? distanceKmBetween(lastRevealed, point)
-      : last ? distanceKmBetween(last, point) : 0
-    if (last && movedSinceReveal >= 0.005 && distanceKmBetween(last, point) <= 1.5) {
-      const from = lastRevealed && distanceKmBetween(lastRevealed, last) <= 1.5
-        ? lastRevealed : last
-      lastExplorationRevealPosition.set(job.id, [point[0], point[1]])
-      return {
-        jobs,
-        exploredTerritory: extendExploredTerritorySegments(
-          state.exploredTerritory, [[from, [point[0], point[1]]]], job.id,
-        ),
-      }
-    }
     return { jobs }
   }),
 
@@ -349,7 +319,6 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     return { pausedAt: null, updatedAt: new Date().toISOString() }
   }),
   refreshJobs: async () => {
-    set((current) => ({ exploredTerritory: flushPendingExploration(current) }))
     const state = useGameStore.getState()
 const generationTaxi = selectJobGenerationTaxi(state)
     if (!(state.activeCityId ?? state.startingCityId) || state.jobsLoading || !generationTaxi) return

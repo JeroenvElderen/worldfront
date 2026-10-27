@@ -82,6 +82,18 @@ const ferryCrossingsForRoute = (coordinates: Coordinates[], legs: MapboxRoute['l
   return resolveLandsideFerryTerminals(coordinates, crossings)
 }
 
+// Cache only ordinary, unmodified routing requests. Closure-sensitive routes and
+// aborted requests must always be resolved independently.
+const ROUTE_CACHE_TTL_MS = 5 * 60_000
+const ROUTE_CACHE_LIMIT = 200
+const roadRouteCache = new Map<string, { expiresAt: number; route: RoadRouteDetails | null }>()
+const inFlightRoadRoutes = new Map<string, Promise<RoadRouteDetails | null>>()
+
+const routeCacheKey = (from: Coordinates, to: Coordinates, profiles: string[], options: RoadRouteOptions) =>
+  options.closedRoadPoints?.length || options.closedRoadSegments?.length
+    ? null
+    : `${from.map((v) => v.toFixed(5)).join(',')}|${to.map((v) => v.toFixed(5)).join(',')}|${profiles.join(',')}|${options.excludeFerries ? 'no-ferry' : 'ferry'}`
+
 /** Resolve a real drivable route and retain any ferry legs Mapbox selected. */
 export async function resolveRoadRoute(
   from: Coordinates,
@@ -91,6 +103,37 @@ export async function resolveRoadRoute(
   options: RoadRouteOptions = {},
 ): Promise<RoadRouteDetails | null> {
   if (!mapboxAccessToken) return null
+  const key = signal ? null : routeCacheKey(from, to, profiles, options)
+  if (key) {
+    const cached = roadRouteCache.get(key)
+    if (cached && cached.expiresAt > Date.now()) return cached.route
+    if (cached) roadRouteCache.delete(key)
+    const pending = inFlightRoadRoutes.get(key)
+    if (pending) return pending
+    const request = resolveRoadRouteUncached(from, to, signal, profiles, options)
+    inFlightRoadRoutes.set(key, request)
+    try {
+      const route = await request
+      roadRouteCache.set(key, { expiresAt: Date.now() + ROUTE_CACHE_TTL_MS, route })
+      if (roadRouteCache.size > ROUTE_CACHE_LIMIT) {
+        const oldest = roadRouteCache.keys().next().value
+        if (oldest) roadRouteCache.delete(oldest)
+      }
+      return route
+    } finally {
+      inFlightRoadRoutes.delete(key)
+    }
+  }
+  return resolveRoadRouteUncached(from, to, signal, profiles, options)
+}
+
+async function resolveRoadRouteUncached(
+  from: Coordinates,
+  to: Coordinates,
+  signal: AbortSignal | undefined,
+  profiles: Array<'driving-traffic' | 'driving'>,
+  options: RoadRouteOptions,
+): Promise<RoadRouteDetails | null> {
   for (const profile of profiles) {
     const query = new URLSearchParams({
       alternatives: options.closedRoadPoints?.length || options.closedRoadSegments?.length ? 'true' : 'false',

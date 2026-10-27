@@ -243,7 +243,7 @@ const createRouteMotion = (
     }
     const speed = Math.min(
       topSpeedKmh,
-      speedLimitKmh(route.speedLimits[index]) ?? fallbackSpeedKmh,
+      speedLimitKmh(route.speedLimits[index]) ?? Math.min(50, fallbackSpeedKmh),
     );
     phases.push({
       duration: lengths[index] / Math.max(1, speed),

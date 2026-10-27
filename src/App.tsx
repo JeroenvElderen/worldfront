@@ -58,7 +58,6 @@ export default function App() {
         : 'Tap +, then place a station to unlock another territory'
 
   const buildStation = game.buildStation
-  const expandTerritory = game.expandTerritory
   const handleBuildStation = useCallback((coordinates: Parameters<typeof buildStation>[0]) => {
     buildStation(coordinates)
     setPlacingStation(false)

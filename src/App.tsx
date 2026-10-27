@@ -85,7 +85,7 @@ export default function App() {
     }
   }, [])
 
-  const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, runAutomation, hasHydrated } = game
+  const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, hasHydrated } = game
 
   const placeHarbour = game.placeHarbour
   const setSection = game.setSection
@@ -345,11 +345,15 @@ export default function App() {
 
   const [cloudPanelOpen, setCloudPanelOpen] = useState(false)
 
-  /** Let a hired branch manager dispatch qualifying calls for larger fleets. */
+  // Dispatch when the set of available offers changes, not when journey
+  // checkpoints are recorded. Each checkpoint updates jobs and previously
+  // retriggered the entire automation engine every second.
+  const offeredJobIds = jobs.filter((job) => job.status === 'offered').map((job) => job.id).sort().join('|')
   useEffect(() => {
     if (!automation?.enabled || !company || !hasHydrated) return
-    runAutomation()
-  }, [company, automation, hasHydrated, jobs, runAutomation])
+    useGameStore.getState().runAutomation()
+  }, [Boolean(company), automation?.enabled, hasHydrated, offeredJobIds])
+
 
   // Cloud saves are opened from the bottom navigation More menu.
   if (!game.hasHydrated) {

@@ -69,12 +69,10 @@ interface GameMapProps {
   placingStation: boolean;
   placingTerritory: boolean;
   placingHotel: boolean;
-  placingHarbour: boolean;
   placingPostalDepot: boolean;
   onBuildStation: (coordinates: Coordinates) => void;
   onExpandTerritory: (coordinates: Coordinates) => void;
   onBuildHotel: (coordinates: Coordinates) => void;
-  onPlaceHarbour: (coordinates: Coordinates) => void;
   onBuildPostalDepot: (coordinates: Coordinates) => void;
   onOpenJob: (jobId: string) => void;
   onSaveJobPickupRoute: (
@@ -624,19 +622,16 @@ function GameMapView({
   jobs,
   transportAssets,
   transportRoutes,
-  purchasedHarbours,
   trafficIncidents,
   vehicleIncidents,
   focusedJobId,
   placingStation,
   placingTerritory,
   placingHotel,
-  placingHarbour,
   placingPostalDepot,
   onBuildStation,
   onExpandTerritory,
   onBuildHotel,
-  onPlaceHarbour,
   onBuildPostalDepot,
   onOpenJob,
   onSaveJobPickupRoute,
@@ -662,7 +657,6 @@ function GameMapView({
   const liveJobRunners = useRef(new Map<string, () => void>());
   const arrivedJobIds = useRef(new Set<string>());
   const incidentMarkers = useRef<mapboxgl.Marker[]>([]);
-  const harbourMarkers = useRef<mapboxgl.Marker[]>([]);
   const hotelMarkers = useRef<mapboxgl.Marker[]>([]);
   const postalDepotMarkers = useRef<mapboxgl.Marker[]>([]);
   const postalRouteRunners = useRef(new Map<string, string>());
@@ -801,14 +795,13 @@ function GameMapView({
       .getCanvas()
       .classList.toggle(
         "placing-depot",
-        placingStation || placingTerritory || placingHotel || placingHarbour || placingPostalDepot,
+        placingStation || placingTerritory || placingHotel || placingPostalDepot,
       );
     const handlePlacement = (event: mapboxgl.MapMouseEvent) => {
       const coordinates: Coordinates = [event.lngLat.lng, event.lngLat.lat];
       if (placingStation) onBuildStation(coordinates);
       else if (placingTerritory) onExpandTerritory(coordinates);
       else if (placingHotel) onBuildHotel(coordinates);
-      else if (placingHarbour) onPlaceHarbour(coordinates);
       else if (placingPostalDepot) onBuildPostalDepot(coordinates);
     };
     instance.on("click", handlePlacement);
@@ -820,12 +813,10 @@ function GameMapView({
     placingStation,
     placingTerritory,
     placingHotel,
-    placingHarbour,
     placingPostalDepot,
     onBuildStation,
     onExpandTerritory,
     onBuildHotel,
-    onPlaceHarbour,
     onBuildPostalDepot,
   ]);
 
@@ -1886,33 +1877,7 @@ function GameMapView({
   ]);
 
   // Harbours exist only where the player explicitly placed them.
-  useEffect(() => {
-    const instance = map.current;
-    if (!instance) return;
-    harbourMarkers.current.forEach((marker) => marker.remove());
-    const markers = purchasedHarbours.map((harbour) => {
-      const element = document.createElement("div");
-      element.className = "harbour-map-marker owned";
-      element.textContent = "⚓";
-      element.setAttribute("aria-label", harbour.name);
-      const popupContent = document.createElement("div");
-      popupContent.className = "harbour-popup";
-      const title = document.createElement("strong");
-      title.textContent = harbour.name;
-      const status = document.createElement("small");
-      status.textContent = "Owned harbour";
-      popupContent.append(title, status);
-      return new mapboxgl.Marker({ element, anchor: "center" })
-        .setLngLat(harbour.coordinates)
-        .setPopup(new mapboxgl.Popup({ offset: 16, className: "harbour-map-popup" }).setDOMContent(popupContent))
-        .addTo(instance);
-    });
-    harbourMarkers.current = markers;
-    return () => {
-      markers.forEach((marker) => marker.remove());
-      if (harbourMarkers.current === markers) harbourMarkers.current = [];
-    };
-  }, [mapRevision, purchasedHarbours]);
+
 
   useEffect(() => {
     const instance = map.current;
@@ -3077,12 +3042,10 @@ export const GameMap = memo(
     previous.placingStation === next.placingStation &&
     previous.placingTerritory === next.placingTerritory &&
     previous.placingHotel === next.placingHotel &&
-    previous.placingHarbour === next.placingHarbour &&
     previous.placingPostalDepot === next.placingPostalDepot &&
     previous.onBuildStation === next.onBuildStation &&
     previous.onExpandTerritory === next.onExpandTerritory &&
     previous.onBuildHotel === next.onBuildHotel &&
-    previous.onPlaceHarbour === next.onPlaceHarbour &&
     previous.onBuildPostalDepot === next.onBuildPostalDepot &&
     previous.focusedJobId === next.focusedJobId &&
     previous.onOpenJob === next.onOpenJob &&

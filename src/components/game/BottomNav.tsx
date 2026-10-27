@@ -3,13 +3,11 @@ import { useCurrency } from './CurrencyContext'
 
 const items: { id: Section; label: string; hint: string; icon: string }[] = [
   { id: 'map', label: 'Map', hint: 'Live operations', icon: '◇' },
-  { id: 'jobs', label: 'Dispatch', hint: 'Travel operations', icon: '▣' },
+  { id: 'jobs', label: 'Dispatch', hint: 'Taxi operations', icon: '▣' },
   { id: 'postal', label: 'Postal', hint: 'Rounds & tenders', icon: '📮' },
-  { id: 'ferries', label: 'Ferries', hint: 'Harbours & routes', icon: '⛴' },
   { id: 'operations', label: 'Control', hint: 'Live incidents', icon: '⚠' },
   { id: 'fleet', label: 'Fleet', hint: 'Vehicles', icon: '▱' },
   { id: 'hotels', label: 'Hotels', hint: 'Properties & markets', icon: '▦' },
-  { id: 'travel', label: 'Travel', hint: 'Grow network', icon: '✈' },
   { id: 'finance', label: 'Finance', hint: 'Performance', icon: 'currency' },
   { id: 'company', label: 'Company', hint: 'Team & goals', icon: '▥' },
 ]

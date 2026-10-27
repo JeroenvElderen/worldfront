@@ -741,6 +741,7 @@ function GameMapView({
   transportAssetsRef.current = transportAssets;
   transportRoutesRef.current = transportRoutes;
   const [mapRevision, setMapRevision] = useState(0);
+  const [containerReady, setContainerReady] = useState(false);
   // Simulated congestion for currently displayed mission roads. This does not
   // claim to be live traffic data and never changes actual road geometry.
   useEffect(() => {
@@ -768,7 +769,7 @@ function GameMapView({
     return () => { instance.off("style.load", refresh); window.clearInterval(timer); };
   }, [jobs, cityId, mapRevision, containerReady]);
 
-  const [containerReady, setContainerReady] = useState(false);
+
   // Use a visible night basemap rather than a subtle canvas brightness filter.
   // Keep the current map instance, sources and mission layers intact.
   useEffect(() => {

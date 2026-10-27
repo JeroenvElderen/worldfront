@@ -516,7 +516,12 @@ const generationTaxi = selectJobGenerationTaxi(state)
         ),
       }
 
+      // Morning/evening commuter peaks raise the rate of passenger offers.
+      const localHour = ((Date.now() / 3_600_000 + city.coordinates[0] / 15) % 24 + 24) % 24
+      const rushDemand = (localHour >= 7 && localHour < 9.5) || (localHour >= 16.5 && localHour < 19)
+        ? 1.65 : (localHour >= 6 && localHour < 11) || (localHour >= 15 && localHour < 21) ? 1.2 : 1
       const demandMultiplier =
+        rushDemand *
         (state.activeEvent?.fareMultiplier ?? 1) *
 
         cityDemandMultiplier(

@@ -21,7 +21,7 @@ import { canResearch, hasResearch, researchNodes } from '../services/research'
 import { calculateJobOutcome, createDriverCandidates, createGoals, energyMultiplier, jobOfferCapacity, pickupSpeedMultiplier, updateGoals, upgradeAppliesToVehicle, upgradeDetails, upgradeFareMultiplier, vehicleCanTakeJob, vehicleComfortScore } from '../services/earlyGameEngine'
 import { cityDemandMultiplier, createCityEconomy, HOTEL_PURCHASE_COST, hotelUpgradeCost, pendingHotelRevenue } from '../services/hotelEconomy'
 import { competitorGrowth, createCompetitors, createWorldCondition, defaultBrandStrategy, fareMultiplier, marketingDemandMultiplier } from '../services/worldSystems'
-import { compactLegacyDiscoveries, extendExploredTerritory, isInsideVillageTerritories, type VillageTerritoryCenter } from '../services/territoryGeometry'
+import { compactLegacyDiscoveries, extendExploredTerritorySegments, isInsideVillageTerritories, type VillageTerritoryCenter } from '../services/territoryGeometry'
 import { createTrafficIncident, trafficImpactForJob } from '../services/operationsIncidents'
 import { cleaningDetails, createAutomationEmployee, createCustomerReview, createStarterDispatcher, createStarterMechanic, maintenanceAdvisories, maintenanceQuote, recruitDispatcher, recruitMechanic, tireDetails, tireWearForDistance } from '../services/fleetOperations'
 import { ferryCrossingsHaveActiveService } from '../services/ferryService'
@@ -176,8 +176,7 @@ const finishRecordedJourney = (
   }
   if (segment.length > 1) segments.push(segment)
   if (!segments.length) return { explored, history }
-  let nextExplored = explored
-  for (const route of segments) nextExplored = extendExploredTerritory(nextExplored, route, job.id)
+  const nextExplored = extendExploredTerritorySegments(explored, segments, job.id)
   const distanceKm = segments.reduce((total, route) => total + route.slice(1).reduce(
     (sum, point, index) => sum + distanceKmBetween(route[index], point), 0,
   ), 0)

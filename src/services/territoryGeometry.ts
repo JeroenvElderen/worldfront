@@ -1,5 +1,5 @@
 import { featureCollection, lineString, polygon } from '@turf/helpers'
-import { booleanPointInPolygon, buffer, circle, difference, simplify, union } from '@turf/turf'
+import { bbox, booleanPointInPolygon, buffer, circle, difference, simplify, union } from '@turf/turf'
 import type { Coordinates, TerritoryFeature, TerritoryGeometry } from '../models/game'
 
 const EARTH_KM_PER_LATITUDE_DEGREE = 110.574
@@ -177,9 +177,29 @@ export const resolveVillageTerritories = async (centers: VillageTerritoryCenter[
       : await realVillageTerritory(center.id, center.coordinates)
         ?? villageTerritory(center.id, center.coordinates, VILLAGE_TERRITORY_RADIUS_KM)))
 
-/** True when a location belongs to one of the supplied map territory features. */
+/** Bounding boxes are cached by feature identity, not by id: completed routes
+ * can replace the geometry of an existing discovery without changing its id.
+ * WeakMap entries disappear when their geometry is no longer referenced.
+ */
+const territoryBounds = new WeakMap<TerritoryFeature, [number, number, number, number]>()
+const boundsForTerritory = (territory: TerritoryFeature): [number, number, number, number] => {
+  const cached = territoryBounds.get(territory)
+  if (cached) return cached
+  const bounds = bbox(territory) as [number, number, number, number]
+  territoryBounds.set(territory, bounds)
+  return bounds
+}
+
+/** Reject points outside the bounding box before expensive polygon checks.
+ * The polygon test remains authoritative, preserving holes and islands.
+ */
 export const isInsideTerritoryFeatures = (coordinates: Coordinates, territories: TerritoryFeature[]) =>
-  territories.some((territory) => booleanPointInPolygon(coordinates, territory))
+  territories.some((territory) => {
+    const [west, south, east, north] = boundsForTerritory(territory)
+    return coordinates[0] >= west && coordinates[0] <= east &&
+      coordinates[1] >= south && coordinates[1] <= north &&
+      booleanPointInPolygon(coordinates, territory)
+  })
 
 /** A red world overlay with the purchased territory cut out as transparent holes. */
 export const lockedTerritoryMask = (unlocked: ReturnType<typeof mergeVillageTerritories>) => {

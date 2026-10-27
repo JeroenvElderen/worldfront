@@ -4,7 +4,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { featureCollection, lineString, point } from "@turf/helpers";
 import { mapboxAccessToken } from "../config/mapbox";
 import { getCity, worldOverview } from "../data/cities";
-import { taxiModels } from "../data/taxis";
+import { taxiModels, taxiTripSpeedMultiplier } from "../data/taxis";
 import type {
   Branch,
   Coordinates,
@@ -24,6 +24,7 @@ import type {
 import {
   distanceKmBetween,
   getJobMotionJourney,
+  SIMULATED_MINUTE_MS,
   getJobMotionTime,
   jobDestination,
   jobPickup,
@@ -1493,6 +1494,7 @@ function GameMapView({
           let lastFerryState: "waiting" | "aboard" | null | undefined;
           let localFerryDelayMs = 0;
           let rerouteStartedAt = job.rerouteStartedAt ? new Date(job.rerouteStartedAt).getTime() : 0;
+          let rerouteArrivesAt = rerouteStartedAt + (job.rerouteDurationMs ?? 0);
           let reroutePending = false;
           let lastRerouteCheck = 0;
 
@@ -1557,7 +1559,7 @@ function GameMapView({
                   Math.min(
                     1,
                     (time - Math.max(currentJourney.pickupAt, rerouteStartedAt)) /
-                      Math.max(1, currentJourney.arrivesAt - Math.max(currentJourney.pickupAt, rerouteStartedAt)),
+                      Math.max(1, Math.max(currentJourney.arrivesAt, rerouteArrivesAt) - Math.max(currentJourney.pickupAt, rerouteStartedAt)),
                   ),
                 );
             const activeRoute = pickingUp ? pickupRoute : passengerRoute;
@@ -1660,7 +1662,7 @@ function GameMapView({
             // Check active OSM closure edges while driving. Persist the new route
             // and its clock anchor so a page refresh resumes the same detour.
             if (!pickingUp && !ferryState && !reroutePending &&
-                now - lastRerouteCheck > 10_000 && time < currentJourney.arrivesAt) {
+                now - lastRerouteCheck > 10_000 && time < Math.max(currentJourney.arrivesAt, rerouteArrivesAt)) {
               lastRerouteCheck = now;
               const remaining = remainingRoute(passengerRoute.coordinates, progress) as Coordinates[];
               const blocked = activeClosedRoadSegments.some((segment) =>
@@ -1672,13 +1674,15 @@ function GameMapView({
                   .then((detour) => {
                     if (!detour || abortController.signal.aborted || map.current !== instance) return;
                     const started = new Date(getJobMotionTime(job, Date.now())).toISOString();
+                    const rerouteDurationMs = Math.max(3_000, detour.durationMinutes * SIMULATED_MINUTE_MS / taxiTripSpeedMultiplier(vehicle.modelId));
                     rerouteStartedAt = new Date(started).getTime();
+                    rerouteArrivesAt = rerouteStartedAt + rerouteDurationMs;
                     passengerRoute = detour;
                     passengerMotion = createRouteMotion(detour, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130);
                     onSaveJobRoute(job.id, detour.coordinates, detour.ferryCrossings);
                     useGameStore.setState((state) => ({
                       jobs: state.jobs.map((entry) => entry.id === job.id
-                        ? { ...entry, rerouteStartedAt: started } : entry),
+                        ? { ...entry, rerouteStartedAt: started, rerouteDurationMs } : entry),
                     }));
                   })
                   .catch((error) => console.warn("Unable to reroute taxi around closure:", error))
@@ -1688,7 +1692,7 @@ function GameMapView({
 
             if (
               now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS ||
-              time >= currentJourney.arrivesAt
+              time >= Math.max(currentJourney.arrivesAt, rerouteArrivesAt)
             ) {
               const routeAhead = pickingUp
                 ? [

@@ -95,6 +95,7 @@ async function roadStops(from: Coordinates, to: Coordinates, signal?: AbortSigna
       pickupRoad: route.origin,
       destinationRoad: route.destination,
       routeCoordinates: route.coordinates,
+      speedLimits: route.speedLimits,
       ferryCrossings: route.ferryCrossings,
       durationMinutes: route.durationMinutes,
       distanceKm: route.distanceKm,
@@ -342,7 +343,7 @@ routes = shuffled([...uniqueRoutes.values()])
   const resolvedRoutes: Array<(typeof routes)[number] & { stops: NonNullable<Awaited<ReturnType<typeof roadStops>>> }> = []
   const resolveRoute = async (route: (typeof routes)[number]) => {
     const stops = route.stored
-      ? { pickupRoad: route.stored.pickupRoad ?? route.pickup.coordinates, destinationRoad: route.stored.destinationRoad ?? route.destination.coordinates, routeCoordinates: route.stored.routeCoordinates ?? [route.stored.pickup, route.stored.destination], ferryCrossings: route.stored.ferryCrossings ?? [], durationMinutes: route.stored.durationMinutes, distanceKm: route.stored.distanceKm }
+      ? { pickupRoad: route.stored.pickupRoad ?? route.pickup.coordinates, destinationRoad: route.stored.destinationRoad ?? route.destination.coordinates, routeCoordinates: route.stored.routeCoordinates ?? [route.stored.pickup, route.stored.destination], speedLimits: [] as import('./roadRoutes').RouteSpeedLimit[], ferryCrossings: route.stored.ferryCrossings ?? [], durationMinutes: route.stored.durationMinutes, distanceKm: route.stored.distanceKm }
       : await roadStops(route.pickup.coordinates, route.destination.coordinates, signal)
     if (!stops) return null
     // A ferry edge in Directions is not a vehicle-owned boat. Cross-water work
@@ -398,6 +399,7 @@ if (
     pickup: route.stops.pickupRoad, destination: route.stops.destinationRoad,
     pickupRoad: route.stops.pickupRoad, destinationRoad: route.stops.destinationRoad,
     routeCoordinates: route.stops.routeCoordinates,
+    routeSpeedLimits: route.stops.speedLimits,
     ferryCrossings: route.stops.ferryCrossings,
     routeResolved: !route.stored || Boolean(route.stored.routeCoordinates && route.stored.routeCoordinates.length > 2),
     pickupLabel: route.pickup.name, destinationLabel: route.destination.name,

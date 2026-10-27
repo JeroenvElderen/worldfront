@@ -674,7 +674,6 @@ function GameMapView({
   jobs,
   transportAssets,
   transportRoutes,
-  purchasedHarbours,
   trafficIncidents,
   vehicleIncidents,
   focusedJobId,
@@ -724,7 +723,6 @@ function GameMapView({
   const liveJobRunners = useRef(new Map<string, () => void>());
   const arrivedJobIds = useRef(new Set<string>());
   const incidentMarkers = useRef<mapboxgl.Marker[]>([]);
-  const harbourMarkers = useRef<mapboxgl.Marker[]>([]);
   const hotelMarkers = useRef<mapboxgl.Marker[]>([]);
   const postalDepotMarkers = useRef<mapboxgl.Marker[]>([]);
   const postalRouteRunners = useRef(new Map<string, string>());

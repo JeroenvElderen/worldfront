@@ -1155,7 +1155,7 @@ function GameMapView({
               roadRoute,
               40,
               vehicle.topSpeedKmh ?? 130,
-            congestionForJob(job.id, jobPickup(job)[0]).factor,
+            1,
             );
             if (token) {
               void resolveRoadRouteThrough(
@@ -1169,7 +1169,7 @@ function GameMapView({
                     roadRoute,
                     40,
                     vehicle.topSpeedKmh ?? 130,
-            congestionForJob(job.id, jobPickup(job)[0]).factor,
+            1,
                   );
                   routeReady = true;
                 })
@@ -1426,13 +1426,13 @@ function GameMapView({
             pickupRoute,
             fallbackSpeedKmh,
             vehicle.topSpeedKmh ?? 130,
-            congestionForJob(job.id, jobPickup(job)[0]).factor,
+            job ? congestionForJob(job.id, jobPickup(job)[0]).factor : 1,
           );
           let passengerMotion = createRouteMotion(
             passengerRoute,
             fallbackSpeedKmh,
             vehicle.topSpeedKmh ?? 130,
-            congestionForJob(job.id, jobPickup(job)[0]).factor,
+            job ? congestionForJob(job.id, jobPickup(job)[0]).factor : 1,
           );
           if (job && token) {
             const fetchRoute = async (from: Coordinates, to: Coordinates) => {
@@ -1459,7 +1459,7 @@ function GameMapView({
                   pickupRoute,
                   fallbackSpeedKmh,
                   vehicle.topSpeedKmh ?? 130,
-            congestionForJob(job.id, jobPickup(job)[0]).factor,
+            job ? congestionForJob(job.id, jobPickup(job)[0]).factor : 1,
                 );
                 if (
                   !job.pickupRouteCoordinates ||
@@ -1506,7 +1506,7 @@ function GameMapView({
                     passengerRoute,
                     fallbackSpeedKmh,
                     vehicle.topSpeedKmh ?? 130,
-            congestionForJob(job.id, jobPickup(job)[0]).factor,
+            job ? congestionForJob(job.id, jobPickup(job)[0]).factor : 1,
                   );
                   (
                     instance.getSource(jobRouteSourceId(job.id)) as
@@ -3063,7 +3063,7 @@ function GameMapView({
           roadRoute,
           45,
           vehicle.topSpeedKmh ?? 130,
-            congestionForJob(job.id, jobPickup(job)[0]).factor,
+            1,
         );
         ensureFerryWaitLabel(instance, vehicleId);
 
@@ -3080,7 +3080,7 @@ function GameMapView({
                 roadRoute,
                 45,
                 vehicle.topSpeedKmh ?? 130,
-            congestionForJob(job.id, jobPickup(job)[0]).factor,
+            1,
               );
               routeReady = true;
             })

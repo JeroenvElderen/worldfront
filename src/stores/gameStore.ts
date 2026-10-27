@@ -445,8 +445,11 @@ const generationTaxi = selectJobGenerationTaxi(state)
      * Taxi B -> one pickup near Taxi B
      * Taxi C -> one pickup near Taxi C
      */
+    // Reserve per-city capacity before launching asynchronous routing work.
+    // Limit concurrent taxi searches to avoid overwhelming the routing API.
+    const scheduled: Array<() => Promise<Awaited<ReturnType<typeof generateJobOffers>> | null>> = []
     for (const generationTaxi of orderedTaxis) {
-      if (generatedBatches.length >= slotsRemaining) {
+      if (scheduled.length >= slotsRemaining) {
         break
       }
 
@@ -527,6 +530,8 @@ const generationTaxi = selectJobGenerationTaxi(state)
               200,
         )
 
+      generatedPerCity.set(city.id, alreadyGenerated + 1)
+      scheduled.push(async () => {
       try {
         const generated = await generateJobOffers(
           searchArea,
@@ -536,7 +541,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
 
           [
             ...(state.jobRequestHistory ?? []),
-            ...generatedSignatures,
+
           ],
 
           maxDistanceKm,
@@ -550,22 +555,27 @@ const generationTaxi = selectJobGenerationTaxi(state)
 
         if (!generated.jobs.length) continue
 
-        generatedBatches.push(generated)
+        return generated
 
-        generatedSignatures.push(
-          ...generated.signatures,
-        )
 
-        generatedPerCity.set(
-          city.id,
-          alreadyGenerated + generated.jobs.length,
-        )
       } catch (error) {
         /*
          * Failure around one taxi should not prevent another
          * taxi from receiving a nearby job.
          */
         lastGenerationError = error
+        return null
+      }
+      })
+    }
+
+    const MAX_PARALLEL_TAXI_SEARCHES = 3
+    for (let index = 0; index < scheduled.length; index += MAX_PARALLEL_TAXI_SEARCHES) {
+      const batch = await Promise.all(scheduled.slice(index, index + MAX_PARALLEL_TAXI_SEARCHES).map((run) => run()))
+      for (const generated of batch) {
+        if (!generated) continue
+        generatedBatches.push(generated)
+        generatedSignatures.push(...generated.signatures)
       }
     }
 

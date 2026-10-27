@@ -949,7 +949,7 @@ function GameMapView({
     // but they do not change village boundaries. Avoid re-requesting every
     // already-resolved boundary during that hot transition.
     const unresolvedCenters = centers.filter(
-      ({ id }) => !(id in realTerritoriesRef.current),
+      ({ id }) => id !== branches[0]?.id && !(id in realTerritoriesRef.current),
     );
     if (!unresolvedCenters.length)
       return () => {
@@ -1919,12 +1919,10 @@ function GameMapView({
       const ownedTerritories = [
         ...stationCoordinates.map(
           ({ station, coordinates }) =>
-            realTerritories[station.id] ??
-            villageTerritory(
-              station.id,
-              coordinates,
-              VILLAGE_TERRITORY_RADIUS_KM,
-            ),
+            station.id === branches[0]?.id
+              ? villageTerritory(station.id, coordinates, 1)
+              : realTerritories[station.id] ??
+                villageTerritory(station.id, coordinates, VILLAGE_TERRITORY_RADIUS_KM),
         ),
         ...territoryExpansions
           .filter((expansion) => expansion.source !== "taxi-discovery")

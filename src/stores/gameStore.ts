@@ -156,7 +156,7 @@ const unlockedTerritoryCenters = (state: Pick<GameState, 'branches' | 'territory
 ]
 const administrativeTerritories = (state: Pick<GameState, 'territoryExpansions'>): TerritoryFeature[] =>
   (state.territoryExpansions ?? []).filter(area => area.regionGeometry)
-    .map(area => ({ type: 'Feature' as const, properties: { id: area.regionId, unlocked: true }, geometry: area.regionGeometry! }))
+    .map(area => ({ type: 'Feature' as const, properties: { id: area.regionId ?? area.id, unlocked: true }, geometry: area.regionGeometry! }))
 const withinOperatingRights = (coordinates: Coordinates, state: GameState) =>
   isInsideVillageTerritories(coordinates, unlockedTerritoryCenters(state)) ||
   isInsideTerritoryFeatures(coordinates, administrativeTerritories(state))

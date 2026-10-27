@@ -1789,6 +1789,7 @@ function GameMapView({
               }),
             );
             recordTaxiPosition(vehicle.id, currentPosition);
+            recordLiveDiscovery(vehicle.id, currentPosition);
             // Check active OSM closure edges while driving. Persist the new route
             // and its clock anchor so a page refresh resumes the same detour.
             if (!pickingUp && !ferryState && !reroutePending &&

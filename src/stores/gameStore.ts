@@ -543,6 +543,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
           state.exploredTerritory,
           state.transportRoutes ?? [],
           state.transportAssets ?? [],
+          administrativeTerritories(state),
         )
 
         if (!generated.jobs.length) continue

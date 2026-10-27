@@ -757,7 +757,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
     const result = completeJobState(state.company, state.jobs, state.vehicles, jobId)
     if (!result || !job) return state
     const updatedAt = new Date().toISOString()
-    return { ...result, exploredTerritory: addTaxiDiscovery(state.exploredTerritory, job, vehicle?.position), updatedAt }
+    return { ...result, updatedAt }
   }),
   tickJobs: () => set((state) => {
     if (!state.company) return state

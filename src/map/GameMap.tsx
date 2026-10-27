@@ -421,38 +421,6 @@ if (typeof window !== "undefined") {
 }
 // Throttle geometry unions and indexedDB writes; only actual taxi travel
 // contributes to discovery, never a proposed route.
-const liveDiscoveryCheckpoints = new Map<string, { position: Coordinates; at: number }>();
-const recordLiveDiscovery = (vehicleId: string, position: Coordinates) => {
-  const now = Date.now();
-  const previous = liveDiscoveryCheckpoints.get(vehicleId);
-  if (!previous) {
-    liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
-    // Reveal the first road position immediately instead of waiting for a
-    // second movement checkpoint (important for short trips).
-    try {
-      const offset: Coordinates = [position[0] + 0.00001, position[1]];
-      useGameStore.getState().discoverLiveRoute([position, offset]);
-    } catch (error) {
-      console.warn("[exploration] Initial road discovery failed", error);
-    }
-    return;
-  }
-  if (now - previous.at < 750) return;
-  const distance = distanceKmBetween(previous.position, position);
-  if (distance < 0.003) return;
-  // Avoid connecting teleportation, city switching, or stale positions with
-  // a fictional discovered road across the map.
-  if (distance > 10) {
-    liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
-    return;
-  }
-  liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
-  try {
-    useGameStore.getState().discoverLiveRoute([previous.position, position]);
-  } catch (error) {
-    console.warn("[exploration] Live territory update failed", error);
-  }
-};
 const TAXI_SVG_IMAGE = "worldfront-taxi-svg";
 const TAXI_SVG_URL = `${import.meta.env.BASE_URL}vehicles/taxi-topview.svg`;
 const VEHICLE_MARKER_RADIUS = 4;
@@ -1211,8 +1179,6 @@ function GameMapView({
                 ferryState = ferryPosition.state;
               }
               // Discover only road movement, never ferry crossings or unresolved routes.
-              if (routeReady && !ferryState) recordLiveDiscovery(vehicle.id, currentPosition);
-              else liveDiscoveryCheckpoints.delete(vehicle.id);
               (
                 instance.getSource(sourceId) as
                   | mapboxgl.GeoJSONSource
@@ -1343,8 +1309,6 @@ function GameMapView({
                 ferryState = ferryPosition.state;
               }
               // Discover only road movement, never ferry crossings or unresolved routes.
-              if (routeReady && !ferryState) recordLiveDiscovery(vehicle.id, currentPosition);
-              else liveDiscoveryCheckpoints.delete(vehicle.id);
               (
                 instance.getSource(sourceId) as
                   | mapboxgl.GeoJSONSource
@@ -1724,7 +1688,6 @@ function GameMapView({
               }),
             );
             recordTaxiPosition(vehicle.id, currentPosition);
-            recordLiveDiscovery(vehicle.id, currentPosition);
             // Check active OSM closure edges while driving. Persist the new route
             // and its clock anchor so a page refresh resumes the same detour.
             if (!pickingUp && !ferryState && !reroutePending &&
@@ -2725,7 +2688,6 @@ function GameMapView({
             );
           }
         }
-        recordLiveDiscovery(vehicle.id, currentPosition);
         (instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(
           movingVehiclePoint(taxiSourceId, currentPosition, {
             ferryStatus:
@@ -2921,8 +2883,6 @@ function GameMapView({
           currentPosition = ferryPosition.position;
           ferryState = ferryPosition.state;
         }
-        if (routeReady && !ferryState) recordLiveDiscovery(vehicle.id, currentPosition);
-        else liveDiscoveryCheckpoints.delete(vehicle.id);
         (instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined)?.setData(movingVehiclePoint(vehicleId, currentPosition, { ferryStatus: ferryState === "waiting" ? "Waiting for ferry" : ferryState === "aboard" ? "On ferry" : "" }));
         if (ferryState !== lastFerryState && instance.getLayer(vehicleId)) {
           instance.setPaintProperty(vehicleId, "circle-color", ferryState === "waiting" ? vehicleColor.waitingForFerry : ferryState === "aboard" ? vehicleColor.onFerry : vehicleColor.postal);
@@ -3042,8 +3002,6 @@ function GameMapView({
             currentPosition = ferryPosition.position;
             ferryState = ferryPosition.state;
           }
-          if (routeReady && !ferryState) recordLiveDiscovery(vehicle.id, currentPosition);
-          else liveDiscoveryCheckpoints.delete(vehicle.id);
           (
             instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined
           )?.setData(

@@ -2,6 +2,12 @@
 -- Run after supabase/schema.sql and supabase/atomic-save-migration.sql.
 -- No separate writes or frame-by-frame taxi updates are required.
 -- SECURITY INVOKER is essential: the owner's worldfront_saves RLS still applies.
+-- Older installations may lack columns expected by the cloud-save client.
+-- Add them without dropping the table or modifying existing saved games.
+alter table public.worldfront_saves
+  add column if not exists revision bigint not null default 0;
+alter table public.worldfront_saves
+  add column if not exists saved_at timestamptz not null default now();
 create or replace view public.worldfront_map_state
 with (security_invoker = true)
 as

@@ -1,5 +1,5 @@
 import { featureCollection, lineString, polygon } from '@turf/helpers'
-import { booleanPointInPolygon, buffer, circle, simplify, union } from '@turf/turf'
+import { booleanPointInPolygon, buffer, circle, difference, simplify, union } from '@turf/turf'
 import type { Coordinates, TerritoryFeature, TerritoryGeometry } from '../models/game'
 
 const EARTH_KM_PER_LATITUDE_DEGREE = 110.574
@@ -182,13 +182,12 @@ export const isInsideTerritoryFeatures = (coordinates: Coordinates, territories:
 /** A red world overlay with the purchased territory cut out as transparent holes. */
 export const lockedTerritoryMask = (unlocked: ReturnType<typeof mergeVillageTerritories>) => {
   const worldRing: Coordinates[] = [[-179.9, -85], [179.9, -85], [179.9, 85], [-179.9, 85], [-179.9, -85]]
-  if (!unlocked) return polygon([worldRing], { locked: true })
-  // GeoJSON interior rings must wind in the opposite direction to their outer
-  // ring. Village territories wind counter-clockwise, just like worldRing, so
-  // passing them through unchanged makes Mapbox fill them instead of treating
-  // them as transparent unlocked areas.
-  const holes = unlocked.geometry.type === 'Polygon'
-    ? [unlocked.geometry.coordinates[0].slice().reverse() as Coordinates[]]
-    : unlocked.geometry.coordinates.map((part: number[][][]) => part[0].slice().reverse() as Coordinates[])
-  return polygon([worldRing, ...holes], { locked: true })
+  const world = polygon([worldRing], { locked: true })
+  if (!unlocked) return world
+
+  // Subtract the complete polygon geometry, including interior rings. The
+  // previous implementation cut out only exterior rings, incorrectly revealing
+  // unvisited islands enclosed by taxi routes.
+  const locked = difference(featureCollection([world, unlocked]))
+  return locked ? { ...locked, properties: { locked: true } } : polygon([worldRing], { locked: true })
 }

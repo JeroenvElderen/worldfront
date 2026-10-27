@@ -137,6 +137,23 @@ export const extendExploredTerritory = (
   return { ...optimized, properties: { id: 'taxi-exploration', unlocked: true as const } }
 }
 
+/** Merge all continuous segments of a completed journey in one union pass.
+ * This avoids repeatedly unioning and simplifying the entire explored map.
+ */
+export const extendExploredTerritorySegments = (
+  existing: TerritoryFeature | null,
+  segments: Coordinates[][],
+  id = 'taxi-exploration',
+): TerritoryFeature | null => {
+  const valid = segments.filter((segment) => segment.length >= 2)
+  if (!valid.length) return existing
+  const discoveries = valid.map((segment, index) => taxiDiscoveryRouteTerritory(`${id}-${index}`, segment))
+  const merged = mergeVillageTerritories([...(existing ? [existing] : []), ...discoveries])
+  if (!merged) return existing
+  const optimized = simplify(merged, { tolerance: .00005, highQuality: false }) as TerritoryFeature
+  return { ...optimized, properties: { id: 'taxi-exploration', unlocked: true as const } }
+}
+
 /** One-time migration for saves that persisted every historical taxi route. */
 export const compactLegacyDiscoveries = (
   existing: TerritoryFeature | null | undefined,

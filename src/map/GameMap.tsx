@@ -51,6 +51,8 @@ import { resolveLandsideFerryTerminals } from "../services/ferryTerminals";
 import { postalDepotCapacity } from "../services/postalDepots";
 import { resolveClosedRoadSegment, routeIntersectsClosedSegment, type ClosedRoadSegment } from "../services/closedRoadSegments";
 import { useGameStore } from "../stores/gameStore";
+import { worldHarbours, worldRoutesForHarbour } from "../services/worldMaritimeNetwork";
+import { isInsideTerritoryFeatures } from "../services/territoryGeometry";
 import { recordTaxiPosition, taxiPosition, persistTaxiPositions } from "../services/liveTaxiPositions";
 
 interface GameMapProps {
@@ -2079,7 +2081,77 @@ function GameMapView({
     realTerritories,
   ]);
 
-  // Harbours exist only where the player explicitly placed them.
+  // World harbours are static infrastructure. Fog-of-war determines visibility.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    harbourMarkers.current.forEach((marker) => marker.remove());
+    const revealed = (coordinates: Coordinates) =>
+      Boolean(liveExploredTerritory && isInsideTerritoryFeatures(coordinates, [liveExploredTerritory])) ||
+      purchasedHarbours.some((owned) => distanceKmBetween(owned.coordinates, coordinates) < 1);
+    const markers = worldHarbours.filter((port) => revealed(port.coordinates)).map((port) => {
+      const owned = purchasedHarbours.some((item) => item.id === port.id);
+      const element = document.createElement("div");
+      element.className = `harbour-map-marker ${owned ? "owned" : "available"}`;
+      element.textContent = "⚓";
+      element.setAttribute("aria-label", port.name);
+      const popupContent = document.createElement("div");
+      popupContent.className = "harbour-popup";
+      const title = document.createElement("strong");
+      title.textContent = port.name;
+      const status = document.createElement("small");
+      status.textContent = owned ? "Owned harbour" : "Discovered harbour · €5,000 to purchase";
+      popupContent.append(title, status);
+      const routes = worldRoutesForHarbour(port);
+      for (const route of routes) {
+        const row = document.createElement("small");
+        const destinationVisible = revealed(route.destinationCoordinates);
+        row.textContent = `⛴ ${destinationVisible ? route.destinationName : "???"} · ${Math.round(route.distanceKm)} km`;
+        popupContent.append(row);
+      }
+      if (!owned) {
+        const purchase = document.createElement("button");
+        purchase.type = "button";
+        purchase.textContent = "Purchase harbour · €5,000";
+        purchase.addEventListener("click", () => onPlaceHarbour(port.coordinates));
+        popupContent.append(purchase);
+      }
+      return new mapboxgl.Marker({ element, anchor: "center" })
+        .setLngLat(port.coordinates)
+        .setPopup(new mapboxgl.Popup({ offset: 16, className: "harbour-map-popup" }).setDOMContent(popupContent))
+        .addTo(instance);
+    });
+    harbourMarkers.current = markers;
+    const sourceId = "world-ferry-discovery";
+    const lineFeatures = worldHarbours.filter((port) => revealed(port.coordinates)).flatMap((port) =>
+      worldRoutesForHarbour(port).map((route) => ({
+        type: "Feature" as const,
+        properties: { id: route.id },
+        geometry: { type: "LineString" as const, coordinates: route.routeCoordinates },
+      })),
+    );
+    const drawRoutes = () => {
+      if (!instance.isStyleLoaded()) return;
+      const data = { type: "FeatureCollection" as const, features: lineFeatures };
+      const existing = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+      if (existing) existing.setData(data);
+      else instance.addSource(sourceId, { type: "geojson", data });
+      if (!instance.getLayer(sourceId)) instance.addLayer({
+        id: sourceId, type: "line", source: sourceId,
+        paint: { "line-color": "#1ccfbd", "line-width": 2, "line-opacity": 0.7, "line-dasharray": [2, 2] },
+      });
+    };
+    drawRoutes();
+    instance.on("style.load", drawRoutes);
+    return () => {
+      instance.off("style.load", drawRoutes);
+      markers.forEach((marker) => marker.remove());
+      if (harbourMarkers.current === markers) harbourMarkers.current = [];
+      if (instance.getLayer(sourceId)) instance.removeLayer(sourceId);
+      if (instance.getSource(sourceId)) instance.removeSource(sourceId);
+    };
+  }, [mapRevision, purchasedHarbours, liveExploredTerritory, onPlaceHarbour]);
+
   useEffect(() => {
     const instance = map.current;
     if (!instance) return;

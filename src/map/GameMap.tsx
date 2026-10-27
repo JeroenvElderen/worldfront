@@ -2043,11 +2043,15 @@ function GameMapView({
     const refresh = () => { loadIcon(); applyIcons(); };
     instance.on("style.load", refresh);
     instance.on("idle", applyIcons);
+    // Vehicle sources can be created after the map's first idle event.
+    // Recheck after each render, including after a page refresh/hydration.
+    instance.on("render", applyIcons);
     refresh();
     return () => {
       disposed = true;
       instance.off("style.load", refresh);
       instance.off("idle", applyIcons);
+      instance.off("render", applyIcons);
     };
   }, [mapRevision, vehicles]);
 

@@ -1968,16 +1968,19 @@ function GameMapView({
     };
   }, [mapRevision, postalDepots, vehicles]);
 
+  // Attach symbols after sources exist; the old effect ran before vehicle
+  // sources were created, leaving the original circles visible.
   useEffect(() => {
     const instance = map.current;
-    if (!instance?.isStyleLoaded()) return;
-    let cancelled = false;
-    const applyVehicleIcons = () => {
-      if (cancelled || !instance.isStyleLoaded() || !instance.hasImage(TAXI_SVG_IMAGE)) return;
-      vehicles.forEach((vehicle) => {
+    if (!instance) return;
+    let disposed = false;
+    const applyIcons = () => {
+      if (disposed || !instance.isStyleLoaded()) return;
+      for (const vehicle of vehicles) {
+        if (vehicle.type !== "taxi") continue;
         const sourceId = vehicleSourceId(vehicle.id);
         const layerId = `${sourceId}-taxi-svg`;
-        if (!instance.getSource(sourceId)) return;
+        if (!instance.getSource(sourceId) || !instance.hasImage(TAXI_SVG_IMAGE)) continue;
         if (!instance.getLayer(layerId)) {
           instance.addLayer({
             id: layerId,
@@ -1985,10 +1988,12 @@ function GameMapView({
             source: sourceId,
             layout: {
               "icon-image": TAXI_SVG_IMAGE,
-              "icon-size": 0.24,
+              "icon-size": 0.12,
               "icon-allow-overlap": true,
               "icon-ignore-placement": true,
-              "icon-rotation-alignment": "viewport",
+              "icon-rotation-alignment": "map",
+              "icon-pitch-alignment": "map",
+              "icon-rotate": ["coalesce", ["get", "heading"], 0],
             },
           });
         }
@@ -1996,29 +2001,36 @@ function GameMapView({
           instance.setPaintProperty(sourceId, "circle-opacity", 0);
           instance.setPaintProperty(sourceId, "circle-stroke-opacity", 0);
         }
-      });
+      }
     };
-    if (instance.hasImage(TAXI_SVG_IMAGE)) {
-      applyVehicleIcons();
-    } else {
+    const loadIcon = () => {
+      if (disposed || !instance.isStyleLoaded()) return;
+      if (instance.hasImage(TAXI_SVG_IMAGE)) { applyIcons(); return; }
       const img = new Image();
       img.onload = () => {
-        if (cancelled || !instance.isStyleLoaded()) return;
+        if (disposed || !instance.isStyleLoaded()) return;
         const canvas = document.createElement("canvas");
-        canvas.width = 48;
-        canvas.height = 96;
+        canvas.width = 128;
+        canvas.height = 256;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
-        ctx.drawImage(img, 0, 0, 48, 96);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         if (!instance.hasImage(TAXI_SVG_IMAGE)) {
-          instance.addImage(TAXI_SVG_IMAGE, ctx.getImageData(0, 0, 48, 96), { pixelRatio: 2 });
+          instance.addImage(TAXI_SVG_IMAGE, ctx.getImageData(0, 0, canvas.width, canvas.height), { pixelRatio: 2 });
         }
-        applyVehicleIcons();
+        applyIcons();
       };
       img.src = TAXI_SVG_URL;
-    }
-    instance.once("idle", applyVehicleIcons);
-    return () => { cancelled = true; };
+    };
+    const refresh = () => { loadIcon(); applyIcons(); };
+    instance.on("style.load", refresh);
+    instance.on("idle", applyIcons);
+    refresh();
+    return () => {
+      disposed = true;
+      instance.off("style.load", refresh);
+      instance.off("idle", applyIcons);
+    };
   }, [mapRevision, vehicles]);
 
   useEffect(() => {

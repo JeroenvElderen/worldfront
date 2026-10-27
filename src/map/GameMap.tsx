@@ -741,6 +741,33 @@ function GameMapView({
   transportAssetsRef.current = transportAssets;
   transportRoutesRef.current = transportRoutes;
   const [mapRevision, setMapRevision] = useState(0);
+  // Simulated congestion for currently displayed mission roads. This does not
+  // claim to be live traffic data and never changes actual road geometry.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance || !containerReady) return;
+    const refresh = () => {
+      const hour = ((Date.now() / 3_600_000 + instance.getCenter().lng / 15) % 24 + 24) % 24;
+      const peak = (hour >= 7 && hour < 9.5) || (hour >= 16.5 && hour < 19);
+      const shoulder = (hour >= 6 && hour < 11) || (hour >= 15 && hour < 21);
+      for (const job of jobs) {
+        if (job.status !== "accepted" || job.cityId !== cityId) continue;
+        const layerId = jobRouteSourceId(job.id);
+        if (!instance.getLayer(layerId)) continue;
+        // Each route has a stable severity so not every road looks identical.
+        const seed = [...job.id].reduce((n, c) => n + c.charCodeAt(0), 0) % 4;
+        const severity = (peak ? 2 : shoulder ? 1 : 0) + (seed === 0 ? 1 : 0);
+        instance.setPaintProperty(layerId, "line-color",
+          severity >= 3 ? "#ef4444" : severity === 2 ? "#f97316" : severity === 1 ? "#eab308" : missionColor(job.id));
+        instance.setPaintProperty(layerId, "line-width", severity >= 2 ? 3.5 : 2);
+      }
+    };
+    instance.on("style.load", refresh);
+    const timer = window.setInterval(refresh, 30_000);
+    refresh();
+    return () => { instance.off("style.load", refresh); window.clearInterval(timer); };
+  }, [jobs, cityId, mapRevision, containerReady]);
+
   const [containerReady, setContainerReady] = useState(false);
   // Use a visible night basemap rather than a subtle canvas brightness filter.
   // Keep the current map instance, sources and mission layers intact.

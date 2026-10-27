@@ -172,9 +172,14 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
   // creates a territoryExpansions record or deducts company cash.
   discoverLiveRoute: (route) => set((state) => {
     if (!state.company || route.length < 2) return state;
-    const explored = extendExploredTerritory(state.exploredTerritory, route, 'live-taxi-exploration');
-    if (explored === state.exploredTerritory) return state;
-    return { exploredTerritory: explored, updatedAt: new Date().toISOString() };
+    try {
+      const explored = extendExploredTerritory(state.exploredTerritory, route, 'live-taxi-exploration');
+      if (explored === state.exploredTerritory) return state;
+      return { exploredTerritory: explored, updatedAt: new Date().toISOString() };
+    } catch (error) {
+      console.error("[exploration] Unable to merge travelled road geometry", error);
+      return state;
+    }
   }),
 
   ...blankSave, activeSection: 'map', focusedJobId: null, hasHydrated: false, jobsLoading: false, jobsError: null,

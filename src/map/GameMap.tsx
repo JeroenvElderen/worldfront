@@ -733,8 +733,8 @@ function GameMapView({
           [[point.x - 14, point.y - 14], [point.x + 14, point.y + 14]],
         ).filter((feature) =>
           feature.geometry.type === "LineString" &&
-          /road|street|transportation/i.test(feature.layer.id) &&
-          !/closure/i.test(feature.layer.id),
+          /road|street|transportation/i.test(feature.layer?.id ?? "") &&
+          !/closure/i.test(feature.layer?.id ?? ""),
         );
         let best: GeoJSON.LineString | null = null;
         let nearest = Number.POSITIVE_INFINITY;

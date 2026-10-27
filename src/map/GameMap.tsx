@@ -766,7 +766,7 @@ function GameMapView({
     };
     instance.on("style.load", updateClosureRoads);
     instance.on("moveend", updateClosureRoads);
-    instance.on("idle", updateClosureRoads);
+    instance.once("idle", updateClosureRoads);
     updateClosureRoads();
     incidentMarkers.current = [
       ...activeTraffic.map((incident) =>

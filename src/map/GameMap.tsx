@@ -712,6 +712,20 @@ function GameMapView({
   onJobFerryCrossingComplete,
   onTaxiArrived,
 }: GameMapProps) {
+  // The map owns an independent subscription to exploration changes. Taxi
+  // animation updates Zustand directly, so relying solely on parent props
+  // can leave the Mapbox fog-of-war stale until a page refresh.
+  const [liveExploredTerritory, setLiveExploredTerritory] = useState<TerritoryFeature | null>(
+    () => useGameStore.getState().exploredTerritory ?? exploredTerritory,
+  );
+  useEffect(() => {
+    setLiveExploredTerritory(useGameStore.getState().exploredTerritory ?? exploredTerritory);
+    return useGameStore.subscribe((state, previous) => {
+      if (state.exploredTerritory !== previous.exploredTerritory) {
+        setLiveExploredTerritory(state.exploredTerritory);
+      }
+    });
+  }, [exploredTerritory]);
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const pickupJobIds = useRef(new Set<string>());
@@ -1946,7 +1960,7 @@ function GameMapView({
       // with village coverage and never replays historical routes.
       const unlockedTerritory = mergeVillageTerritories([
         ...ownedTerritories,
-        ...(exploredTerritory ? [exploredTerritory] : []),
+        ...(liveExploredTerritory ? [liveExploredTerritory] : []),
       ]);
       const coverageData = featureCollection(
         unlockedTerritory ? [unlockedTerritory] : [],
@@ -2082,7 +2096,7 @@ function GameMapView({
     branches,
     customCities,
     territoryExpansions,
-    exploredTerritory,
+    liveExploredTerritory,
     mapRevision,
     realTerritories,
   ]);

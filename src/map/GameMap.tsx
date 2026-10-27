@@ -2430,7 +2430,12 @@ function GameMapView({
             "line-width": 2,
             "line-opacity": 0.7,
           },
-        });
+        }, instance.getLayer(taxiSourceId) ? taxiSourceId : undefined);
+      }
+      // Layer order can change after a style reload or vehicle re-creation.
+      // Keep the live route behind its taxi, including on subsequent updates.
+      if (instance.getLayer(routeSourceId) && instance.getLayer(taxiSourceId)) {
+        instance.moveLayer(routeSourceId, taxiSourceId);
       }
 
       if (instance.getLayer(taxiSourceId)) {

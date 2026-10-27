@@ -742,6 +742,32 @@ function GameMapView({
   transportRoutesRef.current = transportRoutes;
   const [mapRevision, setMapRevision] = useState(0);
   const [containerReady, setContainerReady] = useState(false);
+  // Keep the base map readable at night without dimming mission markers,
+  // taxi icons, route overlays or interactive HTML controls.
+  useEffect(() => {
+    const updateLighting = () => {
+      const instance = map.current;
+      if (!instance) return;
+      const longitude = instance.getCenter().lng;
+      const utcHour = (Date.now() / 3_600_000) % 24;
+      const localHour = (utcHour + longitude / 15 + 24) % 24;
+      const daylight = localHour >= 7 && localHour < 19;
+      const twilight = (localHour >= 6 && localHour < 7) || (localHour >= 19 && localHour < 20);
+      const canvas = instance.getCanvas();
+      canvas.style.filter = daylight ? "none" : twilight ? "brightness(0.82) saturate(0.9)" : "brightness(0.62) saturate(0.82)";
+      canvas.style.transition = "filter 90s linear";
+    };
+    const timer = window.setInterval(updateLighting, 60_000);
+    const instance = map.current;
+    instance?.on("moveend", updateLighting);
+    updateLighting();
+    return () => {
+      window.clearInterval(timer);
+      instance?.off("moveend", updateLighting);
+      if (instance) instance.getCanvas().style.filter = "none";
+    };
+  }, [mapRevision, containerReady]);
+
   // Null is a resolved fallback too. Remember it so a location with no mapped
   // boundary does not trigger another reverse-geocode request after each trip.
   const [realTerritories, setRealTerritories] = useState<

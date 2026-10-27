@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { featureCollection, lineString, point } from "@turf/helpers";
+import { along, length } from "@turf/turf";
 import { mapboxAccessToken } from "../config/mapbox";
 import { getCity, worldOverview } from "../data/cities";
 import { taxiModels, taxiTripSpeedMultiplier } from "../data/taxis";
@@ -421,38 +422,6 @@ if (typeof window !== "undefined") {
 }
 // Throttle geometry unions and indexedDB writes; only actual taxi travel
 // contributes to discovery, never a proposed route.
-const liveDiscoveryCheckpoints = new Map<string, { position: Coordinates; at: number }>();
-const recordLiveDiscovery = (vehicleId: string, position: Coordinates) => {
-  const now = Date.now();
-  const previous = liveDiscoveryCheckpoints.get(vehicleId);
-  if (!previous) {
-    liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
-    // Reveal the first road position immediately instead of waiting for a
-    // second movement checkpoint (important for short trips).
-    try {
-      const offset: Coordinates = [position[0] + 0.00001, position[1]];
-      useGameStore.getState().discoverLiveRoute([position, offset]);
-    } catch (error) {
-      console.warn("[exploration] Initial road discovery failed", error);
-    }
-    return;
-  }
-  if (now - previous.at < 750) return;
-  const distance = distanceKmBetween(previous.position, position);
-  if (distance < 0.003) return;
-  // Avoid connecting teleportation, city switching, or stale positions with
-  // a fictional discovered road across the map.
-  if (distance > 10) {
-    liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
-    return;
-  }
-  liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
-  try {
-    useGameStore.getState().discoverLiveRoute([previous.position, position]);
-  } catch (error) {
-    console.warn("[exploration] Live territory update failed", error);
-  }
-};
 const TAXI_SVG_IMAGE = "worldfront-taxi-svg";
 const TAXI_SVG_URL = `${import.meta.env.BASE_URL}vehicles/taxi-topview.svg`;
 const VEHICLE_MARKER_RADIUS = 4;
@@ -736,6 +705,82 @@ function GameMapView({
     });
   }, [exploredTerritory]);
   const container = useRef<HTMLDivElement>(null);
+  // Each arrival animates independently. Persisted exploration is already saved
+  // at drop-off; this road-tracing highlight is purely visual.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    const processed = new Set<string>();
+    const frames = new Map<string, number>();
+    const sourceId = "completed-discovery-routes";
+    const activeRoutes = new Map<string, Coordinates[]>();
+    const redraw = () => {
+      const source = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+      if (!source) return;
+      source.setData(featureCollection([...activeRoutes].map(([id, route]) =>
+        lineString(route, { id }))));
+    };
+    const ensureLayer = () => {
+      if (!instance.isStyleLoaded() || instance.getSource(sourceId)) return;
+      instance.addSource(sourceId, { type: "geojson", data: featureCollection([]) });
+      instance.addLayer({
+        id: "completed-discovery-glow", type: "line", source: sourceId,
+        paint: { "line-color": "#5eead4", "line-width": 12, "line-opacity": 0.3, "line-blur": 8 },
+      });
+      instance.addLayer({
+        id: "completed-discovery-trace", type: "line", source: sourceId,
+        paint: { "line-color": "#a7f3d0", "line-width": 4, "line-opacity": 0.95 },
+      });
+    };
+    const animate = (id: string, route: Coordinates[]) => {
+      if (route.length < 2) return;
+      const line = lineString(route);
+      const total = length(line, { units: "kilometers" });
+      if (!Number.isFinite(total) || total <= 0) return;
+      const started = performance.now();
+      const frame = (now: number) => {
+        if (!instance.getSource(sourceId)) return;
+        const progress = Math.min(1, (now - started) / 3000);
+        const segments = Math.max(2, Math.ceil(progress * Math.min(120, route.length * 4)));
+        const prefix: Coordinates[] = [route[0]];
+        for (let index = 1; index <= segments; index++) {
+          prefix.push(along(line, total * progress * index / segments, { units: "kilometers" }).geometry.coordinates as Coordinates);
+        }
+        activeRoutes.set(id, prefix);
+        redraw();
+        if (progress < 1) frames.set(id, requestAnimationFrame(frame));
+        else {
+          frames.delete(id);
+          window.setTimeout(() => { activeRoutes.delete(id); redraw(); }, 500);
+        }
+      };
+      frames.set(id, requestAnimationFrame(frame));
+    };
+    const handle = (state: ReturnType<typeof useGameStore.getState>) => {
+      ensureLayer();
+      if (!instance.getSource(sourceId)) return;
+      for (const event of state.discoveryAnimations ?? []) {
+        if (processed.has(event.id)) continue;
+        processed.add(event.id);
+        animate(event.id, event.route);
+      }
+    };
+    // Only arrivals observed while this map is open animate; older persisted
+    // arrivals remain visible normally and do not replay after navigation.
+    for (const event of useGameStore.getState().discoveryAnimations ?? []) processed.add(event.id);
+    const unsubscribe = useGameStore.subscribe(state => handle(state));
+    instance.on("style.load", ensureLayer);
+    ensureLayer();
+    return () => {
+      unsubscribe();
+      instance.off("style.load", ensureLayer);
+      for (const frame of frames.values()) cancelAnimationFrame(frame);
+      if (instance.getLayer("completed-discovery-trace")) instance.removeLayer("completed-discovery-trace");
+      if (instance.getLayer("completed-discovery-glow")) instance.removeLayer("completed-discovery-glow");
+      if (instance.getSource(sourceId)) instance.removeSource(sourceId);
+    };
+  }, []);
+
   const map = useRef<mapboxgl.Map | null>(null);
   const pickupJobIds = useRef(new Set<string>());
   const pickupHandlers = useRef(
@@ -1211,8 +1256,6 @@ function GameMapView({
                 ferryState = ferryPosition.state;
               }
               // Discover only road movement, never ferry crossings or unresolved routes.
-              if (routeReady && !ferryState) recordLiveDiscovery(vehicle.id, currentPosition);
-              else liveDiscoveryCheckpoints.delete(vehicle.id);
               (
                 instance.getSource(sourceId) as
                   | mapboxgl.GeoJSONSource
@@ -1343,8 +1386,6 @@ function GameMapView({
                 ferryState = ferryPosition.state;
               }
               // Discover only road movement, never ferry crossings or unresolved routes.
-              if (routeReady && !ferryState) recordLiveDiscovery(vehicle.id, currentPosition);
-              else liveDiscoveryCheckpoints.delete(vehicle.id);
               (
                 instance.getSource(sourceId) as
                   | mapboxgl.GeoJSONSource
@@ -1724,7 +1765,6 @@ function GameMapView({
               }),
             );
             recordTaxiPosition(vehicle.id, currentPosition);
-            recordLiveDiscovery(vehicle.id, currentPosition);
             // Check active OSM closure edges while driving. Persist the new route
             // and its clock anchor so a page refresh resumes the same detour.
             if (!pickingUp && !ferryState && !reroutePending &&
@@ -2725,7 +2765,6 @@ function GameMapView({
             );
           }
         }
-        recordLiveDiscovery(vehicle.id, currentPosition);
         (instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(
           movingVehiclePoint(taxiSourceId, currentPosition, {
             ferryStatus:
@@ -2921,8 +2960,6 @@ function GameMapView({
           currentPosition = ferryPosition.position;
           ferryState = ferryPosition.state;
         }
-        if (routeReady && !ferryState) recordLiveDiscovery(vehicle.id, currentPosition);
-        else liveDiscoveryCheckpoints.delete(vehicle.id);
         (instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined)?.setData(movingVehiclePoint(vehicleId, currentPosition, { ferryStatus: ferryState === "waiting" ? "Waiting for ferry" : ferryState === "aboard" ? "On ferry" : "" }));
         if (ferryState !== lastFerryState && instance.getLayer(vehicleId)) {
           instance.setPaintProperty(vehicleId, "circle-color", ferryState === "waiting" ? vehicleColor.waitingForFerry : ferryState === "aboard" ? vehicleColor.onFerry : vehicleColor.postal);
@@ -3042,8 +3079,6 @@ function GameMapView({
             currentPosition = ferryPosition.position;
             ferryState = ferryPosition.state;
           }
-          if (routeReady && !ferryState) recordLiveDiscovery(vehicle.id, currentPosition);
-          else liveDiscoveryCheckpoints.delete(vehicle.id);
           (
             instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined
           )?.setData(

@@ -712,6 +712,7 @@ function GameMapView({
       }
     });
   }, [exploredTerritory]);
+  const discoveredFerryRoutes = useGameStore((state) => state.discoveredFerryRoutes)
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const pickupJobIds = useRef(new Set<string>());
@@ -2130,6 +2131,12 @@ function GameMapView({
         geometry: { type: "LineString" as const, coordinates: route.routeCoordinates },
       })),
     );
+    // Add live provider connections for owned harbours to the map overlay.
+    for (const route of discoveredFerryRoutes ?? []) {
+      if (!route.harbourId || !purchasedHarbours.some((port) => port.id === route.harbourId)) continue;
+      if (route.id.includes('simulated-harbour-circuit') || route.routeCoordinates.length < 2) continue;
+      lineFeatures.push({ type: 'Feature', properties: { id: route.id }, geometry: { type: 'LineString', coordinates: route.routeCoordinates } });
+    }
     const drawRoutes = () => {
       if (!instance.isStyleLoaded()) return;
       const data = { type: "FeatureCollection" as const, features: lineFeatures };
@@ -2150,7 +2157,7 @@ function GameMapView({
       if (instance.getLayer(sourceId)) instance.removeLayer(sourceId);
       if (instance.getSource(sourceId)) instance.removeSource(sourceId);
     };
-  }, [mapRevision, purchasedHarbours, liveExploredTerritory, onPlaceHarbour]);
+  }, [mapRevision, purchasedHarbours, liveExploredTerritory, onPlaceHarbour, discoveredFerryRoutes]);
 
   useEffect(() => {
     const instance = map.current;

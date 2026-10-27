@@ -46,14 +46,14 @@ interface GameActions {
   setDispatcherStrategy: (dispatcherId: string, strategy: DispatcherStrategy) => void
   respondToReview: (reviewId: string, response: 'thanks' | 'apology' | 'voucher' | 'dispute') => void
 }
-interface GameState extends GameSave { activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
+interface GameState extends GameSave { setTaxiTravelSpeed: (speed: 1 | 2 | 4 | 8) => void; activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
 
 const initialContracts = () => [
   { id: crypto.randomUUID(), name: 'Airport partner', description: 'Complete 5 airport transfers', category: 'airport' as const, target: 5, progress: 0, reward: 4_500, expiresAt: new Date(Date.now() + 7 * 60_000).toISOString(), accepted: false, completed: false },
   { id: crypto.randomUUID(), name: 'City post tender', description: 'Complete 3 postal rounds', category: 'postal' as const, target: 3, progress: 0, reward: 6_000, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(), accepted: false, completed: false },
   { id: crypto.randomUUID(), name: 'Visitor experience', description: 'Complete 2 guided tours', category: 'tour' as const, target: 2, progress: 0, reward: 5_000, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(), accepted: false, completed: false },
 ]
-const blankSave: GameSave = { id: 'autosave', version: 28, updatedAt: new Date(0).toISOString(), pausedAt: null, company: null, startingCityId: null, activeCityId: null, branches: [], territoryExpansions: [], exploredTerritory: null, customCities: [], territoryLicenses: [], countryLicenses: [], hotels: [], cityEconomies: [], vehicles: [], garageLevel: 0, postalDepots: [], postalPerformance: { completedRounds: 0, deliveredParcels: 0, revenue: 0, distanceKm: 0, onTimeRounds: 0 }, transportAssets: [], transportRoutes: [], discoveredFerryRoutes: [], purchasedHarbours: [], drivers: [], driverCandidates: [], mechanics: [], dispatchers: [], automationEmployees: [], maintenanceAlerts: [], customerReviews: [], jobs: [], agencies: [], tours: [], coachRoutes: [], contracts: [], specialization: null, specializationPoints: 1, completedResearch: [], automation: { enabled: false, minFare: 20, maxPickupKm: 10, minFuel: 20, minCondition: 30, autoServiceBelow: 30, cashReserve: 5_000, activity: [] }, passengers: [], goals: [], jobRequestHistory: [], loans: [], financialTransactions: [], activeEvent: null, nextEventAt: new Date(0).toISOString(), nextOperatingPaymentAt: new Date(0).toISOString(), competitors: [], difficulty: 'standard', worldCondition: createWorldCondition(0), incidents: [], trafficIncidents: [], nextTrafficIncidentAt: new Date(0).toISOString(), brandStrategy: defaultBrandStrategy }
+const blankSave: GameSave = { taxiTravelSpeed: 4, id: 'autosave', version: 28, updatedAt: new Date(0).toISOString(), pausedAt: null, company: null, startingCityId: null, activeCityId: null, branches: [], territoryExpansions: [], exploredTerritory: null, customCities: [], territoryLicenses: [], countryLicenses: [], hotels: [], cityEconomies: [], vehicles: [], garageLevel: 0, postalDepots: [], postalPerformance: { completedRounds: 0, deliveredParcels: 0, revenue: 0, distanceKm: 0, onTimeRounds: 0 }, transportAssets: [], transportRoutes: [], discoveredFerryRoutes: [], purchasedHarbours: [], drivers: [], driverCandidates: [], mechanics: [], dispatchers: [], automationEmployees: [], maintenanceAlerts: [], customerReviews: [], jobs: [], agencies: [], tours: [], coachRoutes: [], contracts: [], specialization: null, specializationPoints: 1, completedResearch: [], automation: { enabled: false, minFare: 20, maxPickupKm: 10, minFuel: 20, minCondition: 30, autoServiceBelow: 30, cashReserve: 5_000, activity: [] }, passengers: [], goals: [], jobRequestHistory: [], loans: [], financialTransactions: [], activeEvent: null, nextEventAt: new Date(0).toISOString(), nextOperatingPaymentAt: new Date(0).toISOString(), competitors: [], difficulty: 'standard', worldCondition: createWorldCondition(0), incidents: [], trafficIncidents: [], nextTrafficIncidentAt: new Date(0).toISOString(), brandStrategy: defaultBrandStrategy }
 
 
 const transaction = (category: TransactionCategory, description: string, amount: number, vehicleId?: string, occurredAt = new Date().toISOString()): FinancialTransaction => ({
@@ -184,6 +184,28 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
 
   ...blankSave, activeSection: 'map', focusedJobId: null, hasHydrated: false, jobsLoading: false, jobsError: null,
   setHasHydrated: (hasHydrated) => set({ hasHydrated }),
+  setTaxiTravelSpeed: (speed) => set((state) => {
+    if (![1, 2, 4, 8].includes(speed) || speed === (state.taxiTravelSpeed ?? 4)) return state
+    const now = Date.now()
+    const jobs = state.jobs.map((job) => {
+      if (job.status !== 'accepted' || !job.acceptedAt) return job
+      const oldSpeed = job.travelSpeedMultiplier ?? 1
+      const ferryDelay = (job.pickupFerryDelayMs ?? 0) + (job.passengerFerryDelayMs ?? 0)
+      const elapsedMotion = Math.max(0, now - new Date(job.acceptedAt).getTime() - ferryDelay)
+      const rebasedAcceptedAt = new Date(now - ferryDelay - elapsedMotion * oldSpeed / speed).toISOString()
+      const rerouteElapsed = job.rerouteStartedAt ? Math.max(0, now - new Date(job.rerouteStartedAt).getTime()) : 0
+      return {
+        ...job,
+        acceptedAt: rebasedAcceptedAt,
+        travelSpeedMultiplier: speed,
+        ...(job.rerouteStartedAt && job.rerouteDurationMs ? {
+          rerouteStartedAt: new Date(now - rerouteElapsed * oldSpeed / speed).toISOString(),
+          rerouteDurationMs: job.rerouteDurationMs * oldSpeed / speed,
+        } : {}),
+      }
+    })
+    return { taxiTravelSpeed: speed, jobs, updatedAt: new Date(now).toISOString() }
+  }),
   setSection: (activeSection) => set({ activeSection }),
   openJob: (focusedJobId) => set({ focusedJobId, activeSection: 'jobs' }),
   showJobOnMap: (focusedJobId) => set({ focusedJobId, activeSection: 'map' }),
@@ -624,6 +646,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
     if (!offeredJob || !suitableVehicles.length) return state
     const result = acceptJobState(state.jobs, state.vehicles, jobId, new Set(suitableVehicles.map((vehicle) => vehicle.id)))
     if (!result) return state
+    result.jobs = result.jobs.map((job) => job.id === jobId ? { ...job, travelSpeedMultiplier: state.taxiTravelSpeed ?? 4 } : job)
     const assignedVehicleId = result.jobs.find((job) => job.id === jobId)?.assignedVehicleId
     const driverId = result.vehicles.find((vehicle) => vehicle.id === assignedVehicleId)?.driverId
     const driver = state.drivers.find((candidate) => candidate.id === driverId)
@@ -1574,7 +1597,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
       postalDepotAssignments.set(vehicle.id, depot.id)
       postalDepotLoads.set(depot.id, (postalDepotLoads.get(depot.id) ?? 0) + 1)
     }
-    return { ...current, ...saved, version: 28, company, customCities, territoryExpansions, exploredTerritory, hotels, cityEconomies, territoryLicenses: saved.territoryLicenses ?? [], countryLicenses: saved.countryLicenses ?? [], discoveredFerryRoutes, purchasedHarbours, jobs, postalDepots, postalPerformance, completedResearch: saved.completedResearch ?? [], competitors: saved.competitors ?? [], difficulty: saved.difficulty ?? 'standard', worldCondition: saved.worldCondition ?? createWorldCondition(), incidents: saved.incidents ?? [], mechanics: saved.mechanics ?? [], dispatchers: saved.dispatchers ?? [], automationEmployees: saved.automationEmployees ?? [], maintenanceAlerts: saved.maintenanceAlerts ?? [], customerReviews: saved.customerReviews ?? [], brandStrategy: { ...defaultBrandStrategy, ...(saved.brandStrategy ?? {}) }, automation: { ...current.automation, ...(saved.automation ?? {}), activity: saved.automation?.activity ?? [] }, vehicles: (saved.vehicles ?? []).map((vehicle) => ({ cleanliness: 100, tireCondition: 100, tireType: 'touring' as const, tireInstalledAtKm: vehicle.odometerKm ?? 0, ...vehicle, postalDepotId: postalDepots.some((depot) => depot.id === vehicle.postalDepotId) ? vehicle.postalDepotId : postalDepotAssignments.get(vehicle.id), status: strandedJobVehicleIds.has(vehicle.id) ? 'available' as const : vehicle.status })), drivers: (saved.drivers ?? []).map((driver) => ({ experience: 0, morale: 80, certifications: [], completedTrips: 0, careerEarnings: 0, ...driver, status: strandedDriverIds.has(driver.id) ? 'available' as const : driver.status })), branches: (saved.branches ?? []).map((branch, index) => ({ ...branch, name: branch.isHeadquarters ? `Station ${index + 1}` : branch.name, isHeadquarters: undefined, coordinates: branch.coordinates ?? getCity(branch.cityId, saved.customCities ?? [])?.coordinates })) }
+    return { ...current, ...saved, version: 28, taxiTravelSpeed: saved.taxiTravelSpeed ?? 4, company, customCities, territoryExpansions, exploredTerritory, hotels, cityEconomies, territoryLicenses: saved.territoryLicenses ?? [], countryLicenses: saved.countryLicenses ?? [], discoveredFerryRoutes, purchasedHarbours, jobs, postalDepots, postalPerformance, completedResearch: saved.completedResearch ?? [], competitors: saved.competitors ?? [], difficulty: saved.difficulty ?? 'standard', worldCondition: saved.worldCondition ?? createWorldCondition(), incidents: saved.incidents ?? [], mechanics: saved.mechanics ?? [], dispatchers: saved.dispatchers ?? [], automationEmployees: saved.automationEmployees ?? [], maintenanceAlerts: saved.maintenanceAlerts ?? [], customerReviews: saved.customerReviews ?? [], brandStrategy: { ...defaultBrandStrategy, ...(saved.brandStrategy ?? {}) }, automation: { ...current.automation, ...(saved.automation ?? {}), activity: saved.automation?.activity ?? [] }, vehicles: (saved.vehicles ?? []).map((vehicle) => ({ cleanliness: 100, tireCondition: 100, tireType: 'touring' as const, tireInstalledAtKm: vehicle.odometerKm ?? 0, ...vehicle, postalDepotId: postalDepots.some((depot) => depot.id === vehicle.postalDepotId) ? vehicle.postalDepotId : postalDepotAssignments.get(vehicle.id), status: strandedJobVehicleIds.has(vehicle.id) ? 'available' as const : vehicle.status })), drivers: (saved.drivers ?? []).map((driver) => ({ experience: 0, morale: 80, certifications: [], completedTrips: 0, careerEarnings: 0, ...driver, status: strandedDriverIds.has(driver.id) ? 'available' as const : driver.status })), branches: (saved.branches ?? []).map((branch, index) => ({ ...branch, name: branch.isHeadquarters ? `Station ${index + 1}` : branch.name, isHeadquarters: undefined, coordinates: branch.coordinates ?? getCity(branch.cityId, saved.customCities ?? [])?.coordinates })) }
   },
   partialize: ({ activeSection, focusedJobId, hasHydrated, jobsLoading, jobsError, ...save }) => {
     void activeSection

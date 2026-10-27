@@ -1655,15 +1655,17 @@ useGameStore.subscribe((state, previous) => {
   if (offered >= Math.min(MAX_JOB_OFFERS, availableJobOfferCapacity(state))) return
   if (!selectJobGenerationTaxi(state)) return
   if (replenishTimer) clearTimeout(replenishTimer)
+  // Schedule *after* the cooldown rather than silently dropping a refill.
+  // A second offer may disappear while the previous generation is cooling down.
+  const cooldownRemaining = Math.max(0, REPLENISH_COOLDOWN_MS - (Date.now() - lastReplenishAttempt))
   replenishTimer = setTimeout(() => {
     replenishTimer = null
     const latest = useGameStore.getState()
     if (!latest.hasHydrated || !latest.company || latest.pausedAt || latest.jobsLoading) return
-    if (Date.now() - lastReplenishAttempt < REPLENISH_COOLDOWN_MS) return
     const capacity = Math.min(MAX_JOB_OFFERS, availableJobOfferCapacity(latest))
     if (latest.jobs.filter((job) => job.status === 'offered').length >= capacity) return
     if (!selectJobGenerationTaxi(latest)) return
     lastReplenishAttempt = Date.now()
     void latest.addRandomJob()
-  }, REPLENISH_DEBOUNCE_MS)
+  }, Math.max(REPLENISH_DEBOUNCE_MS, cooldownRemaining))
 })

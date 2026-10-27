@@ -4,7 +4,7 @@ import { cities, countries, getCity } from '../data/cities'
 import { transportModels } from '../data/transport'
 import { getTaxiModel } from '../data/taxis'
 import { getPostVehicleModel } from '../data/postVehicles'
-import type { AutomationRole, BrandStrategy, City, CleaningService, Company, Coordinates, DepotFacility, Difficulty, DispatcherStrategy, Driver, DriverCertification, ExteriorAccessory, FerryRouteOption, FinancialTransaction, GameSave, IncidentResponse, MaintenanceKind, PostalDepot, PostalRoutePlan, RefuelStrategy, ResearchId, Specialization, TaxiFerryCrossing, TaxiJob, TerritoryExpansion, TerritoryFeature, TireType, TransactionCategory, TransportMode, Vehicle, VehicleUpgrade } from '../models/game'
+import type { AutomationRole, BrandStrategy, City, CleaningService, Company, Coordinates, DepotFacility, Difficulty, DispatcherStrategy, Driver, DriverCertification, ExteriorAccessory, FerryRouteOption, FinancialTransaction, GameSave, IncidentResponse, MaintenanceKind, PostalDepot, PostalRoutePlan, RefuelStrategy, ResearchId, Specialization, TaxiFerryCrossing, TerritoryExpansion, TireType, TransactionCategory, TransportMode, Vehicle, VehicleUpgrade } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
 import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import {
@@ -153,15 +153,6 @@ const unlockedTerritoryCenters = (state: Pick<GameState, 'branches' | 'territory
     source: source === 'ferry-discovery' ? 'ferry-discovery' as const : 'village' as const,
   })),
 ]
-const completedJobRoute = (job: TaxiJob, start?: Coordinates) => {
-  const pickupRoute = job.pickupRouteCoordinates ?? [start, jobPickup(job)]
-  return [...pickupRoute, ...(job.routeCoordinates ?? [jobPickup(job), jobDestination(job)]).slice(1)]
-    .filter((point): point is Coordinates => Boolean(point))
-}
-const addTaxiDiscovery = (existing: TerritoryFeature | null, job: TaxiJob, start: Coordinates | undefined) => {
-  const routeCoordinates = completedJobRoute(job, start)
-  return extendExploredTerritory(existing, routeCoordinates)
-}
 const advanceContracts = (contracts: GameSave['contracts'], category: GameSave['contracts'][number]['category']) => contracts.map((contract) => {
   if (!contract.accepted || contract.completed || contract.category !== category) return contract
   const progress = Math.min(contract.target, contract.progress + 1)
@@ -753,11 +744,10 @@ const generationTaxi = selectJobGenerationTaxi(state)
   completeJob: (jobId) => set((state) => {
     if (!state.company) return state
     const job = state.jobs.find((candidate) => candidate.id === jobId)
-    const vehicle = state.vehicles.find((candidate) => candidate.id === job?.assignedVehicleId)
     const result = completeJobState(state.company, state.jobs, state.vehicles, jobId)
     if (!result || !job) return state
     const updatedAt = new Date().toISOString()
-    return { ...result, exploredTerritory: addTaxiDiscovery(state.exploredTerritory, job, vehicle?.position), updatedAt }
+    return { ...result, updatedAt }
   }),
   tickJobs: () => set((state) => {
     if (!state.company) return state
@@ -801,7 +791,6 @@ const generationTaxi = selectJobGenerationTaxi(state)
         // enough for both journeys to finish, the service trip can settle in
         // this same tick instead of leaving the taxi unavailable after launch.
         const completedAt = getJobJourney(job, previousVehicle).arrivesAt
-        exploredTerritory = addTaxiDiscovery(exploredTerritory, job, previousVehicle.position)
         const outcome = calculateJobOutcome(job, previousVehicle, driver)
         const emptyDistanceKm = previousVehicle.position ? distanceKmBetween(previousVehicle.position, jobPickup(job)) : 0
         const journeyDistanceKm = emptyDistanceKm + job.distanceKm

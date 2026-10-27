@@ -48,6 +48,7 @@ import {
 import { activeFerryServiceForCrossing } from "../services/ferryService";
 import { resolveLandsideFerryTerminals } from "../services/ferryTerminals";
 import { postalDepotCapacity } from "../services/postalDepots";
+import { resolveClosedRoadSegment, type ClosedRoadSegment } from "../services/closedRoadSegments";
 import { recordTaxiPosition, taxiPosition, persistTaxiPositions } from "../services/liveTaxiPositions";
 
 interface GameMapProps {
@@ -400,11 +401,14 @@ const movingVehiclePoint = (id: string, position: Coordinates, properties: Recor
 // Closure-aware road routing: Mapbox alternatives are filtered against active
 // road closure coordinates. A route is never silently allowed through a closure.
 let activeClosurePoints: Coordinates[] = [];
+let activeClosedRoadSegments: ClosedRoadSegment[] = [];
+const closureGeometryCache = new Map<string, ClosedRoadSegment>();
 const resolveRoadRoute: typeof resolveBaseRoadRoute = (
   from, to, signal, profiles, options = {},
 ) => resolveBaseRoadRoute(from, to, signal, profiles, {
   ...options,
   closedRoadPoints: [...(options.closedRoadPoints ?? []), ...activeClosurePoints],
+  closedRoadSegments: [...(options.closedRoadSegments ?? []), ...activeClosedRoadSegments],
 });
 
 // Persist animated taxi positions independently of React render frequency.
@@ -736,6 +740,22 @@ function GameMapView({
             ?.position;
         return coordinates ? [{ ...incident, coordinates }] : [];
       });
+    let closureLookupDisposed = false;
+    const closureIncidents = activeTraffic.filter((incident) => incident.kind === "closure");
+    activeClosedRoadSegments = closureIncidents
+      .map((incident) => closureGeometryCache.get(incident.id))
+      .filter((segment): segment is ClosedRoadSegment => Boolean(segment));
+    void Promise.all(closureIncidents.map(async (incident) => {
+      try {
+        const segment = await resolveClosedRoadSegment(incident.coordinates);
+        if (closureLookupDisposed || !segment) return;
+        closureGeometryCache.set(incident.id, segment);
+        activeClosedRoadSegments = closureIncidents
+          .map((entry) => closureGeometryCache.get(entry.id))
+          .filter((entry): entry is ClosedRoadSegment => Boolean(entry));
+        updateClosureRoads();
+      } catch (error) { console.warn("OSM closure lookup unavailable:", error); }
+    }));
     // Snap closure warnings to actual road geometry in the currently loaded map tiles.
     // Never draw an invented straight line: if no road geometry is available,
     // the existing incident pin remains visible without a misleading closure.
@@ -746,6 +766,15 @@ function GameMapView({
       const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
       for (const incident of activeTraffic) {
         if (incident.kind !== "closure") continue;
+        const osmSegment = closureGeometryCache.get(incident.id);
+        if (osmSegment) {
+          features.push({
+            type: "Feature",
+            properties: { title: incident.title, incidentId: incident.id, osmWaySegment: osmSegment.id },
+            geometry: { type: "LineString", coordinates: osmSegment.coordinates },
+          });
+          continue;
+        }
         const point = instance.project(incident.coordinates);
         const nearby = instance.queryRenderedFeatures(
           [[point.x - 14, point.y - 14], [point.x + 14, point.y + 14]],
@@ -810,6 +839,7 @@ function GameMapView({
       ),
     ];
     return () => {
+      closureLookupDisposed = true;
       instance.off("style.load", updateClosureRoads);
       instance.off("moveend", updateClosureRoads);
       instance.off("idle", updateClosureRoads);

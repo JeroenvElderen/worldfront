@@ -722,6 +722,9 @@ function GameMapView({
     return useGameStore.subscribe((state, previous) => {
       if (state.exploredTerritory !== previous.exploredTerritory) {
         setLiveExploredTerritory(state.exploredTerritory);
+        // Wake Mapbox immediately when a trip settles. React's territory
+        // effect will replace the coverage and locked-mask GeoJSON sources.
+        map.current?.triggerRepaint();
       }
     });
   }, [exploredTerritory]);

@@ -1729,7 +1729,7 @@ function GameMapView({
                   .then((detour) => {
                     if (!detour || abortController.signal.aborted || map.current !== instance) return;
                     const started = new Date(getJobMotionTime(job, Date.now())).toISOString();
-                    const rerouteDurationMs = Math.max(3_000, detour.durationMinutes * SIMULATED_MINUTE_MS / taxiTripSpeedMultiplier(vehicle.modelId));
+                    const rerouteDurationMs = Math.max(3_000, detour.durationMinutes * SIMULATED_MINUTE_MS / (taxiTripSpeedMultiplier(vehicle.modelId) * (job.travelSpeedMultiplier ?? 1)));
                     rerouteStartedAt = new Date(started).getTime();
                     rerouteArrivesAt = rerouteStartedAt + rerouteDurationMs;
                     passengerRoute = detour;

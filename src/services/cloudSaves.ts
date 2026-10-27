@@ -1,7 +1,7 @@
 import { supabase } from "../lib/supabase";
 
 export type CloudSave = {
-  id: string;
+  user_id: string;
   revision: number;
   saved_at: string;
   save_data: unknown;
@@ -44,11 +44,15 @@ export const loadCompanyFromCloud = async (): Promise<CloudSave | null> => {
   const user = await requireUser();
   const { data, error } = await supabase!
     .from("worldfront_saves")
-    .select("id,revision,saved_at,save_data")
+    .select("user_id,revision,updated_at,payload")
     .eq("user_id", user.id)
     .maybeSingle();
   if (error) throw error;
-  return data as CloudSave | null;
+  if (!data) return null;
+  let saveData: unknown;
+  try { saveData = JSON.parse(data.payload as string); }
+  catch { throw new Error("Cloud save contains invalid JSON."); }
+  return { user_id: data.user_id as string, revision: data.revision as number, saved_at: data.updated_at as string, save_data: saveData };
 };
 
 /** Read-only map projection of the authoritative, revisioned company save.

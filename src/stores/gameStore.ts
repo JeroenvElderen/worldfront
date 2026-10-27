@@ -553,7 +553,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
           state.transportAssets ?? [],
         )
 
-        if (!generated.jobs.length) continue
+        if (!generated.jobs.length) return null
 
         return generated
 

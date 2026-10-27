@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { BottomNav } from './components/game/BottomNav'
+import { CloudSavePanel } from './components/game/CloudSavePanel'
 import { OperationsControlCentre } from './components/game/OperationsControlCentre'
 import { TopHud } from './components/game/TopHud'
 import { useGameStore } from './stores/gameStore'
@@ -632,6 +633,7 @@ export default function App() {
         /></Suspense>
       )}
     </div>
+      {game.hasHydrated && <CloudSavePanel />}
     </CurrencyProvider>
   )
 }

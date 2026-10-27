@@ -16,6 +16,7 @@ import { moneyFormatterForCity } from './services/localization'
 import { HOTEL_PURCHASE_COST } from './services/hotelEconomy'
 import { CurrencyProvider } from './components/game/CurrencyContext'
 import { worldRoutesForHarbour, nearestWorldHarbour } from './services/worldMaritimeNetwork'
+import { discoverFerryRoutes } from './services/maritimeRoutes'
 import { POSTAL_DEPOT_BUILD_COST } from './services/postalDepots'
 
 const JOB_REFRESH_INTERVAL_MS = 60_000
@@ -107,7 +108,30 @@ export default function App() {
     setHarbourError(null)
     setPlacingHarbour(false)
     setSection('ferries')
+    void discoverFerryRoutes(port.coordinates).then((routes) => {
+      if (routes.length) useGameStore.getState().addHarbourFerryRoutes(port.coordinates, routes)
+    }).catch((error) => console.warn('[maritime] Live route lookup failed', error))
   }, [placeHarbour, setSection])
+
+  // Refresh every owned port's verified network, including ports purchased
+  // before this release. Never charge for refreshing routes.
+  useEffect(() => {
+    if (!game.hasHydrated) return
+    let cancelled = false
+    const harbours = useGameStore.getState().purchasedHarbours ?? []
+    void (async () => {
+      for (const harbour of harbours) {
+        if (cancelled) return
+        try {
+          const routes = await discoverFerryRoutes(harbour.coordinates)
+          if (!cancelled && routes.length) useGameStore.getState().addHarbourFerryRoutes(harbour.coordinates, routes)
+        } catch (error) {
+          console.warn('[maritime] Could not refresh existing harbour routes', error)
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [game.hasHydrated])
 
   const availableOfferCapacity = jobOfferCapacity(game.vehicles, game.drivers)
 

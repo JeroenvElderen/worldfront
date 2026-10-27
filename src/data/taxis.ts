@@ -41,5 +41,6 @@ const legacyTaxiModels: TaxiModel[] = [
 
 export const getTaxiModel = (id: string) => [...taxiModels, ...legacyTaxiModels].find((taxi) => taxi.id === id || taxi.powertrain === id) ?? taxiModels[0]
 
-export const taxiTripSpeedMultiplier = (modelId?: string) =>
-  taxiModels.find((taxi) => taxi.id === modelId)?.tripSpeedMultiplier ?? 1
+// Performance models retain their handling/top-speed specifications, but
+// cannot compress the real-world duration of a taxi journey.
+export const taxiTripSpeedMultiplier = (_modelId?: string) => 1

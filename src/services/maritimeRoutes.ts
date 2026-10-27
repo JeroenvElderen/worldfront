@@ -1,3 +1,4 @@
+import { supabase } from '../lib/supabase'
 import type { Coordinates, FerryRouteOption } from '../models/game'
 import { distanceKmBetween } from './jobEngine'
 import { curatedFerryRoutes } from '../data/ferryRoutes'
@@ -6,7 +7,7 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass.private.coffee/api/interpreter',
   'https://overpass-api.de/api/interpreter',
 ]
-const HARBOUR_SEARCH_RADIUS_METRES = 50_000
+const HARBOUR_SEARCH_RADIUS_METRES = 50_000 // Overpass discovery window, not a maximum ferry journey distance
 const MAX_LOCAL_TERMINAL_DISTANCE_KM = 5
 
 interface OsmTags {
@@ -21,7 +22,7 @@ interface OsmTags {
   duration?: string
 }
 interface OsmGeometryPoint { lon: number; lat: number }
-interface OsmElement { id: number; type: 'node' | 'way'; lat?: number; lon?: number; tags?: OsmTags; geometry?: OsmGeometryPoint[] }
+interface OsmElement { id: number; type: 'node' | 'way' | 'relation'; lat?: number; lon?: number; tags?: OsmTags; geometry?: OsmGeometryPoint[]; members?: Array<{ type: string; role?: string; geometry?: OsmGeometryPoint[] }> }
 
 const isCoordinates = (value: Coordinates | undefined): value is Coordinates =>
   Boolean(value && value.every(Number.isFinite))
@@ -85,11 +86,44 @@ const nearbyCuratedRoutes = (cityCoordinates: Coordinates): FerryRouteOption[] =
   }]
 })
 
+// OSM commonly maps ferry services as route=ferry relations rather than
+// individually tagged ways. Join adjacent member-way geometries without
+// fabricating a straight-line connection across missing route sections.
+const relationGeometry = (element: OsmElement): OsmGeometryPoint[] => {
+  const members = (element.members ?? [])
+    .filter((member) => member.type === 'way' && (member.geometry?.length ?? 0) >= 2)
+    .map((member) => member.geometry!)
+  if (!members.length) return []
+  const ordered = [...members.shift()!]
+  while (members.length) {
+    const tail = ordered.at(-1)!
+    const head = ordered[0]
+    const index = members.findIndex((points) => {
+      const start = points[0], end = points.at(-1)!
+      return Math.hypot(start.lon - tail.lon, start.lat - tail.lat) < 0.0001 ||
+        Math.hypot(end.lon - tail.lon, end.lat - tail.lat) < 0.0001 ||
+        Math.hypot(start.lon - head.lon, start.lat - head.lat) < 0.0001 ||
+        Math.hypot(end.lon - head.lon, end.lat - head.lat) < 0.0001
+    })
+    if (index < 0) break
+    const points = members.splice(index, 1)[0]
+    const start = points[0], end = points.at(-1)!
+    if (Math.hypot(start.lon - tail.lon, start.lat - tail.lat) < 0.0001) ordered.push(...points.slice(1))
+    else if (Math.hypot(end.lon - tail.lon, end.lat - tail.lat) < 0.0001) ordered.push(...points.slice(0, -1).reverse())
+    else if (Math.hypot(end.lon - head.lon, end.lat - head.lat) < 0.0001) ordered.unshift(...points.slice(0, -1))
+    else ordered.unshift(...points.slice(1).reverse())
+  }
+  // A partially assembled relation must not masquerade as a complete route.
+  return members.length ? [] : ordered
+}
+
 const parseRoutes = (elements: OsmElement[], cityCoordinates: Coordinates): FerryRouteOption[] => {
   const terminals = elements.filter((element) => element.type === 'node')
   const routes = elements.flatMap((element): FerryRouteOption[] => {
-    if (element.type !== 'way' || !element.geometry || element.geometry.length < 2) return []
-    let coordinates = element.geometry
+    if (element.type !== 'way' && element.type !== 'relation') return []
+    const geometry = element.type === 'relation' ? relationGeometry(element) : element.geometry
+    if (!geometry || geometry.length < 2) return []
+    let coordinates = geometry
       .map(({ lon, lat }) => [lon, lat] as Coordinates)
       .filter(isCoordinates)
     if (coordinates.length < 2) return []
@@ -115,7 +149,7 @@ const parseRoutes = (elements: OsmElement[], cityCoordinates: Coordinates): Ferr
     const routeName = englishName(element.tags) ?? `${originName} → ${destinationName}`
 
     return [{
-      id: `osm-ferry-${element.id}`,
+      id: `osm-ferry-${element.type}-${element.id}`,
       name: routeName,
       originName,
       destinationName,
@@ -133,21 +167,73 @@ const parseRoutes = (elements: OsmElement[], cityCoordinates: Coordinates): Ferr
     route,
   ])).values()]
     .sort((left, right) => distanceKmBetween(cityCoordinates, left.originCoordinates) - distanceKmBetween(cityCoordinates, right.originCoordinates))
-    .slice(0, 12)
+
+}
+
+/** Read verified port-to-port connections. The small distance tolerance identifies
+ * the selected port only; it never limits how far its ferry services travel.
+ * Unverified rows or connections without actual route geometry are omitted.
+ */
+async function registryRoutes(coordinates: Coordinates): Promise<FerryRouteOption[]> {
+  if (!supabase) return []
+  const [lon, lat] = coordinates
+  const { data: ports, error: portError } = await supabase.from('maritime_ports')
+    .select('id,name,longitude,latitude')
+    .gte('longitude', lon - 0.08).lte('longitude', lon + 0.08)
+    .gte('latitude', lat - 0.08).lte('latitude', lat + 0.08)
+    .limit(100)
+  if (portError) throw portError
+  const port = (ports ?? []).map((candidate) => ({
+    ...candidate,
+    distance: distanceKmBetween(coordinates, [candidate.longitude, candidate.latitude] as Coordinates),
+  })).sort((a, b) => a.distance - b.distance)[0]
+  if (!port || port.distance > 3) return []
+  const { data: connections, error } = await supabase.from('maritime_connections')
+    .select('id,name,origin_port_id,destination_port_id,distance_km,duration_minutes,route_coordinates,verified_at')
+    .or(`origin_port_id.eq.${port.id},destination_port_id.eq.${port.id}`)
+    .limit(1000)
+  if (error) throw error
+  return (connections ?? []).flatMap((connection): FerryRouteOption[] => {
+    const geometry = connection.route_coordinates
+    if (!Array.isArray(geometry) || geometry.length < 2 ||
+      !geometry.every((point) => Array.isArray(point) && point.length === 2 &&
+        point.every((part) => typeof part === 'number' && Number.isFinite(part)))) return []
+    let path = geometry as Coordinates[]
+    if (connection.destination_port_id === port.id) path = [...path].reverse()
+    return [{
+      id: `registry-ferry-${connection.id}`,
+      name: connection.name,
+      originName: port.name,
+      destinationName: connection.name,
+      originCoordinates: path[0],
+      destinationCoordinates: path[path.length - 1],
+      routeCoordinates: path,
+      distanceKm: connection.distance_km ?? routeDistanceKm(path),
+      durationMinutes: connection.duration_minutes ?? undefined,
+      source: 'registry',
+    }]
+  })
 }
 
 /** Find passenger services whose mapped ferry line starts near a placed harbour. */
 export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signal?: AbortSignal) {
   const [longitude, latitude] = harbourCoordinates
-  const query = `[out:json][timeout:25];way(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["route"="ferry"]->.routes;(.routes;node(w.routes)["amenity"="ferry_terminal"];);out tags geom;`
+  // Relations contain most mapped ferry services; query them as well as
+  // ferry ways. The endpoint filter below only accepts real nearby terminals.
+  const query = `[out:json][timeout:25];(relation(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["route"="ferry"];way(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["route"="ferry"];way(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["ferry"="yes"];node(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["amenity"="ferry_terminal"];);out tags geom;`
   let lastError: unknown
   const curated = nearbyCuratedRoutes(harbourCoordinates)
+  let registered: FerryRouteOption[] = []
+  try { registered = await registryRoutes(harbourCoordinates) } catch (error) {
+    console.warn('[maritime] Registry unavailable; falling back to mapped routes:', error)
+  }
+  if (registered.length) return registered
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
     const requestController = new AbortController()
     const cancelRequest = () => requestController.abort()
     signal?.addEventListener('abort', cancelRequest, { once: true })
-    const timeout = setTimeout(cancelRequest, curated.length ? 4_000 : 10_000)
+    const timeout = setTimeout(cancelRequest, 20_000)
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -158,7 +244,10 @@ export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signa
       if (!response.ok) throw new Error(`OpenStreetMap ferry lookup failed (${response.status})`)
       const result = await response.json() as { elements?: OsmElement[] }
       const routes = parseRoutes(result.elements ?? [], harbourCoordinates)
-      return routes.length ? routes : curated
+      if (routes.length) return routes
+      if (curated.length) return curated
+      // Empty data from one mirror is not proof that the location has no
+      // ferry service. Try the next Overpass instance.
     } catch (error) {
       if (signal?.aborted) throw error
       lastError = (error as Error).name === 'AbortError'
@@ -171,5 +260,35 @@ export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signa
   }
 
   if (curated.length) return curated
-  throw lastError instanceof Error ? lastError : new Error('Ferry routes are temporarily unavailable.')
+  if (lastError) throw lastError instanceof Error ? lastError : new Error('Ferry routes are temporarily unavailable.')
+  return []
+}
+
+/**
+ * Guaranteed gameplay fallback, NOT a verified real-world ferry service.
+ * A small harbour manoeuvring circuit is available when no actual service is
+ * mapped. It must never be presented as a scheduled passenger connection.
+ */
+export function simulatedHarbourCircuit(coordinates: Coordinates): FerryRouteOption {
+  const [lon, lat] = coordinates
+  const deltaLon = 0.001 / Math.max(0.2, Math.cos(lat * Math.PI / 180))
+  const routeCoordinates: Coordinates[] = [
+    coordinates,
+    [lon + deltaLon, lat + 0.001],
+    [lon + deltaLon * 2, lat],
+    [lon + deltaLon, lat - 0.001],
+    coordinates,
+  ]
+  return {
+    id: 'simulated-harbour-circuit',
+    name: 'Harbour training circuit (simulated)',
+    originName: 'Harbour',
+    destinationName: 'Harbour training circuit (simulated)',
+    originCoordinates: coordinates,
+    destinationCoordinates: coordinates,
+    routeCoordinates,
+    distanceKm: Math.round(routeDistanceKm(routeCoordinates) * 10) / 10,
+    durationMinutes: 15,
+    source: 'curated',
+  }
 }

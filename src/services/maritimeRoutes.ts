@@ -227,7 +227,20 @@ export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signa
   try { registered = await registryRoutes(harbourCoordinates) } catch (error) {
     console.warn('[maritime] Registry unavailable; falling back to mapped routes:', error)
   }
-  if (registered.length) return registered
+  // Never stop at the first provider: a single registry record must not hide
+  // the many other real ferry connections served by the same port.
+  const combined = new Map<string, FerryRouteOption>()
+  const merge = (routes: FerryRouteOption[]) => {
+    for (const route of routes) {
+      const destination = route.destinationCoordinates.map((part) => part.toFixed(2)).join(',')
+      if (![...combined.values()].some((existing) =>
+        distanceKmBetween(existing.destinationCoordinates, route.destinationCoordinates) < 2)) {
+        combined.set(destination, route)
+      }
+    }
+  }
+  merge(registered)
+  merge(curated)
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
     const requestController = new AbortController()
@@ -244,8 +257,8 @@ export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signa
       if (!response.ok) throw new Error(`OpenStreetMap ferry lookup failed (${response.status})`)
       const result = await response.json() as { elements?: OsmElement[] }
       const routes = parseRoutes(result.elements ?? [], harbourCoordinates)
-      if (routes.length) return routes
-      if (curated.length) return curated
+      merge(routes)
+      if (routes.length) break
       // Empty data from one mirror is not proof that the location has no
       // ferry service. Try the next Overpass instance.
     } catch (error) {
@@ -259,7 +272,7 @@ export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signa
     }
   }
 
-  if (curated.length) return curated
+  if (combined.size) return [...combined.values()]
   if (lastError) throw lastError instanceof Error ? lastError : new Error('Ferry routes are temporarily unavailable.')
   return []
 }

@@ -41,7 +41,7 @@ import {
 } from "../services/territoryGeometry";
 import { cancelMapFrame, scheduleMapFrame } from "../services/frameScheduler";
 import {
-  resolveRoadRoute,
+  resolveRoadRoute as resolveBaseRoadRoute,
   type RoadRouteDetails,
   type RouteSpeedLimit,
 } from "../services/roadRoutes";
@@ -396,6 +396,16 @@ const movingVehiclePoint = (id: string, position: Coordinates, properties: Recor
   return point(position, { ...properties, heading });
 };
 
+// Closure-aware road routing: Mapbox alternatives are filtered against active
+// road closure coordinates. A route is never silently allowed through a closure.
+let activeClosurePoints: Coordinates[] = [];
+const resolveRoadRoute: typeof resolveBaseRoadRoute = (
+  from, to, signal, profiles, options = {},
+) => resolveBaseRoadRoute(from, to, signal, profiles, {
+  ...options,
+  closedRoadPoints: [...(options.closedRoadPoints ?? []), ...activeClosurePoints],
+});
+
 const TAXI_SVG_IMAGE = "worldfront-taxi-svg";
 const TAXI_SVG_URL = `${import.meta.env.BASE_URL}vehicles/taxi-topview.svg`;
 const VEHICLE_MARKER_RADIUS = 4;
@@ -709,6 +719,9 @@ function GameMapView({
     const activeTraffic = trafficIncidents.filter(
       (incident) => !incident.resolved && incident.cityId === cityId,
     );
+    activeClosurePoints = trafficIncidents
+      .filter((incident) => !incident.resolved && incident.kind === "closure" && new Date(incident.expiresAt).getTime() > Date.now())
+      .map((incident) => incident.coordinates);
     const activeVehicles = vehicleIncidents
       .filter((incident) => !incident.resolved)
       .flatMap((incident) => {

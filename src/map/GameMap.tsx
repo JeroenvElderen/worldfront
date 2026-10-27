@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { featureCollection, lineString, point } from "@turf/helpers";
+import { along, length } from "@turf/turf";
 import { mapboxAccessToken } from "../config/mapbox";
 import { getCity, worldOverview } from "../data/cities";
 import { taxiModels, taxiTripSpeedMultiplier } from "../data/taxis";
@@ -704,6 +705,82 @@ function GameMapView({
     });
   }, [exploredTerritory]);
   const container = useRef<HTMLDivElement>(null);
+  // Each arrival animates independently. Persisted exploration is already saved
+  // at drop-off; this road-tracing highlight is purely visual.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    const processed = new Set<string>();
+    const frames = new Map<string, number>();
+    const sourceId = "completed-discovery-routes";
+    const activeRoutes = new Map<string, Coordinates[]>();
+    const redraw = () => {
+      const source = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+      if (!source) return;
+      source.setData(featureCollection([...activeRoutes].map(([id, route]) =>
+        lineString(route, { id }))));
+    };
+    const ensureLayer = () => {
+      if (!instance.isStyleLoaded() || instance.getSource(sourceId)) return;
+      instance.addSource(sourceId, { type: "geojson", data: featureCollection([]) });
+      instance.addLayer({
+        id: "completed-discovery-glow", type: "line", source: sourceId,
+        paint: { "line-color": "#5eead4", "line-width": 12, "line-opacity": 0.3, "line-blur": 8 },
+      });
+      instance.addLayer({
+        id: "completed-discovery-trace", type: "line", source: sourceId,
+        paint: { "line-color": "#a7f3d0", "line-width": 4, "line-opacity": 0.95 },
+      });
+    };
+    const animate = (id: string, route: Coordinates[]) => {
+      if (route.length < 2) return;
+      const line = lineString(route);
+      const total = length(line, { units: "kilometers" });
+      if (!Number.isFinite(total) || total <= 0) return;
+      const started = performance.now();
+      const frame = (now: number) => {
+        if (!instance.getSource(sourceId)) return;
+        const progress = Math.min(1, (now - started) / 3000);
+        const segments = Math.max(2, Math.ceil(progress * Math.min(120, route.length * 4)));
+        const prefix: Coordinates[] = [route[0]];
+        for (let index = 1; index <= segments; index++) {
+          prefix.push(along(line, total * progress * index / segments, { units: "kilometers" }).geometry.coordinates as Coordinates);
+        }
+        activeRoutes.set(id, prefix);
+        redraw();
+        if (progress < 1) frames.set(id, requestAnimationFrame(frame));
+        else {
+          frames.delete(id);
+          window.setTimeout(() => { activeRoutes.delete(id); redraw(); }, 500);
+        }
+      };
+      frames.set(id, requestAnimationFrame(frame));
+    };
+    const handle = (state: ReturnType<typeof useGameStore.getState>) => {
+      ensureLayer();
+      if (!instance.getSource(sourceId)) return;
+      for (const event of state.discoveryAnimations ?? []) {
+        if (processed.has(event.id)) continue;
+        processed.add(event.id);
+        animate(event.id, event.route);
+      }
+    };
+    // Only arrivals observed while this map is open animate; older persisted
+    // arrivals remain visible normally and do not replay after navigation.
+    for (const event of useGameStore.getState().discoveryAnimations ?? []) processed.add(event.id);
+    const unsubscribe = useGameStore.subscribe(state => handle(state));
+    instance.on("style.load", ensureLayer);
+    ensureLayer();
+    return () => {
+      unsubscribe();
+      instance.off("style.load", ensureLayer);
+      for (const frame of frames.values()) cancelAnimationFrame(frame);
+      if (instance.getLayer("completed-discovery-trace")) instance.removeLayer("completed-discovery-trace");
+      if (instance.getLayer("completed-discovery-glow")) instance.removeLayer("completed-discovery-glow");
+      if (instance.getSource(sourceId)) instance.removeSource(sourceId);
+    };
+  }, []);
+
   const map = useRef<mapboxgl.Map | null>(null);
   const pickupJobIds = useRef(new Set<string>());
   const pickupHandlers = useRef(

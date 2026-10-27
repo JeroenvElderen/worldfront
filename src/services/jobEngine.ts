@@ -49,6 +49,17 @@ export function liveMeterFare(job: TaxiJob, vehicle: Vehicle, now = Date.now()) 
   return Math.round((10 + (finalFare - 10) * progress) * 100) / 100
 }
 
+/** Deterministic congestion shared by mission timing and map animation. */
+export function jobTrafficFactor(job: TaxiJob) {
+  const longitude = jobPickup(job)[0]
+  const hour = ((Date.now() / 3_600_000 + longitude / 15) % 24 + 24) % 24
+  const peak = (hour >= 7 && hour < 9.5) || (hour >= 16.5 && hour < 19)
+  const shoulder = (hour >= 6 && hour < 11) || (hour >= 15 && hour < 21)
+  const seed = [...job.id].reduce((n, char) => n + char.charCodeAt(0), 0) % 4
+  const level = Math.min(3, (peak ? 2 : shoulder ? 1 : 0) + (seed === 0 ? 1 : 0))
+  return [1, 0.75, 0.5, 0.25][level]
+}
+
 /** Base road-motion timings. Ferry timing offsets are applied separately. */
 export function getJobMotionJourney(job: TaxiJob, vehicle: Vehicle) {
   const acceptedAt = job.acceptedAt ? new Date(job.acceptedAt).getTime() : Date.now()
@@ -57,25 +68,22 @@ export function getJobMotionJourney(job: TaxiJob, vehicle: Vehicle) {
   const pickupDistanceKm = distanceKmBetween(start, jobPickup(job))
 
   // Use the job's average journey speed for the empty drive to the passenger too.
-  const pickupMinutes = job.pickupDurationMinutes ?? (job.distanceKm > 0
-    ? pickupDistanceKm * job.durationMinutes / job.distanceKm
-    : 0)
-
   const speedMultiplier = 8 * taxiTripSpeedMultiplier(vehicle.modelId)
-
+  // Directions travel time is the best available proxy for average permitted
+  // road speed until per-segment speed limits are persisted with each job.
+  const estimatedRoadSpeed = job.durationMinutes > 0 && job.distanceKm > 0
+    ? job.distanceKm / (job.durationMinutes / 60)
+    : 30
+  const permittedSpeed = Math.max(1, Math.min(vehicle.topSpeedKmh ?? 130, estimatedRoadSpeed))
+  const trafficSpeed = Math.max(1, permittedSpeed * jobTrafficFactor(job))
   const pickupDurationMs = Math.max(
     1_000,
-    pickupMinutes *
-      SIMULATED_MINUTE_MS *
-      (job.pickupTimeMultiplier ?? 1) /
-      speedMultiplier,
+    (pickupDistanceKm / trafficSpeed) * 60 * SIMULATED_MINUTE_MS *
+      (job.pickupTimeMultiplier ?? 1) / speedMultiplier,
   )
-
   const passengerDurationMs = Math.max(
     3_000,
-    job.durationMinutes *
-      SIMULATED_MINUTE_MS /
-      speedMultiplier,
+    (job.distanceKm / trafficSpeed) * 60 * SIMULATED_MINUTE_MS / speedMultiplier,
   )
 
   return {

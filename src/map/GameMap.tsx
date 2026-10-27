@@ -418,6 +418,28 @@ const resolveRoadRoute: typeof resolveBaseRoadRoute = (
 if (typeof window !== "undefined") {
   window.addEventListener("pagehide", persistTaxiPositions);
 }
+// Throttle geometry unions and indexedDB writes; only actual taxi travel
+// contributes to discovery, never a proposed route.
+const liveDiscoveryCheckpoints = new Map<string, { position: Coordinates; at: number }>();
+const recordLiveDiscovery = (vehicleId: string, position: Coordinates) => {
+  const now = Date.now();
+  const previous = liveDiscoveryCheckpoints.get(vehicleId);
+  if (!previous) {
+    liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
+    return;
+  }
+  if (now - previous.at < 6_000) return;
+  const distance = distanceKmBetween(previous.position, position);
+  if (distance < 0.08) return;
+  // Avoid connecting teleportation, city switching, or stale positions with
+  // a fictional discovered road across the map.
+  if (distance > 3) {
+    liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
+    return;
+  }
+  liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
+  useGameStore.getState().discoverLiveRoute([previous.position, position]);
+};
 const TAXI_SVG_IMAGE = "worldfront-taxi-svg";
 const TAXI_SVG_URL = `${import.meta.env.BASE_URL}vehicles/taxi-topview.svg`;
 const VEHICLE_MARKER_RADIUS = 4;
@@ -1673,6 +1695,7 @@ function GameMapView({
               }),
             );
             recordTaxiPosition(vehicle.id, currentPosition);
+            recordLiveDiscovery(vehicle.id, currentPosition);
             // Check active OSM closure edges while driving. Persist the new route
             // and its clock anchor so a page refresh resumes the same detour.
             if (!pickingUp && !ferryState && !reroutePending &&
@@ -2654,6 +2677,7 @@ function GameMapView({
             );
           }
         }
+        recordLiveDiscovery(vehicle.id, currentPosition);
         (instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(
           movingVehiclePoint(taxiSourceId, currentPosition, {
             ferryStatus:

@@ -51,8 +51,6 @@ import { resolveLandsideFerryTerminals } from "../services/ferryTerminals";
 import { postalDepotCapacity } from "../services/postalDepots";
 import { resolveClosedRoadSegment, routeIntersectsClosedSegment, type ClosedRoadSegment } from "../services/closedRoadSegments";
 import { useGameStore } from "../stores/gameStore";
-import { worldHarbours, worldRoutesForHarbour } from "../services/worldMaritimeNetwork";
-import { isInsideTerritoryFeatures } from "../services/territoryGeometry";
 import { recordTaxiPosition, taxiPosition, persistTaxiPositions } from "../services/liveTaxiPositions";
 
 interface GameMapProps {
@@ -2081,7 +2079,7 @@ function GameMapView({
     realTerritories,
   ]);
 
-  // World harbours are static infrastructure. Fog-of-war determines visibility.
+  // Harbours exist only where the player explicitly placed them.
   useEffect(() => {
     const instance = map.current;
     if (!instance) return;

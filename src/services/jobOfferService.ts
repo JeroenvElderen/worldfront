@@ -189,6 +189,8 @@ export async function generateJobOffers(
     ...(exploredTerritory ? [exploredTerritory] : []),
   ])
   const ownedTerritories = unlockedTerritory ? [unlockedTerritory] : []
+  // A mission is valid only when both actual stops are within revealed territory.
+  // This predicate is also used for cached/offline jobs and snapped road stops.
   const isUnlocked = (coordinates: Coordinates) => isInsideTerritoryFeatures(coordinates, ownedTerritories)
   let routes: Array<{ pickup: MapboxPlace; destination: MapboxPlace; distanceKm: number; signature: string; stored?: StoredJobRoute }>
   try {

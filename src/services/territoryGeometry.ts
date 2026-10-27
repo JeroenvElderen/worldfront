@@ -1,5 +1,5 @@
 import { featureCollection, lineString, polygon } from '@turf/helpers'
-import { booleanPointInPolygon, buffer, circle, simplify, union } from '@turf/turf'
+import { booleanPointInPolygon, buffer, circle, difference, simplify, union } from '@turf/turf'
 import type { Coordinates, TerritoryFeature, TerritoryGeometry } from '../models/game'
 
 const EARTH_KM_PER_LATITUDE_DEGREE = 110.574
@@ -9,7 +9,7 @@ export const VILLAGE_TERRITORY_RADIUS_KM = 6
 // manually purchased village territory retains its separate 6 km radius.
 export const TAXI_DISCOVERY_RADIUS_KM = 0.5
 
-export interface VillageTerritoryCenter { id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; source?: 'village' | 'taxi-discovery' | 'ferry-discovery'; radiusKm?: number }
+export interface VillageTerritoryCenter { id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; source?: 'village' | 'starting-station' | 'taxi-discovery' | 'ferry-discovery'; radiusKm?: number }
 export type { TerritoryFeature } from '../models/game'
 
 const realBoundaryCache = new Map<string, Promise<TerritoryFeature | null>>()
@@ -164,7 +164,9 @@ export const isInsideVillageTerritories = (coordinates: Coordinates, centers: Vi
  */
 export const resolveVillageTerritories = async (centers: VillageTerritoryCenter[]) =>
   Promise.all(centers.map(async (center) =>
-    center.source === 'taxi-discovery'
+    center.source === 'starting-station'
+      ? villageTerritory(center.id, center.coordinates, 1)
+      : center.source === 'taxi-discovery'
       ? center.routeCoordinates && center.routeCoordinates.length >= 2
         ? taxiDiscoveryRouteTerritory(center.id, center.routeCoordinates, center.radiusKm)
         : taxiDiscoveryTerritory(center.id, center.coordinates, center.radiusKm)
@@ -182,13 +184,12 @@ export const isInsideTerritoryFeatures = (coordinates: Coordinates, territories:
 /** A red world overlay with the purchased territory cut out as transparent holes. */
 export const lockedTerritoryMask = (unlocked: ReturnType<typeof mergeVillageTerritories>) => {
   const worldRing: Coordinates[] = [[-179.9, -85], [179.9, -85], [179.9, 85], [-179.9, 85], [-179.9, -85]]
-  if (!unlocked) return polygon([worldRing], { locked: true })
-  // GeoJSON interior rings must wind in the opposite direction to their outer
-  // ring. Village territories wind counter-clockwise, just like worldRing, so
-  // passing them through unchanged makes Mapbox fill them instead of treating
-  // them as transparent unlocked areas.
-  const holes = unlocked.geometry.type === 'Polygon'
-    ? [unlocked.geometry.coordinates[0].slice().reverse() as Coordinates[]]
-    : unlocked.geometry.coordinates.map((part: number[][][]) => part[0].slice().reverse() as Coordinates[])
-  return polygon([worldRing, ...holes], { locked: true })
+  const world = polygon([worldRing], { locked: true })
+  if (!unlocked) return world
+
+  // Subtract the actual union geometry rather than constructing one world
+  // polygon with hand-written holes. The latter drops interior rings of
+  // explored polygons and incorrectly reveals enclosed, untravelled islands.
+  // Turf preserves all nested holes and disconnected components.
+  return difference(featureCollection([world, { ...unlocked, properties: { locked: true } }])) ?? world
 }

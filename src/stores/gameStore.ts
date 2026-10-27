@@ -144,7 +144,7 @@ const postalVehiclesAtDepot = (state: Pick<GameState, 'vehicles'>, depotId: stri
 const availablePostalDepot = (state: Pick<GameState, 'postalDepots' | 'vehicles'>, cityId?: string | null) =>
   (state.postalDepots ?? []).find((depot) => (!cityId || depot.cityId === cityId) && postalVehiclesAtDepot(state, depot.id).length < postalDepotCapacity(depot))
 const unlockedTerritoryCenters = (state: Pick<GameState, 'branches' | 'territoryExpansions'>): VillageTerritoryCenter[] => [
-  ...state.branches.flatMap((branch) => branch.coordinates ? [{ id: branch.id, coordinates: branch.coordinates }] : []),
+  ...state.branches.flatMap((branch, index) => branch.coordinates ? [{ id: branch.id, coordinates: branch.coordinates, source: index === 0 ? 'starting-station' as const : 'village' as const }] : []),
   ...(state.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery').map(({ id, coordinates, routeCoordinates, radiusKm, source }) => ({
     id,
     coordinates,

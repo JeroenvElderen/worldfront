@@ -2309,6 +2309,8 @@ function GameMapView({
         instance.off("mouseleave", sourceId, handlers.leave);
         instance.off("click", sourceId, handlers.click);
       }
+      if (instance.getLayer(`destination-label-${jobId}`))
+        instance.removeLayer(`destination-label-${jobId}`);
       if (instance.getLayer(`destination-${jobId}`))
         instance.removeLayer(`destination-${jobId}`);
       if (instance.getLayer(sourceId)) instance.removeLayer(sourceId);
@@ -2322,7 +2324,7 @@ function GameMapView({
     for (const job of visibleJobs) {
       const sourceId = `pickup-${job.id}`;
       const color = missionColor(job.id);
-      if (pickupJobIds.current.has(job.id) && instance.getLayer(sourceId) && instance.getLayer(`destination-${job.id}`)) {
+      if (pickupJobIds.current.has(job.id) && instance.getLayer(sourceId) && instance.getLayer(`destination-${job.id}`) && instance.getLayer(`destination-label-${job.id}`)) {
         continue;
       }
       // A style reload can remove Mapbox layers without clearing React refs.
@@ -2333,6 +2335,8 @@ function GameMapView({
           instance.off("mouseleave", sourceId, old.leave);
           instance.off("click", sourceId, old.click);
         }
+        if (instance.getLayer(`destination-label-${job.id}`))
+          instance.removeLayer(`destination-label-${job.id}`);
         for (const id of [sourceId, `destination-${job.id}`]) {
           if (instance.getLayer(id)) instance.removeLayer(id);
           if (instance.getSource(id)) instance.removeSource(id);
@@ -2356,9 +2360,13 @@ function GameMapView({
         },
       });
       const destinationId = `destination-${job.id}`;
+      const assignedTaxi = vehicles.find((vehicle) => vehicle.id === job.assignedVehicleId);
+      const destinationTag = job.status === "accepted" && assignedTaxi
+        ? `↓ ${assignedTaxi.name}`
+        : `↓ ${job.id.slice(0, 5).toUpperCase()}`;
       instance.addSource(destinationId, {
         type: "geojson",
-        data: point(jobDestination(job), { title: job.destinationLabel }),
+        data: point(jobDestination(job), { title: job.destinationLabel, destinationTag }),
       });
       instance.addLayer({
         id: destinationId,
@@ -2369,6 +2377,25 @@ function GameMapView({
           "circle-color": color,
           "circle-stroke-width": VEHICLE_MARKER_STROKE_WIDTH,
           "circle-stroke-color": "#ffffff",
+        },
+      });
+      // A persistent label identifies the destination even when several
+      // missions overlap. It stays at drop-off while the pickup halo moves.
+      instance.addLayer({
+        id: `destination-label-${job.id}`,
+        type: "symbol",
+        source: destinationId,
+        layout: {
+          "text-field": ["get", "destinationTag"],
+          "text-size": 11,
+          "text-offset": [0, 1.6],
+          "text-anchor": "top",
+          "text-allow-overlap": true,
+        },
+        paint: {
+          "text-color": "#ffffff",
+          "text-halo-color": "#111827",
+          "text-halo-width": 2,
         },
       });
       const handlers = {

@@ -27,19 +27,49 @@ const MAPBOX_STREETS_TILESET = 'mapbox.mapbox-streets-v8'
 export const MAX_PICKUP_DISTANCE_KM = 2
 
 /** A Directions waypoint may snap onto a routable ferry edge offshore. */
-async function isWaterCoordinate(coordinates: Coordinates, signal?: AbortSignal) {
+const STOP_TERRAIN_CACHE_TTL_MS = 10 * 60_000
+const STOP_TERRAIN_CACHE_LIMIT = 500
+const stopTerrainCache = new Map<string, { water: boolean; expiresAt: number }>()
+const pendingTerrainChecks = new Map<string, Promise<boolean>>()
+
+/** Check whether a snapped stop lies in water; share duplicate requests. */
+async function isWaterCoordinate(coordinates: Coordinates, signal?: AbortSignal): Promise<boolean> {
   if (!mapboxAccessToken) return false
-  const query = new URLSearchParams({
-    layers: 'water',
-    geometry: 'polygon',
-    radius: '0',
-    limit: '5',
-    access_token: mapboxAccessToken,
-  })
-  const response = await fetch(`https://api.mapbox.com/v4/${MAPBOX_STREETS_TILESET}/tilequery/${coordinates.join(',')}.json?${query}`, { signal })
-  if (!response.ok) throw new Error(`Could not validate job stop terrain (${response.status}).`)
-  const result = await response.json() as { features?: unknown[] }
-  return Boolean(result.features?.length)
+  const key = coordinates.map((part) => part.toFixed(5)).join(',')
+  if (!signal) {
+    const cached = stopTerrainCache.get(key)
+    if (cached && cached.expiresAt > Date.now()) return cached.water
+    if (cached) stopTerrainCache.delete(key)
+    const pending = pendingTerrainChecks.get(key)
+    if (pending) return pending
+  }
+  const check = async () => {
+    const query = new URLSearchParams({
+      layers: 'water',
+      geometry: 'polygon',
+      radius: '0',
+      limit: '5',
+      access_token: mapboxAccessToken,
+    })
+    const response = await fetch(`https://api.mapbox.com/v4/${MAPBOX_STREETS_TILESET}/tilequery/${coordinates.join(',')}.json?${query}`, { signal })
+    if (!response.ok) throw new Error(`Could not validate job stop terrain (${response.status}).`)
+    const result = await response.json() as { features?: unknown[] }
+    return Boolean(result.features?.length)
+  }
+  if (signal) return check()
+  const request = check()
+  pendingTerrainChecks.set(key, request)
+  try {
+    const water = await request
+    stopTerrainCache.set(key, { water, expiresAt: Date.now() + STOP_TERRAIN_CACHE_TTL_MS })
+    if (stopTerrainCache.size > STOP_TERRAIN_CACHE_LIMIT) {
+      const oldest = stopTerrainCache.keys().next().value
+      if (oldest) stopTerrainCache.delete(oldest)
+    }
+    return water
+  } finally {
+    pendingTerrainChecks.delete(key)
+  }
 }
 
 const ferryTouchesRouteEndpoint = (route: NonNullable<Awaited<ReturnType<typeof resolveRoadRoute>>>) =>

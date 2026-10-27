@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import type { Company } from '../../models/game'
 import { progressionForReputation } from '../../services/companyProgression'
-import { gameDateAt } from '../../services/gameTime'
+import { gameDateAt, getGameSpeed, setGameSpeed, type GameSpeed } from '../../services/gameTime'
 import { useCurrency } from './CurrencyContext'
 
 export function TopHud({ company }: { company: Company }) {
   const { money, locale } = useCurrency()
+  const [speed, updateSpeed] = useState<GameSpeed>(() => getGameSpeed())
   const progression = progressionForReputation(company.reputation)
   const [gameDate, setGameDate] = useState(() => gameDateAt(company.foundedAt))
   useEffect(() => {
@@ -30,6 +31,7 @@ export function TopHud({ company }: { company: Company }) {
       <span className="hud-copy"><strong>{company.reputation.toFixed(1)}</strong><small>Rating</small></span>
       <span className="hud-menu" aria-hidden="true">☰</span>
     </div>
+    <label aria-label="Game calendar speed" style={{ position: "absolute", right: 14, top: 118, zIndex: 12, background: "#102633", color: "#fff", borderRadius: 14, padding: "5px 9px", fontSize: 12 }}>Speed <select aria-label="Game speed" value={speed} onChange={(event) => { const next = Number(event.target.value) as GameSpeed; setGameSpeed(next); updateSpeed(next); }} style={{ background: "#102633", color: "#fff", border: 0, fontWeight: 700 }}><option value={1}>1× real time</option><option value={2}>2×</option><option value={5}>5×</option><option value={10}>10×</option></select></label>
     <span className="hud-context">{company.name} · {date} · {time}</span>
   </header>
 }

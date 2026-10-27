@@ -263,3 +263,32 @@ export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signa
   if (lastError) throw lastError instanceof Error ? lastError : new Error('Ferry routes are temporarily unavailable.')
   return []
 }
+
+/**
+ * Guaranteed gameplay fallback, NOT a verified real-world ferry service.
+ * A small harbour manoeuvring circuit is available when no actual service is
+ * mapped. It must never be presented as a scheduled passenger connection.
+ */
+export function simulatedHarbourCircuit(coordinates: Coordinates): FerryRouteOption {
+  const [lon, lat] = coordinates
+  const deltaLon = 0.001 / Math.max(0.2, Math.cos(lat * Math.PI / 180))
+  const routeCoordinates: Coordinates[] = [
+    coordinates,
+    [lon + deltaLon, lat + 0.001],
+    [lon + deltaLon * 2, lat],
+    [lon + deltaLon, lat - 0.001],
+    coordinates,
+  ]
+  return {
+    id: 'simulated-harbour-circuit',
+    name: 'Harbour training circuit (simulated)',
+    originName: 'Harbour',
+    destinationName: 'Harbour training circuit (simulated)',
+    originCoordinates: coordinates,
+    destinationCoordinates: coordinates,
+    routeCoordinates,
+    distanceKm: Math.round(routeDistanceKm(routeCoordinates) * 10) / 10,
+    durationMinutes: 15,
+    source: 'curated',
+  }
+}

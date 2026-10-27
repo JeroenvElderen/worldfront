@@ -1288,16 +1288,19 @@ const generationTaxi = selectJobGenerationTaxi(state)
   addHarbourFerryRoutes: (coordinates, routes) => set((state) => {
     const id = harbourId(coordinates)
     if (!(state.purchasedHarbours ?? []).some((harbour) => harbour.id === id) || !routes.length) return state
-    const existing = new Set((state.discoveredFerryRoutes ?? []).map((route) => route.id))
+    const hasRealRoutes = routes.some((route) => route.id !== 'simulated-harbour-circuit')
+    const retained = (state.discoveredFerryRoutes ?? []).filter((route) =>
+      !(hasRealRoutes && route.harbourId === id && route.id === `${id}:simulated-harbour-circuit`))
+    const existing = new Set(retained.map((route) => route.id))
     const discoveredAt = new Date().toISOString()
     const additions = routes
       .map((route) => ({ ...route, id: `${id}:${route.id}`, harbourId: id, cityId: id, discoveredAt }))
       .filter((route) => !existing.has(route.id))
-    if (!additions.length) return state
+    if (!additions.length && retained.length === (state.discoveredFerryRoutes ?? []).length) return state
     return {
-      discoveredFerryRoutes: [...(state.discoveredFerryRoutes ?? []), ...additions],
+      discoveredFerryRoutes: [...retained, ...additions],
       purchasedHarbours: state.purchasedHarbours.map((harbour) =>
-        harbour.id === id ? { ...harbour, name: additions[0].originName } : harbour),
+        harbour.id === id ? { ...harbour, name: (additions[0]?.originName ?? harbour.name) } : harbour),
       updatedAt: discoveredAt,
     }
   }),

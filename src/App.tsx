@@ -15,7 +15,7 @@ import { getCity } from './data/cities'
 import { moneyFormatterForCity } from './services/localization'
 import { HOTEL_PURCHASE_COST } from './services/hotelEconomy'
 import { CurrencyProvider } from './components/game/CurrencyContext'
-import { discoverFerryRoutes } from './services/maritimeRoutes'
+import { discoverFerryRoutes, simulatedHarbourCircuit } from './services/maritimeRoutes'
 import { POSTAL_DEPOT_BUILD_COST } from './services/postalDepots'
 
 const JOB_REFRESH_INTERVAL_MS = 60_000
@@ -104,11 +104,33 @@ export default function App() {
     setSection('ferries')
     // Never undo a successful purchase if a third-party provider is unavailable.
     void discoverFerryRoutes(coordinates).then((routes) => {
-      if (routes.length) useGameStore.getState().addHarbourFerryRoutes(coordinates, routes)
+      useGameStore.getState().addHarbourFerryRoutes(coordinates, routes.length ? routes : [simulatedHarbourCircuit(coordinates)])
     }).catch((error) => {
       console.warn('[harbour] Background ferry discovery failed:', error)
+      useGameStore.getState().addHarbourFerryRoutes(coordinates, [simulatedHarbourCircuit(coordinates)])
     })
   }, [placeHarbour, setSection])
+
+  // Existing purchased harbours also recover routes after deployment or reload.
+  useEffect(() => {
+    if (!game.hasHydrated) return
+    const harbours = useGameStore.getState().purchasedHarbours ?? []
+    let cancelled = false
+    void (async () => {
+      for (const harbour of harbours) {
+        if (cancelled) break
+        const state = useGameStore.getState()
+        if ((state.discoveredFerryRoutes ?? []).some((route) => route.harbourId === harbour.id && route.id !== `${harbour.id}:simulated-harbour-circuit`)) continue
+        try {
+          const routes = await discoverFerryRoutes(harbour.coordinates)
+          if (!cancelled) state.addHarbourFerryRoutes(harbour.coordinates, routes.length ? routes : [simulatedHarbourCircuit(harbour.coordinates)])
+        } catch {
+          if (!cancelled) state.addHarbourFerryRoutes(harbour.coordinates, [simulatedHarbourCircuit(harbour.coordinates)])
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [game.hasHydrated])
 
   const availableOfferCapacity = jobOfferCapacity(game.vehicles, game.drivers)
 

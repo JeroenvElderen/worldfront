@@ -207,7 +207,7 @@ const flushPendingExploration = (state: GameState): GameSave['exploredTerritory'
   }
   return explored
 }
-const lastExplorationRevealAt = new Map<string, number>()
+const lastExplorationRevealPosition = new Map<string, Coordinates>()
 const advanceContracts = (contracts: GameSave['contracts'], category: GameSave['contracts'][number]['category']) => contracts.map((contract) => {
   if (!contract.accepted || contract.completed || contract.category !== category) return contract
   const progress = Math.min(contract.target, contract.progress + 1)
@@ -224,36 +224,28 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     const last = previous[previous.length - 1]
     if (last) {
       const distance = distanceKmBetween(last, point)
-      if (distance < 0.015) return state
+      if (distance < 0.005) return state
     }
     // Persist only observed animation positions. Large gaps are retained as
     // segment breaks at completion, never filled with invented road travel.
     const updated = [...previous.slice(-4999), [point[0], point[1]] as Coordinates]
     const jobs = state.jobs.slice()
     jobs[index] = { ...job, recordedRoute: updated }
-    // Reveal verified, actually travelled roads periodically while the taxi
-    // is moving, rather than waiting for the mission to finish. Use a short
-    // rolling window so we never draw a straight line across missing samples.
-    const now = Date.now()
-    if (updated.length >= 2 && now - (lastExplorationRevealAt.get(job.id) ?? 0) >= 1_000) {
-      lastExplorationRevealAt.set(job.id, now)
-      const recent = updated.slice(-Math.min(updated.length, 100))
-      const segments: Coordinates[][] = []
-      let segment: Coordinates[] = [recent[0]]
-      for (let i = 1; i < recent.length; i++) {
-        if (distanceKmBetween(recent[i - 1], recent[i]) > 1.5) {
-          if (segment.length > 1) segments.push(segment)
-          segment = [recent[i]]
-        } else {
-          segment.push(recent[i])
-        }
-      }
-      if (segment.length > 1) segments.push(segment)
+    // Reveal each observed road segment as soon as the taxi has travelled
+    // roughly five metres. Never reveal an unobserved jump across the map.
+    const lastRevealed = lastExplorationRevealPosition.get(job.id)
+    const movedSinceReveal = lastRevealed
+      ? distanceKmBetween(lastRevealed, point)
+      : last ? distanceKmBetween(last, point) : 0
+    if (last && movedSinceReveal >= 0.005 && distanceKmBetween(last, point) <= 1.5) {
+      const from = lastRevealed && distanceKmBetween(lastRevealed, last) <= 1.5
+        ? lastRevealed : last
+      lastExplorationRevealPosition.set(job.id, [point[0], point[1]])
       return {
         jobs,
-        exploredTerritory: segments.length
-          ? extendExploredTerritorySegments(state.exploredTerritory, segments, job.id)
-          : state.exploredTerritory,
+        exploredTerritory: extendExploredTerritorySegments(
+          state.exploredTerritory, [[from, [point[0], point[1]]]], job.id,
+        ),
       }
     }
     return { jobs }

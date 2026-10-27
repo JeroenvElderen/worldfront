@@ -7,7 +7,7 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
 ]
 const HARBOUR_SEARCH_RADIUS_METRES = 50_000
-const MAX_LOCAL_TERMINAL_DISTANCE_KM = 15
+const MAX_LOCAL_TERMINAL_DISTANCE_KM = 3
 
 interface OsmTags {
   name?: string
@@ -21,7 +21,7 @@ interface OsmTags {
   duration?: string
 }
 interface OsmGeometryPoint { lon: number; lat: number }
-interface OsmElement { id: number; type: 'node' | 'way'; lat?: number; lon?: number; tags?: OsmTags; geometry?: OsmGeometryPoint[] }
+interface OsmElement { id: number; type: 'node' | 'way' | 'relation'; lat?: number; lon?: number; tags?: OsmTags; geometry?: OsmGeometryPoint[]; members?: Array<{ type: string; role?: string; geometry?: OsmGeometryPoint[] }> }
 
 const isCoordinates = (value: Coordinates | undefined): value is Coordinates =>
   Boolean(value && value.every(Number.isFinite))
@@ -85,11 +85,44 @@ const nearbyCuratedRoutes = (cityCoordinates: Coordinates): FerryRouteOption[] =
   }]
 })
 
+// OSM commonly maps ferry services as route=ferry relations rather than
+// individually tagged ways. Join adjacent member-way geometries without
+// fabricating a straight-line connection across missing route sections.
+const relationGeometry = (element: OsmElement): OsmGeometryPoint[] => {
+  const members = (element.members ?? [])
+    .filter((member) => member.type === 'way' && (member.geometry?.length ?? 0) >= 2)
+    .map((member) => member.geometry!)
+  if (!members.length) return []
+  const ordered = [...members.shift()!]
+  while (members.length) {
+    const tail = ordered.at(-1)!
+    const head = ordered[0]
+    const index = members.findIndex((points) => {
+      const start = points[0], end = points.at(-1)!
+      return Math.hypot(start.lon - tail.lon, start.lat - tail.lat) < 0.0001 ||
+        Math.hypot(end.lon - tail.lon, end.lat - tail.lat) < 0.0001 ||
+        Math.hypot(start.lon - head.lon, start.lat - head.lat) < 0.0001 ||
+        Math.hypot(end.lon - head.lon, end.lat - head.lat) < 0.0001
+    })
+    if (index < 0) break
+    const points = members.splice(index, 1)[0]
+    const start = points[0], end = points.at(-1)!
+    if (Math.hypot(start.lon - tail.lon, start.lat - tail.lat) < 0.0001) ordered.push(...points.slice(1))
+    else if (Math.hypot(end.lon - tail.lon, end.lat - tail.lat) < 0.0001) ordered.push(...points.slice(0, -1).reverse())
+    else if (Math.hypot(end.lon - head.lon, end.lat - head.lat) < 0.0001) ordered.unshift(...points.slice(0, -1))
+    else ordered.unshift(...points.slice(1).reverse())
+  }
+  // A partially assembled relation must not masquerade as a complete route.
+  return members.length ? [] : ordered
+}
+
 const parseRoutes = (elements: OsmElement[], cityCoordinates: Coordinates): FerryRouteOption[] => {
   const terminals = elements.filter((element) => element.type === 'node')
   const routes = elements.flatMap((element): FerryRouteOption[] => {
-    if (element.type !== 'way' || !element.geometry || element.geometry.length < 2) return []
-    let coordinates = element.geometry
+    if (element.type !== 'way' && element.type !== 'relation') return []
+    const geometry = element.type === 'relation' ? relationGeometry(element) : element.geometry
+    if (!geometry || geometry.length < 2) return []
+    let coordinates = geometry
       .map(({ lon, lat }) => [lon, lat] as Coordinates)
       .filter(isCoordinates)
     if (coordinates.length < 2) return []
@@ -115,7 +148,7 @@ const parseRoutes = (elements: OsmElement[], cityCoordinates: Coordinates): Ferr
     const routeName = englishName(element.tags) ?? `${originName} → ${destinationName}`
 
     return [{
-      id: `osm-ferry-${element.id}`,
+      id: `osm-ferry-${element.type}-${element.id}`,
       name: routeName,
       originName,
       destinationName,
@@ -139,7 +172,9 @@ const parseRoutes = (elements: OsmElement[], cityCoordinates: Coordinates): Ferr
 /** Find passenger services whose mapped ferry line starts near a placed harbour. */
 export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signal?: AbortSignal) {
   const [longitude, latitude] = harbourCoordinates
-  const query = `[out:json][timeout:25];(way(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["route"="ferry"];way(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["ferry"="yes"];);out tags geom;node(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["amenity"="ferry_terminal"];out tags;`
+  // Relations contain most mapped ferry services; query them as well as
+  // ferry ways. The endpoint filter below only accepts real nearby terminals.
+  const query = `[out:json][timeout:25];(relation(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["route"="ferry"];way(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["route"="ferry"];way(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["ferry"="yes"];node(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["amenity"="ferry_terminal"];);out tags geom;`
   let lastError: unknown
   const curated = nearbyCuratedRoutes(harbourCoordinates)
 
@@ -158,7 +193,10 @@ export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signa
       if (!response.ok) throw new Error(`OpenStreetMap ferry lookup failed (${response.status})`)
       const result = await response.json() as { elements?: OsmElement[] }
       const routes = parseRoutes(result.elements ?? [], harbourCoordinates)
-      return routes.length ? routes : curated
+      if (routes.length) return routes
+      if (curated.length) return curated
+      // Empty data from one mirror is not proof that the location has no
+      // ferry service. Try the next Overpass instance.
     } catch (error) {
       if (signal?.aborted) throw error
       lastError = (error as Error).name === 'AbortError'
@@ -171,5 +209,6 @@ export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signa
   }
 
   if (curated.length) return curated
-  throw lastError instanceof Error ? lastError : new Error('Ferry routes are temporarily unavailable.')
+  if (lastError) throw lastError instanceof Error ? lastError : new Error('Ferry routes are temporarily unavailable.')
+  return []
 }

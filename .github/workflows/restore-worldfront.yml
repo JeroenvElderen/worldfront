@@ -1,0 +1,87 @@
+name: Restore or hard reset WorldFront
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Full 40-character commit SHA
+        required: true
+        default: b5900c0035acb434324a14697aaa59f012812dcd
+        type: string
+      mode:
+        description: Restoration method
+        required: true
+        type: choice
+        options:
+          - safe-pr
+          - hard-reset
+        default: safe-pr
+      confirmation:
+        description: Type HARD RESET to enable hard-reset mode
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: worldfront-restore-main
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Validate and restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ inputs.commit_sha }}
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TARGET" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::A full 40-character SHA is required"; exit 1
+          fi
+          if [[ "$MODE" == "hard-reset" && "$CONFIRMATION" != "HARD RESET" ]]; then
+            echo "::error::Type HARD RESET in the confirmation field"; exit 1
+          fi
+          git fetch origin main
+          BASE="$(git rev-parse origin/main)"
+          git fetch origin "$TARGET"
+          git cat-file -e "$TARGET^{commit}"
+          git merge-base --is-ancestor "$TARGET" "$BASE" || {
+            echo "::error::Target must be an ancestor of current main"; exit 1;
+          }
+          if [[ "$MODE" == "hard-reset" ]]; then
+            BACKUP="backup/pre-hard-reset-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            git push origin "$BASE:refs/heads/$BACKUP"
+            echo "Backup branch: $BACKUP" >> "$GITHUB_STEP_SUMMARY"
+            git push --force-with-lease="refs/heads/main:$BASE" origin "$TARGET:refs/heads/main"
+            echo "main now points to $TARGET" >> "$GITHUB_STEP_SUMMARY"
+            echo "Warning: the workflow file may disappear from main if absent in the target commit." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$MODE" == "safe-pr" ]]; then
+            BRANCH="restore/snapshot-${TARGET:0:12}-${GITHUB_RUN_ID}"
+            git switch -c "$BRANCH" "$BASE"
+            git read-tree --reset -u "$TARGET^{tree}"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            if git diff --cached --quiet; then
+              echo "::notice::main already matches the target tree"; exit 0
+            fi
+            git commit -m "Restore tracked files to $TARGET"
+            git push origin "$BRANCH"
+            gh pr create --base main --head "$BRANCH" \
+              --title "Restore WorldFront to ${TARGET:0:12}" \
+              --body "Restores tracked files to commit \`$TARGET\` without rewriting main history. Review before merging."
+          else
+            echo "::error::Unknown mode"; exit 1
+          fi

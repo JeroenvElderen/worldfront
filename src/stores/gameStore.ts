@@ -153,15 +153,6 @@ const unlockedTerritoryCenters = (state: Pick<GameState, 'branches' | 'territory
     source: source === 'ferry-discovery' ? 'ferry-discovery' as const : 'village' as const,
   })),
 ]
-const completedJobRoute = (job: TaxiJob, start?: Coordinates) => {
-  const pickupRoute = job.pickupRouteCoordinates ?? [start, jobPickup(job)]
-  return [...pickupRoute, ...(job.routeCoordinates ?? [jobPickup(job), jobDestination(job)]).slice(1)]
-    .filter((point): point is Coordinates => Boolean(point))
-}
-const addTaxiDiscovery = (existing: TerritoryFeature | null, job: TaxiJob, start: Coordinates | undefined) => {
-  const routeCoordinates = completedJobRoute(job, start)
-  return extendExploredTerritory(existing, routeCoordinates)
-}
 const advanceContracts = (contracts: GameSave['contracts'], category: GameSave['contracts'][number]['category']) => contracts.map((contract) => {
   if (!contract.accepted || contract.completed || contract.category !== category) return contract
   const progress = Math.min(contract.target, contract.progress + 1)
@@ -753,7 +744,6 @@ const generationTaxi = selectJobGenerationTaxi(state)
   completeJob: (jobId) => set((state) => {
     if (!state.company) return state
     const job = state.jobs.find((candidate) => candidate.id === jobId)
-    const vehicle = state.vehicles.find((candidate) => candidate.id === job?.assignedVehicleId)
     const result = completeJobState(state.company, state.jobs, state.vehicles, jobId)
     if (!result || !job) return state
     const updatedAt = new Date().toISOString()

@@ -36,7 +36,7 @@ export function FerryDispatch({ company, purchasedHarbours, discoveredRoutes, tr
     <div className="sheet-handle" />
     <button className="sheet-close" onClick={onClose} aria-label="Close ferry dispatch">×</button>
     <header className="ferry-heading">
-      <div><small>MARITIME OPERATIONS</small><h2 id="ferry-dispatch-title">Ferry dispatch</h2><p>Place your own harbour marker, then operate only the routes found at that point.</p></div>
+      <div><small>MARITIME OPERATIONS</small><h2 id="ferry-dispatch-title">Ferry dispatch</h2><p>Discover real harbours through exploration, purchase one, then buy a boat to operate its existing connections.</p></div>
       <span className="ferry-heading-icon" aria-hidden="true">⛴</span>
     </header>
 
@@ -49,9 +49,9 @@ export function FerryDispatch({ company, purchasedHarbours, discoveredRoutes, tr
     <h3>Your harbours</h3>
     <div className="ferry-destinations harbour-market">
       {purchasedHarbours.map((harbour) => <article key={harbour.id}><span aria-hidden="true">⚓</span><div><strong>{harbour.name}</strong><small>{availableRoutes.filter((route) => routeHarbourId(route) === harbour.id).length} routes discovered from this point</small></div><button disabled>Placed</button></article>)}
-      {!purchasedHarbours.length && <div className="ferry-empty"><strong>No harbours placed</strong><small>Place your first harbour inside owned territory to discover its routes.</small></div>}
+      {!purchasedHarbours.length && <div className="ferry-empty"><strong>No harbours owned</strong><small>Explore the map to discover existing harbours, then purchase one.</small></div>}
     </div>
-    <button disabled={company.cash < HARBOUR_PRICE} onClick={onPlaceHarbour}>{company.cash < HARBOUR_PRICE ? 'Not enough cash' : `Place harbour on map · ${money.format(HARBOUR_PRICE)}`}</button>
+    <button disabled={company.cash < HARBOUR_PRICE} onClick={onPlaceHarbour}>{company.cash < HARBOUR_PRICE ? 'Not enough cash' : `Find harbour on map · ${money.format(HARBOUR_PRICE)}`}</button>
 
     <article className={`mode-card harbour-card ${purchasedHarbours.length ? 'available' : ''}`}>
       <header><span>⛴</span><div><strong>Ferry fleet</strong><small>Ferries serve routes created from harbours you own.</small></div></header>
@@ -64,7 +64,7 @@ export function FerryDispatch({ company, purchasedHarbours, discoveredRoutes, tr
       {availableRoutes.length ? availableRoutes.map((route) => {
         const owned = routeAlreadyOwned(route)
         return <article key={route.id}><span aria-hidden="true">⚓</span><div><strong>{route.destinationName}</strong><small>from {route.originName} · {route.distanceKm.toFixed(1)} km{route.durationMinutes ? ` · ${Math.round(route.durationMinutes)} min` : ''}</small></div><button disabled={owned} onClick={() => onCreateRoute(route)}>{owned ? 'Route created' : 'Create route'}</button></article>
-      }) : <div className="ferry-empty"><strong>Place a harbour to discover routes</strong><small>Only routes starting near one of your placed harbour points become available.</small></div>}
+      }) : <div className="ferry-empty"><strong>Discover and purchase a harbour</strong><small>Existing connections are shown at discovered harbour markers; purchase a harbour to operate them.</small></div>}
     </div>
 
     <h3>Route dispatch</h3>

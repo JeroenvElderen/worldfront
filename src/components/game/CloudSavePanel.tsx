@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { loadCompanyFromCloud, saveCompanyToCloud, signInWithEmail, signUpWithEmail } from "../../services/cloudSaves";
 import { useGameStore } from "../../stores/gameStore";
+import { snapshotTaxiPositions, persistTaxiPositions } from "../../services/liveTaxiPositions";
 
 const saveSnapshot = () => {
   const { activeSection, focusedJobId, hasHydrated, jobsLoading, jobsError, ...snapshot } = useGameStore.getState();
   void activeSection; void focusedJobId; void hasHydrated; void jobsLoading; void jobsError;
-  return snapshot;
+  persistTaxiPositions();
+  return { ...snapshot, vehicles: snapshotTaxiPositions(snapshot.vehicles) };
 };
 
 export function CloudSavePanel() {

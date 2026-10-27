@@ -214,7 +214,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
 
   ...blankSave, activeSection: 'map', focusedJobId: null, hasHydrated: false, jobsLoading: false, jobsError: null,
   setHasHydrated: (hasHydrated) => set({ hasHydrated }),
-  setSection: (activeSection) => set({ activeSection }),
+  setSection: (activeSection) => set({ activeSection: activeSection === 'ferries' || activeSection === 'travel' ? 'map' : activeSection }),
   openJob: (focusedJobId) => set({ focusedJobId, activeSection: 'jobs' }),
   showJobOnMap: (focusedJobId) => set({ focusedJobId, activeSection: 'map' }),
   initializeCompany: (city) => {

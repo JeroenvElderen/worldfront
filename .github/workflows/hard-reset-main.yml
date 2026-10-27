@@ -1,0 +1,53 @@
+name: Hard reset main to commit
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Full 40-character commit SHA to restore'
+        required: true
+        default: 'fe1a42e845f713d806bdee74f0e90910f5216add'
+        type: string
+      confirmation:
+        description: 'Type RESET MAIN to authorize rewriting main history'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hard-reset-main
+  cancel-in-progress: false
+
+jobs:
+  hard-reset:
+    if: ${{ inputs.confirmation == 'RESET MAIN' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Validate target and back up main
+        env:
+          TARGET: ${{ inputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "::error::Enter a full 40-character SHA"; exit 1; }
+          git fetch origin main
+          git cat-file -e "${TARGET}^{commit}" || { echo "::error::Commit not found"; exit 1; }
+          CURRENT=$(git rev-parse refs/remotes/origin/main)
+          echo "CURRENT=$CURRENT" >> "$GITHUB_ENV"
+          echo "TARGET=$TARGET" >> "$GITHUB_ENV"
+          BACKUP="backup/main-before-hard-reset-${GITHUB_RUN_ID}"
+          git push origin "$CURRENT:refs/heads/$BACKUP"
+          echo "Backup created: $BACKUP"
+
+      - name: Hard reset main (force-with-lease)
+        run: |
+          set -euo pipefail
+          git push --force-with-lease="refs/heads/main:$CURRENT" origin "$TARGET:refs/heads/main"
+          echo "main now points to $TARGET"

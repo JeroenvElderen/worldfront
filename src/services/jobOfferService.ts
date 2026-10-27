@@ -107,6 +107,39 @@ const randomTerritoryLocations = (city: City, territories: TerritoryFeature[], c
   })
 }
 
+/** Sample destinations near the taxi before doing expensive road validation.
+ * This avoids sampling huge owned regions only to discard distant points.
+ */
+const nearbyTerritoryDestinations = (
+  city: City,
+  isUnlocked: (coordinates: Coordinates) => boolean,
+  maxDistanceKm: number,
+  count: number,
+): MapboxPlace[] => {
+  const locations: MapboxPlace[] = []
+  const [longitude, latitude] = city.coordinates
+  const latitudeScale = 111.32
+  const longitudeScale = 111.32 * Math.max(0.1, Math.cos(latitude * Math.PI / 180))
+  // Account for the pickup being up to two kilometres away.
+  const radius = Math.max(MIN_JOB_DISTANCE_KM, maxDistanceKm + MAX_PICKUP_DISTANCE_KM)
+  const attempts = Math.min(1200, Math.max(200, count * 12))
+  for (let attempt = 0; attempt < attempts && locations.length < count; attempt += 1) {
+    const distance = Math.sqrt(Math.random()) * radius
+    const angle = Math.random() * Math.PI * 2
+    const coordinates: Coordinates = [
+      longitude + Math.cos(angle) * distance / longitudeScale,
+      latitude + Math.sin(angle) * distance / latitudeScale,
+    ]
+    if (!isUnlocked(coordinates)) continue
+    locations.push({
+      id: `destination:${city.id}:${crypto.randomUUID()}`,
+      name: `Destination ${locations.length + 1} in ${city.name}`,
+      coordinates,
+    })
+  }
+  return locations
+}
+
 /** Generate pickup candidates close to the taxi requesting work. */
 const randomNearbyPickupLocations = (
   city: City,
@@ -201,11 +234,20 @@ export async function generateJobOffers(
   Math.max(24, count * 12),
 )
 
-const destinationPlaces = randomTerritoryLocations(
+const destinationPlaces = nearbyTerritoryDestinations(
   city,
-  ownedTerritories,
+  isUnlocked,
+  maxDistanceKm,
   Math.max(64, count * RANDOM_LOCATIONS_PER_OFFER),
 )
+// A fallback preserves offers in unusually thin or fragmented territories.
+if (destinationPlaces.length < count * 4) {
+  destinationPlaces.push(...randomTerritoryLocations(
+    city,
+    ownedTerritories,
+    Math.max(16, count * 8),
+  ))
+}
 
 const uniqueRoutes = new Map<string, (typeof routes)[number]>()
 
@@ -302,7 +344,7 @@ if (
 
     return { ...route, stops }
   }
-  const ROUTE_REQUEST_CONCURRENCY = 4
+  const ROUTE_REQUEST_CONCURRENCY = 6
   for (let index = 0; index < routes.length && resolvedRoutes.length < count; index += ROUTE_REQUEST_CONCURRENCY) {
     const batch = await Promise.all(routes.slice(index, index + ROUTE_REQUEST_CONCURRENCY).map(resolveRoute))
     for (const route of batch) {

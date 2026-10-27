@@ -1634,3 +1634,36 @@ const generationTaxi = selectJobGenerationTaxi(state)
     else useGameStore.setState({ hasHydrated: true })
   },
 }))
+
+
+// Refill the offer board after a job is accepted, declined or expires.
+// Debouncing coalesces several changes into one generation pass, while the
+// cooldown prevents repeated API calls when suitable roads cannot be found.
+let replenishTimer: ReturnType<typeof setTimeout> | null = null
+let lastReplenishAttempt = 0
+const REPLENISH_DEBOUNCE_MS = 1_500
+const REPLENISH_COOLDOWN_MS = 30_000
+
+useGameStore.subscribe((state, previous) => {
+  if (!state.hasHydrated || !state.company || state.pausedAt || state.jobsLoading) return
+  const offered = state.jobs.filter((job) => job.status === 'offered').length
+  const previousOffered = previous.jobs.filter((job) => job.status === 'offered').length
+  // Replenish only when offers were consumed/expired, or the game first
+  // hydrates with an empty board. Never trigger from generation itself.
+  const becameReady = !previous.hasHydrated && state.hasHydrated
+  if (!becameReady && offered >= previousOffered) return
+  if (offered >= Math.min(MAX_JOB_OFFERS, availableJobOfferCapacity(state))) return
+  if (!selectJobGenerationTaxi(state)) return
+  if (replenishTimer) clearTimeout(replenishTimer)
+  replenishTimer = setTimeout(() => {
+    replenishTimer = null
+    const latest = useGameStore.getState()
+    if (!latest.hasHydrated || !latest.company || latest.pausedAt || latest.jobsLoading) return
+    if (Date.now() - lastReplenishAttempt < REPLENISH_COOLDOWN_MS) return
+    const capacity = Math.min(MAX_JOB_OFFERS, availableJobOfferCapacity(latest))
+    if (latest.jobs.filter((job) => job.status === 'offered').length >= capacity) return
+    if (!selectJobGenerationTaxi(latest)) return
+    lastReplenishAttempt = Date.now()
+    void latest.addRandomJob()
+  }, REPLENISH_DEBOUNCE_MS)
+})

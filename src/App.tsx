@@ -91,18 +91,26 @@ export default function App() {
   const setSection = game.setSection
   const handlePlaceHarbour = useCallback(async (coordinates: Parameters<typeof placeHarbour>[0]) => {
     setPlacingHarbour(false)
+    // Harbour construction must not depend on a third-party Overpass service.
+    // Commit the harbour first; ferry route discovery is an optional follow-up.
+    const harbourCount = useGameStore.getState().purchasedHarbours.length
+    placeHarbour(coordinates, [])
+    if (useGameStore.getState().purchasedHarbours.length === harbourCount) {
+      console.warn('[harbour] Construction rejected: check discovered territory, €5,000 funds, and duplicate placement.')
+      setPlacingHarbour(true)
+      return
+    }
+    setSection('ferries')
     try {
       const routes = await discoverFerryRoutes(coordinates)
-      const harbourCount = useGameStore.getState().purchasedHarbours.length
-      placeHarbour(coordinates, routes)
-      if (useGameStore.getState().purchasedHarbours.length === harbourCount) {
-        setPlacingHarbour(true)
+      if (!routes.length) {
+        console.info('[harbour] Harbour built, but no mapped ferry routes were found nearby.')
         return
       }
-      setSection('ferries')
+      // Attach discovered routes without charging the player a second time.
+      useGameStore.getState().addHarbourFerryRoutes(coordinates, routes)
     } catch (error) {
-      console.warn('Unable to discover routes from this harbour point', error)
-      setPlacingHarbour(true)
+      console.warn('[harbour] Harbour built, but ferry route discovery failed:', error)
     }
   }, [placeHarbour, setSection])
 

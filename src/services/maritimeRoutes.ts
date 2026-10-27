@@ -7,7 +7,7 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
 ]
 const HARBOUR_SEARCH_RADIUS_METRES = 50_000
-const MAX_LOCAL_TERMINAL_DISTANCE_KM = 5
+const MAX_LOCAL_TERMINAL_DISTANCE_KM = 15
 
 interface OsmTags {
   name?: string
@@ -139,7 +139,7 @@ const parseRoutes = (elements: OsmElement[], cityCoordinates: Coordinates): Ferr
 /** Find passenger services whose mapped ferry line starts near a placed harbour. */
 export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signal?: AbortSignal) {
   const [longitude, latitude] = harbourCoordinates
-  const query = `[out:json][timeout:25];way(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["route"="ferry"]->.routes;(.routes;node(w.routes)["amenity"="ferry_terminal"];);out tags geom;`
+  const query = `[out:json][timeout:25];(way(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["route"="ferry"];way(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["ferry"="yes"];);out tags geom;node(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["amenity"="ferry_terminal"];out tags;`
   let lastError: unknown
   const curated = nearbyCuratedRoutes(harbourCoordinates)
 

@@ -2049,11 +2049,13 @@ function GameMapView({
     let disposed = false;
     const applyIcons = () => {
       if (disposed || !instance.isStyleLoaded()) return;
+      // Always ensure the image exists after a style reset before modifying layers.
+      if (!instance.hasImage(TAXI_SVG_IMAGE)) { loadIcon(); return; }
       for (const vehicle of vehicles) {
         if (vehicle.type !== "taxi") continue;
         const sourceId = vehicleSourceId(vehicle.id);
         const layerId = `${sourceId}-taxi-svg`;
-        if (!instance.getSource(sourceId) || !instance.hasImage(TAXI_SVG_IMAGE)) continue;
+        if (!instance.getSource(sourceId)) continue;
         if (!instance.getLayer(layerId)) {
           instance.addLayer({
             id: layerId,
@@ -2080,6 +2082,7 @@ function GameMapView({
       if (disposed || !instance.isStyleLoaded()) return;
       if (instance.hasImage(TAXI_SVG_IMAGE)) { applyIcons(); return; }
       const img = new Image();
+      img.onerror = () => { console.error("Unable to load taxi SVG:", TAXI_SVG_URL); };
       img.onload = () => {
         if (disposed || !instance.isStyleLoaded()) return;
         const canvas = document.createElement("canvas");

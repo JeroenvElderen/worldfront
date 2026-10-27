@@ -20,6 +20,7 @@ export function CloudSavePanel() {
   const [autoBackup, setAutoBackup] = useState(false);
   const [lastBackup, setLastBackup] = useState<string | null>(null);
   const backupInProgress = useRef(false);
+  const cloudSavedAt = useRef(0);
   const [message, setMessage] = useState("");
   useEffect(() => {
     if (!supabase) return;
@@ -40,6 +41,7 @@ export function CloudSavePanel() {
       backupInProgress.current = true;
       try {
         await saveCompanyToCloud(snapshot);
+        cloudSavedAt.current = Date.now();
         if (!cancelled) { previousSnapshot = serialized; setLastBackup(new Date().toLocaleTimeString()); }
       } catch (error) {
         if (!cancelled) { setAutoBackup(false); setMessage(error instanceof Error ? error.message : "Cloud backup failed"); }
@@ -49,10 +51,29 @@ export function CloudSavePanel() {
     const interval = window.setInterval(() => void backup(), 60_000);
     return () => { cancelled = true; window.clearInterval(interval); };
   }, [autoBackup, userEmail]);
+  // Detect other devices writing to the same save; never silently overwrite them.
+  useEffect(() => {
+    if (!autoBackup || !userEmail) return;
+    let disposed = false;
+    const checkRemote = async () => {
+      try {
+        const remote = await loadCompanyFromCloud();
+        if (disposed || !remote) return;
+        const timestamp = new Date(remote.saved_at).getTime();
+        if (Number.isFinite(timestamp) && timestamp > cloudSavedAt.current + 2_000) {
+          setAutoBackup(false);
+          setMessage("Another device updated this cloud save. Automatic backup paused to prevent overwriting it. Restore or manually save after reviewing your progress.");
+        }
+      } catch { /* Temporary connectivity failures are handled by backup attempts. */ }
+    };
+    const timer = window.setInterval(() => void checkRemote(), 90_000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [autoBackup, userEmail]);
   const startAutoBackup = async () => {
     const game = useGameStore.getState();
     if (!game.hasHydrated || !game.company) throw new Error("Load a company before enabling backup.");
     const previous = await loadCompanyFromCloud();
+    cloudSavedAt.current = previous ? new Date(previous.saved_at).getTime() : 0;
     if (previous && !window.confirm("A cloud save already exists. Replace it with this device's progress and enable automatic backup?")) return;
     setAutoBackup(true);
     setMessage("Automatic Supabase backup enabled for this session.");
@@ -68,7 +89,7 @@ export function CloudSavePanel() {
       <strong>WorldFront cloud saves</strong>
       {!supabase ? <p>Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel.</p> : userEmail ? <>
         <p>Signed in: {userEmail}</p>
-        <button disabled={busy} onClick={() => void execute(async () => { await saveCompanyToCloud(saveSnapshot()); setLastBackup(new Date().toLocaleTimeString()); setMessage("Cloud backup saved."); })}>Save to cloud</button>
+        <button disabled={busy} onClick={() => void execute(async () => { await saveCompanyToCloud(saveSnapshot()); cloudSavedAt.current = Date.now(); setLastBackup(new Date().toLocaleTimeString()); setMessage("Cloud backup saved."); })}>Save to cloud</button>
         <button disabled={busy} onClick={() => void execute(async () => { if (autoBackup) { setAutoBackup(false); setMessage("Automatic backup stopped."); } else await startAutoBackup(); })}>{autoBackup ? "Stop auto backup" : "Start auto backup"}</button>
         {lastBackup && <p>Last cloud backup: {lastBackup}</p>}
         <button disabled={busy} onClick={() => void execute(async () => {

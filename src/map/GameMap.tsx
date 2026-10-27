@@ -434,12 +434,12 @@ if (typeof window !== "undefined") {
   window.addEventListener("pagehide", persistTaxiPositions);
 }
 // Capture observed taxi animation positions for the active job. Exploration
-// is not changed here: recorded checkpoints are committed after drop-off.
+// is revealed from these checkpoints while the vehicle travels.
 const journeyCheckpointTimes = new Map<string, number>();
 const recordJourneyCheckpoint = (jobId: string, vehicleId: string, position: Coordinates) => {
   const key = `${vehicleId}:${jobId}`;
   const now = Date.now();
-  if (now - (journeyCheckpointTimes.get(key) ?? 0) < 1000) return;
+  if (now - (journeyCheckpointTimes.get(key) ?? 0) < 150) return;
   journeyCheckpointTimes.set(key, now);
   useGameStore.getState().recordJourneyPoint(jobId, vehicleId, position);
 };

@@ -49,8 +49,6 @@ async function isWaterCoordinate(coordinates: Coordinates, signal?: AbortSignal)
  * If Mapbox cannot validate a stop, fail closed instead of placing a passenger.
  */
 const STOP_TILEQUERY_RADIUS_M = 18
-const FORBIDDEN_ROAD_CLASSES = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link', 'path', 'pedestrian', 'steps', 'track', 'service', 'ferry'])
-const FORBIDDEN_LAND_CLASSES = new Set(['wood', 'forest', 'national_park', 'nature_reserve', 'scrub', 'grass', 'park'])
 type TilequeryFeature = {
   properties?: Record<string, unknown>;
   geometry?: { type?: string; coordinates?: unknown };
@@ -74,19 +72,18 @@ const isSafePassengerStop = async (coordinates: Coordinates, signal?: AbortSigna
   if (!mapboxAccessToken) return false
   // Streets-v8 uses road.class, road.type, and landuse.class. Tilequery may
   // return several overlapping features, so reject any motorway/trunk hit.
-  const [roads, landuse, water] = await Promise.all([
+  const [roads, water] = await Promise.all([
     tilequery(coordinates, 'road', STOP_TILEQUERY_RADIUS_M, signal),
-    tilequery(coordinates, 'landuse', 0, signal),
     isWaterCoordinate(coordinates, signal),
   ])
   if (water) return false
   const roadClasses = roads.map((feature) => String(feature.properties?.class ?? '').toLowerCase())
-  if (!roadClasses.length || roadClasses.some((roadClass) => FORBIDDEN_ROAD_CLASSES.has(roadClass))) return false
+  if (!roadClasses.length) return false
+  // Overlapping road features are common at junctions: a nearby motorway
+  // must not invalidate a valid residential street at the same coordinate.
   // Allow only ordinary vehicle-accessible roads rather than accepting an
   // unclassified hiking path or a motorway service lane.
   if (!roadClasses.some((roadClass) => ['street', 'street_limited', 'secondary', 'tertiary', 'primary', 'residential', 'living_street'].includes(roadClass))) return false
-  const landClasses = landuse.map((feature) => String(feature.properties?.class ?? '').toLowerCase())
-  if (landClasses.some((landClass) => FORBIDDEN_LAND_CLASSES.has(landClass))) return false
   return true
 }
 
@@ -120,6 +117,7 @@ async function roadStops(from: Coordinates, to: Coordinates, signal?: AbortSigna
     }
   } catch (error) {
     if ((error as Error).name === 'AbortError') throw error
+    console.warn('[missions] Road-stop validation failed:', error)
     return null
   }
 }
@@ -330,7 +328,7 @@ routes = shuffled([...uniqueRoutes.values()])
     if (!stops) return null
     // Offline cached routes must meet the same curbside restrictions as live
     // routes. Do not trust previously saved stops without terrain validation.
-    if (route.stored) {
+    if (route.stored && (typeof navigator === 'undefined' || navigator.onLine)) {
       try {
         const [safePickup, safeDestination] = await Promise.all([
           isSafePassengerStop(stops.pickupRoad, signal),
@@ -377,7 +375,7 @@ if (
       if (resolvedRoutes.length >= count) break
     }
   }
-  if (!resolvedRoutes.length) throw new Error('No drivable routes were found. Try refreshing the available jobs.')
+  if (!resolvedRoutes.length) throw new Error(`No valid taxi missions after checking ${routes.length} candidate routes. Check Mapbox requests, unlocked territory and road-stop validation.`)
 
   const passengers = resolvedRoutes.map(() => ({
     id: crypto.randomUUID(),

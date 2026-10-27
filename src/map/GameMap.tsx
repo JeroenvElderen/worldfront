@@ -428,17 +428,21 @@ const recordLiveDiscovery = (vehicleId: string, position: Coordinates) => {
     liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
     return;
   }
-  if (now - previous.at < 6_000) return;
+  if (now - previous.at < 1_500) return;
   const distance = distanceKmBetween(previous.position, position);
-  if (distance < 0.08) return;
+  if (distance < 0.015) return;
   // Avoid connecting teleportation, city switching, or stale positions with
   // a fictional discovered road across the map.
-  if (distance > 3) {
+  if (distance > 10) {
     liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
     return;
   }
   liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
-  useGameStore.getState().discoverLiveRoute([previous.position, position]);
+  try {
+    useGameStore.getState().discoverLiveRoute([previous.position, position]);
+  } catch (error) {
+    console.warn("[exploration] Live territory update failed", error);
+  }
 };
 const TAXI_SVG_IMAGE = "worldfront-taxi-svg";
 const TAXI_SVG_URL = `${import.meta.env.BASE_URL}vehicles/taxi-topview.svg`;

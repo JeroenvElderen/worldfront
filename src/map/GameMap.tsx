@@ -742,33 +742,39 @@ function GameMapView({
   transportRoutesRef.current = transportRoutes;
   const [mapRevision, setMapRevision] = useState(0);
   const [containerReady, setContainerReady] = useState(false);
-  // Simulated congestion for currently displayed mission roads. This does not
-  // claim to be live traffic data and never changes actual road geometry.
+  // Every active taxi route has its own simulated congestion colour.
+  // Keep it consistent when a route layer is recreated during a journey.
+  const trafficColorForJob = (jobId: string): string => {
+    const longitude = map.current?.getCenter().lng ?? 0;
+    const hour = ((Date.now() / 3_600_000 + longitude / 15) % 24 + 24) % 24;
+    const peak = (hour >= 7 && hour < 9.5) || (hour >= 16.5 && hour < 19);
+    const shoulder = (hour >= 6 && hour < 11) || (hour >= 15 && hour < 21);
+    const seed = [...jobId].reduce((n, c) => n + c.charCodeAt(0), 0) % 4;
+    const severity = (peak ? 2 : shoulder ? 1 : 0) + (seed === 0 ? 1 : 0);
+    return severity >= 3 ? "#ef4444" : severity === 2 ? "#f97316" : severity === 1 ? "#eab308" : "#22c55e";
+  };
   useEffect(() => {
     const instance = map.current;
     if (!instance || !containerReady) return;
     const refresh = () => {
-      const hour = ((Date.now() / 3_600_000 + instance.getCenter().lng / 15) % 24 + 24) % 24;
-      const peak = (hour >= 7 && hour < 9.5) || (hour >= 16.5 && hour < 19);
-      const shoulder = (hour >= 6 && hour < 11) || (hour >= 15 && hour < 21);
       for (const job of jobs) {
         if (job.status !== "accepted" || job.cityId !== cityId) continue;
         const layerId = jobRouteSourceId(job.id);
         if (!instance.getLayer(layerId)) continue;
-        // Each route has a stable severity so not every road looks identical.
-        const seed = [...job.id].reduce((n, c) => n + c.charCodeAt(0), 0) % 4;
-        const severity = (peak ? 2 : shoulder ? 1 : 0) + (seed === 0 ? 1 : 0);
-        instance.setPaintProperty(layerId, "line-color",
-          severity >= 3 ? "#ef4444" : severity === 2 ? "#f97316" : severity === 1 ? "#eab308" : missionColor(job.id));
-        instance.setPaintProperty(layerId, "line-width", severity >= 2 ? 3.5 : 2);
+        instance.setPaintProperty(layerId, "line-color", trafficColorForJob(job.id));
+        instance.setPaintProperty(layerId, "line-width", 3);
       }
     };
     instance.on("style.load", refresh);
-    const timer = window.setInterval(refresh, 30_000);
+    instance.on("moveend", refresh);
+    const timer = window.setInterval(refresh, 15_000);
     refresh();
-    return () => { instance.off("style.load", refresh); window.clearInterval(timer); };
+    return () => {
+      instance.off("style.load", refresh);
+      instance.off("moveend", refresh);
+      window.clearInterval(timer);
+    };
   }, [jobs, cityId, mapRevision, containerReady]);
-
 
   // Use a visible night basemap rather than a subtle canvas brightness filter.
   // Keep the current map instance, sources and mission layers intact.
@@ -2479,7 +2485,7 @@ function GameMapView({
             source: routeSourceId,
             layout: { "line-cap": "round", "line-join": "round" },
             paint: {
-              "line-color": missionColor(job.id),
+              "line-color": trafficColorForJob(job.id),
               "line-width": 2,
               "line-opacity": 0.7,
             },
@@ -2506,7 +2512,7 @@ function GameMapView({
           source: routeSourceId,
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
-            "line-color": missionColor(job.id),
+            "line-color": trafficColorForJob(job.id),
             "line-width": 2,
             "line-opacity": 0.7,
           },
@@ -3362,7 +3368,7 @@ function GameMapView({
           type: "line",
           source: sourceId,
           paint: {
-            "line-color": missionColor(job.id),
+            "line-color": trafficColorForJob(job.id),
             "line-width": ROUTE_GLOW_WIDTH,
             "line-opacity": 0.2,
             "line-blur": 4,
@@ -3374,7 +3380,7 @@ function GameMapView({
           type: "line",
           source: sourceId,
           paint: {
-            "line-color": missionColor(job.id),
+            "line-color": trafficColorForJob(job.id),
             "line-width": 2.5,
             "line-opacity": 0.95,
           },

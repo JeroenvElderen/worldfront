@@ -1,6 +1,7 @@
 import { mapboxAccessToken } from '../config/mapbox'
 import type { Coordinates, TaxiFerryCrossing } from '../models/game'
 import { resolveLandsideFerryTerminals } from './ferryTerminals'
+import { routeIntersectsClosedSegment, type ClosedRoadSegment } from './closedRoadSegments'
 
 export type RouteSpeedLimit = { speed: number; unit: 'km/h' | 'mph' } | { unknown: true } | { none: true }
 
@@ -18,6 +19,7 @@ export interface RoadRouteOptions {
   excludeFerries?: boolean
   /** Active road closure points. Routes intersecting these points are rejected. */
   closedRoadPoints?: Coordinates[]
+  closedRoadSegments?: ClosedRoadSegment[]
 }
 
 type MapboxStep = {
@@ -91,7 +93,7 @@ export async function resolveRoadRoute(
   if (!mapboxAccessToken) return null
   for (const profile of profiles) {
     const query = new URLSearchParams({
-      alternatives: options.closedRoadPoints?.length ? 'true' : 'false',
+      alternatives: options.closedRoadPoints?.length || options.closedRoadSegments?.length ? 'true' : 'false',
       continue_straight: 'true',
       geometries: 'geojson',
       overview: 'full',
@@ -129,7 +131,8 @@ export async function resolveRoadRoute(
       const closures = options.closedRoadPoints ?? []
       const coords = candidate.geometry!.coordinates as Coordinates[]
       return closures.every((closure) => coords.slice(1).every((end, i) =>
-        metersToSegment(closure, coords[i], end) > 25))
+        metersToSegment(closure, coords[i], end) > 25)) &&
+        (options.closedRoadSegments ?? []).every((segment) => !routeIntersectsClosedSegment(coords, segment))
     }
     const route = validRoutes.filter(avoidsClosures).reduce<MapboxRoute | null>((fastest, candidate) =>
       !fastest || candidate.duration! < fastest.duration! ? candidate : fastest, null)

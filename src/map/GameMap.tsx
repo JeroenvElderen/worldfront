@@ -740,7 +740,7 @@ function GameMapView({
   const transportRoutesRef = useRef(transportRoutes);
   transportAssetsRef.current = transportAssets;
   transportRoutesRef.current = transportRoutes;
-  const [showDemandHeatmap, setShowDemandHeatmap] = useState(true);
+  const [showDemandHeatmap] = useState(true);
   const [mapRevision, setMapRevision] = useState(0);
   const [containerReady, setContainerReady] = useState(false);
   // Null is a resolved fallback too. Remember it so a location with no mapped

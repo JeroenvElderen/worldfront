@@ -378,6 +378,8 @@ const mapVehicleColor = (vehicle: Vehicle, standardColor: string) =>
     ? EXCLUSIVE_VEHICLE_COLOR
     : standardColor;
 
+const TAXI_SVG_IMAGE = "worldfront-taxi-svg";
+const TAXI_SVG_URL = `${import.meta.env.BASE_URL}vehicles/taxi-topview.svg`;
 const VEHICLE_MARKER_RADIUS = 4;
 const VEHICLE_MARKER_STROKE_WIDTH = 1.5;
 const ROUTE_GLOW_WIDTH = 10;
@@ -1965,6 +1967,59 @@ function GameMapView({
       if (postalDepotMarkers.current === markers) postalDepotMarkers.current = [];
     };
   }, [mapRevision, postalDepots, vehicles]);
+
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance?.isStyleLoaded()) return;
+    let cancelled = false;
+    const applyVehicleIcons = () => {
+      if (cancelled || !instance.isStyleLoaded() || !instance.hasImage(TAXI_SVG_IMAGE)) return;
+      vehicles.forEach((vehicle) => {
+        const sourceId = vehicleSourceId(vehicle.id);
+        const layerId = `${sourceId}-taxi-svg`;
+        if (!instance.getSource(sourceId)) return;
+        if (!instance.getLayer(layerId)) {
+          instance.addLayer({
+            id: layerId,
+            type: "symbol",
+            source: sourceId,
+            layout: {
+              "icon-image": TAXI_SVG_IMAGE,
+              "icon-size": 0.24,
+              "icon-allow-overlap": true,
+              "icon-ignore-placement": true,
+              "icon-rotation-alignment": "viewport",
+            },
+          });
+        }
+        if (instance.getLayer(sourceId)) {
+          instance.setPaintProperty(sourceId, "circle-opacity", 0);
+          instance.setPaintProperty(sourceId, "circle-stroke-opacity", 0);
+        }
+      });
+    };
+    if (instance.hasImage(TAXI_SVG_IMAGE)) {
+      applyVehicleIcons();
+    } else {
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled || !instance.isStyleLoaded()) return;
+        const canvas = document.createElement("canvas");
+        canvas.width = 48;
+        canvas.height = 96;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, 48, 96);
+        if (!instance.hasImage(TAXI_SVG_IMAGE)) {
+          instance.addImage(TAXI_SVG_IMAGE, ctx.getImageData(0, 0, 48, 96), { pixelRatio: 2 });
+        }
+        applyVehicleIcons();
+      };
+      img.src = TAXI_SVG_URL;
+    }
+    instance.once("idle", applyVehicleIcons);
+    return () => { cancelled = true; };
+  }, [mapRevision, vehicles]);
 
   useEffect(() => {
     const instance = map.current;

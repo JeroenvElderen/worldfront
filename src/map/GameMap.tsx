@@ -740,6 +740,7 @@ function GameMapView({
   const transportRoutesRef = useRef(transportRoutes);
   transportAssetsRef.current = transportAssets;
   transportRoutesRef.current = transportRoutes;
+  const [showDemandHeatmap, setShowDemandHeatmap] = useState(true);
   const [mapRevision, setMapRevision] = useState(0);
   const [containerReady, setContainerReady] = useState(false);
   // Null is a resolved fallback too. Remember it so a location with no mapped
@@ -890,6 +891,55 @@ function GameMapView({
       incidentMarkers.current = [];
     };
   }, [cityId, mapRevision, trafficIncidents, vehicleIncidents]);
+  // Live demand is computed from existing missions and transport hubs. It is
+  // deliberately a visualization, not an invented population dataset.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    const sourceId = "worldfront-passenger-demand";
+    const layerId = "worldfront-passenger-demand-heat";
+    const update = () => {
+      if (!instance.isStyleLoaded()) return;
+      const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
+      const add = (coordinates: Coordinates, weight: number) => {
+        if (coordinates.every(Number.isFinite)) {
+          features.push({ type: "Feature", geometry: { type: "Point", coordinates }, properties: { weight } });
+        }
+      };
+      for (const job of jobs) {
+        if (job.status === "complete" || job.cityId !== cityId) continue;
+        add(jobPickup(job), job.status === "offered" ? 1 : 0.65);
+      }
+      for (const hotel of hotels) {
+        if (hotel.coordinates) add(hotel.coordinates, 0.55);
+      }
+      for (const branch of branches) {
+        if (branch.coordinates) add(branch.coordinates, 0.4);
+      }
+      const data: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features };
+      const existing = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+      if (existing) existing.setData(data);
+      else instance.addSource(sourceId, { type: "geojson", data });
+      if (!instance.getLayer(layerId)) instance.addLayer({
+        id: layerId,
+        type: "heatmap",
+        source: sourceId,
+        maxzoom: 17,
+        paint: {
+          "heatmap-weight": ["get", "weight"],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 5, 0.5, 13, 1.6],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 5, 12, 13, 38],
+          "heatmap-opacity": 0.55,
+          "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(0,0,0,0)", 0.2, "#22c55e", 0.45, "#facc15", 0.7, "#f97316", 1, "#ef4444"],
+        },
+      });
+      instance.setLayoutProperty(layerId, "visibility", showDemandHeatmap ? "visible" : "none");
+    };
+    instance.on("style.load", update);
+    update();
+    return () => { instance.off("style.load", update); };
+  }, [cityId, jobs, hotels, branches, mapRevision, showDemandHeatmap]);
+
   // Mapbox reads the container dimensions during construction. In Android
   // WebViews the first passive effect can run before the viewport has completed
   // its initial layout, so wait for a genuinely drawable box.

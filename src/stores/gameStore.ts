@@ -208,6 +208,29 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     const updated = [...previous.slice(-4999), [point[0], point[1]] as Coordinates]
     const jobs = state.jobs.slice()
     jobs[index] = { ...job, recordedRoute: updated }
+    // Reveal verified, actually travelled roads periodically while the taxi
+    // is moving, rather than waiting for the mission to finish. Use a short
+    // rolling window so we never draw a straight line across missing samples.
+    if (updated.length >= 2 && updated.length % 50 === 0) {
+      const recent = updated.slice(-50)
+      const segments: Coordinates[][] = []
+      let segment: Coordinates[] = [recent[0]]
+      for (let i = 1; i < recent.length; i++) {
+        if (distanceKmBetween(recent[i - 1], recent[i]) > 1.5) {
+          if (segment.length > 1) segments.push(segment)
+          segment = [recent[i]]
+        } else {
+          segment.push(recent[i])
+        }
+      }
+      if (segment.length > 1) segments.push(segment)
+      return {
+        jobs,
+        exploredTerritory: segments.length
+          ? extendExploredTerritorySegments(state.exploredTerritory, segments, job.id)
+          : state.exploredTerritory,
+      }
+    }
     return { jobs }
   }),
 

@@ -154,6 +154,12 @@ const unlockedTerritoryCenters = (state: Pick<GameState, 'branches' | 'territory
     source: source === 'ferry-discovery' ? 'ferry-discovery' as const : 'village' as const,
   })),
 ]
+const administrativeTerritories = (state: Pick<GameState, 'territoryExpansions'>): TerritoryFeature[] =>
+  (state.territoryExpansions ?? []).filter(area => area.regionGeometry)
+    .map(area => ({ type: 'Feature' as const, properties: { id: area.regionId, unlocked: true }, geometry: area.regionGeometry! }))
+const withinOperatingRights = (coordinates: Coordinates, state: GameState) =>
+  isInsideVillageTerritories(coordinates, unlockedTerritoryCenters(state)) ||
+  isInsideTerritoryFeatures(coordinates, administrativeTerritories(state))
 const completedJobRoute = (job: TaxiJob, start?: Coordinates) => {
   const pickupRoute = job.pickupRouteCoordinates ?? [start, jobPickup(job)]
   return [...pickupRoute, ...(job.routeCoordinates ?? [jobPickup(job), jobDestination(job)]).slice(1)]
@@ -314,7 +320,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
       const searchArea = { ...city, coordinates: taxiJobGenerationPosition(generationTaxi, city.coordinates) }
       const taxis = state.vehicles.filter((vehicle) => vehicle.type === 'taxi')
       const maxDistanceKm = maxJobDistanceForFleet(level, taxis.length) * (hasResearch(state.completedResearch ?? [], 'predictive-demand') ? 1.25 : 1)
-      const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, (state.activeEvent?.fareMultiplier ?? 1) * cityDemandMultiplier(state.cityEconomies.find((economy) => economy.cityId === city.id)) * (state.worldCondition?.demandMultiplier ?? 1) * marketingDemandMultiplier(state.brandStrategy ?? defaultBrandStrategy) * fareMultiplier(state.brandStrategy?.fareStrategy ?? 'standard') * Math.max(.55, 1 - (state.competitors ?? []).filter((competitor) => competitor.relationship === 'rival').reduce((sum, competitor) => sum + competitor.marketShare, 0) / 200), unlockedTerritoryCenters(state), state.exploredTerritory, state.transportRoutes ?? [], state.transportAssets ?? [])
+      const generated = await generateJobOffers(searchArea, 1, state.jobRequestHistory ?? [], maxDistanceKm, undefined, (state.activeEvent?.fareMultiplier ?? 1) * cityDemandMultiplier(state.cityEconomies.find((economy) => economy.cityId === city.id)) * (state.worldCondition?.demandMultiplier ?? 1) * marketingDemandMultiplier(state.brandStrategy ?? defaultBrandStrategy) * fareMultiplier(state.brandStrategy?.fareStrategy ?? 'standard') * Math.max(.55, 1 - (state.competitors ?? []).filter((competitor) => competitor.relationship === 'rival').reduce((sum, competitor) => sum + competitor.marketShare, 0) / 200), unlockedTerritoryCenters(state), state.exploredTerritory, state.transportRoutes ?? [], state.transportAssets ?? [], administrativeTerritories(state))
       set((latest) => {
         const openSlots = Math.max(0, availableJobOfferCapacity(latest) - latest.jobs.filter((job) => job.status === 'offered').length)
         const acceptedJobs = generated.jobs.slice(0, openSlots)
@@ -1139,7 +1145,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
   }),
   buildPostalDepot: (coordinates) => set((state) => {
     const city = getCity(state.activeCityId ?? state.startingCityId, state.customCities)
-    if (!state.company || !city || state.company.cash < POSTAL_DEPOT_BUILD_COST || !isInsideVillageTerritories(coordinates, unlockedTerritoryCenters(state))) return state
+    if (!state.company || !city || state.company.cash < POSTAL_DEPOT_BUILD_COST || !withinOperatingRights(coordinates, state)) return state
     const now = new Date().toISOString()
     const sequence = (state.postalDepots ?? []).length + 1
     const depot: PostalDepot = { id: crypto.randomUUID(), cityId: city.id, name: `${city.name} Postal Depot ${sequence}`, coordinates, level: 1, openedAt: now }
@@ -1260,7 +1266,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
     const id = harbourId(coordinates)
     if (!state.company || state.company.cash < cost || (state.purchasedHarbours ?? []).some((harbour) => harbour.id === id)) return state
     const territoryCenters = unlockedTerritoryCenters(state)
-    const insideUnlockedTerritory = isInsideVillageTerritories(coordinates, territoryCenters)
+    const insideUnlockedTerritory = withinOperatingRights(coordinates, state)
     if (!insideUnlockedTerritory) return state
     const purchasedAt = new Date().toISOString()
     const name = routes[0]?.originName ?? `Harbour ${(state.purchasedHarbours ?? []).length + 1}`

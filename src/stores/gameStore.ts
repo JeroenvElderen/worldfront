@@ -193,7 +193,7 @@ const flushPendingExploration = (state: GameState): GameSave['exploredTerritory'
     if (job.status !== 'accepted' || !job.assignedVehicleId) continue
     const points = job.recordedRoute ?? []
     if (points.length < 2) continue
-    const pending = points.slice(-Math.min(11, (points.length - 1) % 10 + 1))
+    const pending = points.slice(-Math.min(points.length, 100))
     const segments: Coordinates[][] = []
     let segment: Coordinates[] = [pending[0]]
     for (let i = 1; i < pending.length; i++) {
@@ -207,6 +207,7 @@ const flushPendingExploration = (state: GameState): GameSave['exploredTerritory'
   }
   return explored
 }
+const lastExplorationRevealAt = new Map<string, number>()
 const advanceContracts = (contracts: GameSave['contracts'], category: GameSave['contracts'][number]['category']) => contracts.map((contract) => {
   if (!contract.accepted || contract.completed || contract.category !== category) return contract
   const progress = Math.min(contract.target, contract.progress + 1)
@@ -233,8 +234,10 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     // Reveal verified, actually travelled roads periodically while the taxi
     // is moving, rather than waiting for the mission to finish. Use a short
     // rolling window so we never draw a straight line across missing samples.
-    if (updated.length >= 2 && updated.length % 10 === 0) {
-      const recent = updated.slice(-11)
+    const now = Date.now()
+    if (updated.length >= 2 && now - (lastExplorationRevealAt.get(job.id) ?? 0) >= 1_000) {
+      lastExplorationRevealAt.set(job.id, now)
+      const recent = updated.slice(-Math.min(updated.length, 100))
       const segments: Coordinates[][] = []
       let segment: Coordinates[] = [recent[0]]
       for (let i = 1; i < recent.length; i++) {

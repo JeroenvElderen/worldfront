@@ -1,8 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { BottomNav } from './components/game/BottomNav'
-import { CloudSavePanel } from './components/game/CloudSavePanel'
-
 import { OperationsControlCentre } from './components/game/OperationsControlCentre'
 import { TopHud } from './components/game/TopHud'
 import { useGameStore } from './stores/gameStore'
@@ -39,6 +37,7 @@ export default function App() {
   const [placingPostalDepot, setPlacingPostalDepot] = useState(false)
   const [showExpansionMenu, setShowExpansionMenu] = useState(false)
   const purchasedTerritories = (game.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery' && area.source !== 'ferry-discovery').length
+  const unlockedTerritories = (game.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery').length
   const territoryExpansionCost = 5_000 * purchasedTerritories
   const stationPackageCost = Math.round(15_000 * (game.specialization === 'mobility' ? .9 : 1) * (hasResearch(game.completedResearch ?? [], 'prefab-depots') ? .8 : 1)) + getTaxiModel('toyota-corolla').price
   const researchFleetSlots = (hasResearch(game.completedResearch ?? [], 'autonomous-operations') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'global-network') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'regional-hubs') ? game.branches.length : 0)
@@ -47,6 +46,7 @@ export default function App() {
   const money = moneyFormatterForCity(activeCity)
   const maintenanceAlert = (game.maintenanceAlerts ?? []).find((alert) => !alert.dismissed)
   const territoryExpansionPrice = territoryExpansionCost === 0 ? 'Free' : money.format(territoryExpansionCost)
+  const territoryProgressMessage = 'Completed taxi and ferry journeys expand your border along the route they travelled.'
   const stationBuildMessage = !game.company || game.company.level < 2
     ? 'Building a separate station becomes available at level 2'
     : stationFleetFull
@@ -324,15 +324,12 @@ export default function App() {
     }
   }, [company, game.hasHydrated, tickJobs])
 
-  const [cloudPanelOpen, setCloudPanelOpen] = useState(false)
-
   /** Let a hired branch manager dispatch qualifying calls for larger fleets. */
   useEffect(() => {
     if (!automation?.enabled || !company || !hasHydrated) return
     runAutomation()
   }, [company, automation, hasHydrated, jobs, runAutomation])
 
-  // Cloud saves are opened from the bottom navigation More menu.
   if (!game.hasHydrated) {
     return (
       <div className="loading">
@@ -384,6 +381,14 @@ export default function App() {
           {placingTerritory && <aside className="depot-placement-banner"><span>◎</span><div><b>Unlock a village territory</b><small>Tap a village on the map to purchase its organic border for {territoryExpansionPrice.toLocaleLowerCase()}. No station will be built.</small></div><button onClick={() => setPlacingTerritory(false)}>Cancel</button></aside>}
           {placingPostalDepot && <aside className="depot-placement-banner postal-placement-banner"><span>📮</span><div><b>Place Postal Depot {(game.postalDepots ?? []).length + 1}</b><small>Tap inside owned territory to build a dedicated 3-bay postal garage for {money.format(POSTAL_DEPOT_BUILD_COST)}.</small></div><button onClick={() => setPlacingPostalDepot(false)}>Cancel</button></aside>}
           {placingHotel && <aside className="depot-placement-banner hotel-placement-banner"><span>🏨</span><div><b>Place hotel {(game.hotels ?? []).filter((hotel) => hotel.cityId === (game.activeCityId ?? game.startingCityId)).length + 1}</b><small>Tap the exact map location to build this property for {money.format(HOTEL_PURCHASE_COST)}.</small></div><button onClick={() => setPlacingHotel(false)}>Cancel</button></aside>}
+
+          {game.worldCondition && game.worldCondition.weather !== 'clear' && (
+            <aside className="weather-chip" title={game.worldCondition.description}>
+              <span>{game.worldCondition.weather === 'rain' ? '🌧️' : game.worldCondition.weather === 'snow' ? '🌨️' : game.worldCondition.weather === 'storm' ? '⛈️' : '🌡️'}</span>
+              <b>{game.worldCondition.temperatureC}° · {game.worldCondition.weather}</b>
+              {game.worldCondition.disruption !== 'none' && <small>{game.worldCondition.disruption.replace('-', ' ')}</small>}
+            </aside>
+          )}
 
           <Suspense fallback={null}>{game.activeSection === 'jobs' && (
             <TaxiCallPopup
@@ -581,7 +586,6 @@ export default function App() {
             active={game.activeSection}
             onChange={game.setSection}
             availableJobCount={offeredJobCount}
-            onCloudClick={() => setCloudPanelOpen(true)}
           />
         </>
       ) : (
@@ -590,7 +594,6 @@ export default function App() {
         /></Suspense>
       )}
     </div>
-      {game.hasHydrated && <CloudSavePanel open={cloudPanelOpen} onClose={() => setCloudPanelOpen(false)} />}
     </CurrencyProvider>
   )
 }

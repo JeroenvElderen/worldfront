@@ -4,7 +4,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { featureCollection, lineString, point } from "@turf/helpers";
 import { mapboxAccessToken } from "../config/mapbox";
 import { getCity, worldOverview } from "../data/cities";
-import { taxiModels, taxiTripSpeedMultiplier } from "../data/taxis";
+import { taxiModels } from "../data/taxis";
 import type {
   Branch,
   Coordinates,
@@ -24,7 +24,6 @@ import type {
 import {
   distanceKmBetween,
   getJobMotionJourney,
-  SIMULATED_MINUTE_MS,
   getJobMotionTime,
   jobDestination,
   jobPickup,
@@ -42,16 +41,13 @@ import {
 } from "../services/territoryGeometry";
 import { cancelMapFrame, scheduleMapFrame } from "../services/frameScheduler";
 import {
-  resolveRoadRoute as resolveBaseRoadRoute,
+  resolveRoadRoute,
   type RoadRouteDetails,
   type RouteSpeedLimit,
 } from "../services/roadRoutes";
 import { activeFerryServiceForCrossing } from "../services/ferryService";
 import { resolveLandsideFerryTerminals } from "../services/ferryTerminals";
 import { postalDepotCapacity } from "../services/postalDepots";
-import { resolveClosedRoadSegment, routeIntersectsClosedSegment, type ClosedRoadSegment } from "../services/closedRoadSegments";
-import { useGameStore } from "../stores/gameStore";
-import { recordTaxiPosition, taxiPosition, persistTaxiPositions } from "../services/liveTaxiPositions";
 
 interface GameMapProps {
   layoutKey: string;
@@ -244,7 +240,7 @@ const createRouteMotion = (
     }
     const speed = Math.min(
       topSpeedKmh,
-      speedLimitKmh(route.speedLimits[index]) ?? Math.min(50, fallbackSpeedKmh),
+      speedLimitKmh(route.speedLimits[index]) ?? fallbackSpeedKmh,
     );
     phases.push({
       duration: lengths[index] / Math.max(1, speed),
@@ -380,54 +376,6 @@ const mapVehicleColor = (vehicle: Vehicle, standardColor: string) =>
     ? EXCLUSIVE_VEHICLE_COLOR
     : standardColor;
 
-// Screen-independent heading derived from the direction of travel.
-const vehicleHeadingState = new Map<string, { position: Coordinates; heading: number }>();
-const movingVehiclePoint = (id: string, position: Coordinates, properties: Record<string, unknown> = {}) => {
-  const previous = vehicleHeadingState.get(id);
-  let heading = previous?.heading ?? 0;
-  if (previous) {
-    const dx = (position[0] - previous.position[0]) * Math.cos(position[1] * Math.PI / 180);
-    const dy = position[1] - previous.position[1];
-    if (Math.hypot(dx, dy) > 0.0000001) {
-      const target = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
-      const delta = ((target - heading + 540) % 360) - 180;
-      heading = (heading + delta * 0.35 + 360) % 360;
-    }
-  }
-  vehicleHeadingState.set(id, { position, heading });
-  return point(position, { ...properties, heading });
-};
-
-// Closure-aware road routing: Mapbox alternatives are filtered against active
-// road closure coordinates. A route is never silently allowed through a closure.
-let activeClosurePoints: Coordinates[] = [];
-let activeClosedRoadSegments: ClosedRoadSegment[] = [];
-const closureGeometryCache = new Map<string, ClosedRoadSegment>();
-const closureFallbackGeometryCache = new Map<string, GeoJSON.LineString>();
-const resolveRoadRoute: typeof resolveBaseRoadRoute = (
-  from, to, signal, profiles, options = {},
-) => resolveBaseRoadRoute(from, to, signal, profiles, {
-  ...options,
-  closedRoadPoints: [...(options.closedRoadPoints ?? []), ...activeClosurePoints],
-  closedRoadSegments: [...(options.closedRoadSegments ?? []), ...activeClosedRoadSegments],
-});
-
-// Persist animated taxi positions independently of React render frequency.
-if (typeof window !== "undefined") {
-  window.addEventListener("pagehide", persistTaxiPositions);
-}
-// Capture observed taxi animation positions for the active job. Exploration
-// is not changed here: recorded checkpoints are committed after drop-off.
-const journeyCheckpointTimes = new Map<string, number>();
-const recordJourneyCheckpoint = (jobId: string, vehicleId: string, position: Coordinates) => {
-  const key = `${vehicleId}:${jobId}`;
-  const now = Date.now();
-  if (now - (journeyCheckpointTimes.get(key) ?? 0) < 1000) return;
-  journeyCheckpointTimes.set(key, now);
-  useGameStore.getState().recordJourneyPoint(jobId, vehicleId, position);
-};
-const TAXI_SVG_IMAGE = "worldfront-taxi-svg";
-const TAXI_SVG_URL = `${import.meta.env.BASE_URL}vehicles/taxi-topview.svg`;
 const VEHICLE_MARKER_RADIUS = 4;
 const VEHICLE_MARKER_STROKE_WIDTH = 1.5;
 const ROUTE_GLOW_WIDTH = 10;
@@ -691,20 +639,6 @@ function GameMapView({
   onJobFerryCrossingComplete,
   onTaxiArrived,
 }: GameMapProps) {
-  // The map owns an independent subscription to exploration changes. Taxi
-  // animation updates Zustand directly, so relying solely on parent props
-  // can leave the Mapbox fog-of-war stale until a page refresh.
-  const [liveExploredTerritory, setLiveExploredTerritory] = useState<TerritoryFeature | null>(
-    () => useGameStore.getState().exploredTerritory ?? exploredTerritory,
-  );
-  useEffect(() => {
-    setLiveExploredTerritory(useGameStore.getState().exploredTerritory ?? exploredTerritory);
-    return useGameStore.subscribe((state, previous) => {
-      if (state.exploredTerritory !== previous.exploredTerritory) {
-        setLiveExploredTerritory(state.exploredTerritory);
-      }
-    });
-  }, [exploredTerritory]);
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const pickupJobIds = useRef(new Set<string>());
@@ -749,107 +683,15 @@ function GameMapView({
     const activeTraffic = trafficIncidents.filter(
       (incident) => !incident.resolved && incident.cityId === cityId,
     );
-    activeClosurePoints = trafficIncidents
-      .filter((incident) => !incident.resolved && incident.kind === "closure" && new Date(incident.expiresAt).getTime() > Date.now() && !closureGeometryCache.has(incident.id))
-      .map((incident) => incident.coordinates);
     const activeVehicles = vehicleIncidents
       .filter((incident) => !incident.resolved)
       .flatMap((incident) => {
         const coordinates =
           incident.coordinates ??
-          useGameStore.getState().vehicles.find((vehicle) => vehicle.id === incident.vehicleId)
+          vehicles.find((vehicle) => vehicle.id === incident.vehicleId)
             ?.position;
         return coordinates ? [{ ...incident, coordinates }] : [];
       });
-    let closureLookupDisposed = false;
-    const closureIncidents = activeTraffic.filter((incident) => incident.kind === "closure");
-    activeClosedRoadSegments = closureIncidents
-      .map((incident) => closureGeometryCache.get(incident.id))
-      .filter((segment): segment is ClosedRoadSegment => Boolean(segment));
-    void Promise.all(closureIncidents.map(async (incident) => {
-      try {
-        const segment = await resolveClosedRoadSegment(incident.coordinates);
-        if (closureLookupDisposed || !segment) return;
-        closureGeometryCache.set(incident.id, segment);
-        activeClosurePoints = closureIncidents
-          .filter((entry) => !closureGeometryCache.has(entry.id))
-          .map((entry) => entry.coordinates);
-        activeClosedRoadSegments = closureIncidents
-          .map((entry) => closureGeometryCache.get(entry.id))
-          .filter((entry): entry is ClosedRoadSegment => Boolean(entry));
-        updateClosureRoads();
-      } catch (error) { console.warn("OSM closure lookup unavailable:", error); }
-    }));
-    // Snap closure warnings to actual road geometry in the currently loaded map tiles.
-    // Never draw an invented straight line: if no road geometry is available,
-    // the existing incident pin remains visible without a misleading closure.
-    const closureSourceId = "worldfront-closure-road-segments";
-    const closureLayerId = "worldfront-closure-road-segments-line";
-    const updateClosureRoads = () => {
-      if (!instance.isStyleLoaded()) return;
-      const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
-      for (const incident of activeTraffic) {
-        if (incident.kind !== "closure") continue;
-        const osmSegment = closureGeometryCache.get(incident.id);
-        if (osmSegment) {
-          features.push({
-            type: "Feature",
-            properties: { title: incident.title, incidentId: incident.id, osmWaySegment: osmSegment.id },
-            geometry: { type: "LineString", coordinates: osmSegment.coordinates },
-          });
-          continue;
-        }
-        const cachedFallback = closureFallbackGeometryCache.get(incident.id);
-        if (cachedFallback) {
-          features.push({
-            type: "Feature",
-            properties: { title: incident.title, incidentId: incident.id },
-            geometry: cachedFallback,
-          });
-          continue;
-        }
-        const point = instance.project(incident.coordinates);
-        const nearby = instance.queryRenderedFeatures(
-          [[point.x - 14, point.y - 14], [point.x + 14, point.y + 14]],
-        ).filter((feature) =>
-          feature.geometry.type === "LineString" &&
-          /road|street|transportation/i.test(feature.layer?.id ?? "") &&
-          !/closure/i.test(feature.layer?.id ?? ""),
-        );
-        let best: GeoJSON.LineString | null = null;
-        let nearest = Number.POSITIVE_INFINITY;
-        for (const candidate of nearby) {
-          const line = candidate.geometry as GeoJSON.LineString;
-          for (const coordinate of line.coordinates) {
-            const projected = instance.project(coordinate as [number, number]);
-            const distance = Math.hypot(projected.x - point.x, projected.y - point.y);
-            if (distance < nearest) { nearest = distance; best = line; }
-          }
-        }
-        if (best && nearest <= 24) {
-          closureFallbackGeometryCache.set(incident.id, best);
-          features.push({
-          type: "Feature",
-          properties: { title: incident.title, incidentId: incident.id },
-          geometry: best,
-        });
-        }
-      }
-      const data: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
-        type: "FeatureCollection", features,
-      };
-      const source = instance.getSource(closureSourceId) as mapboxgl.GeoJSONSource | undefined;
-      if (source) source.setData(data);
-      else instance.addSource(closureSourceId, { type: "geojson", data });
-      if (!instance.getLayer(closureLayerId)) instance.addLayer({
-        id: closureLayerId, type: "line", source: closureSourceId,
-        paint: { "line-color": "#ef4444", "line-width": 7, "line-opacity": 0.95 },
-        layout: { "line-cap": "round", "line-join": "round" },
-      });
-    };
-    instance.on("style.load", updateClosureRoads);
-    instance.once("idle", updateClosureRoads);
-    updateClosureRoads();
     incidentMarkers.current = [
       ...activeTraffic.map((incident) =>
         new mapboxgl.Marker({
@@ -874,15 +716,10 @@ function GameMapView({
       ),
     ];
     return () => {
-      closureLookupDisposed = true;
-      instance.off("style.load", updateClosureRoads);
-      instance.off("idle", updateClosureRoads);
-      if (instance.getLayer(closureLayerId)) instance.removeLayer(closureLayerId);
-      if (instance.getSource(closureSourceId)) instance.removeSource(closureSourceId);
       incidentMarkers.current.forEach((marker) => marker.remove());
       incidentMarkers.current = [];
     };
-  }, [cityId, mapRevision, trafficIncidents, vehicleIncidents]);
+  }, [cityId, mapRevision, trafficIncidents, vehicleIncidents, vehicles]);
   // Mapbox reads the container dimensions during construction. In Android
   // WebViews the first passive effect can run before the viewport has completed
   // its initial layout, so wait for a genuinely drawable box.
@@ -927,7 +764,7 @@ function GameMapView({
     // but they do not change village boundaries. Avoid re-requesting every
     // already-resolved boundary during that hot transition.
     const unresolvedCenters = centers.filter(
-      ({ id }) => id !== branches[0]?.id && !(id in realTerritoriesRef.current),
+      ({ id }) => !(id in realTerritoriesRef.current),
     );
     if (!unresolvedCenters.length)
       return () => {
@@ -1026,6 +863,10 @@ function GameMapView({
     currentLiveJobRunners.clear();
     instance.addControl(
       new mapboxgl.AttributionControl({ compact: true }),
+      "bottom-right",
+    );
+    instance.addControl(
+      new mapboxgl.NavigationControl({ showCompass: false }),
       "bottom-right",
     );
     const canvas = instance.getCanvas();
@@ -1181,7 +1022,7 @@ function GameMapView({
                   | mapboxgl.GeoJSONSource
                   | undefined
               )?.setData(
-                movingVehiclePoint(sourceId, currentPosition, {
+                point(currentPosition, {
                   ferryStatus:
                     ferryState === "waiting"
                       ? "Waiting for ferry"
@@ -1310,7 +1151,7 @@ function GameMapView({
                   | mapboxgl.GeoJSONSource
                   | undefined
               )?.setData(
-                movingVehiclePoint(sourceId, currentPosition, {
+                point(currentPosition, {
                   ferryStatus:
                     ferryState === "waiting"
                       ? "Waiting for ferry"
@@ -1518,10 +1359,6 @@ function GameMapView({
           let lastPickingUp: boolean | null = null;
           let lastFerryState: "waiting" | "aboard" | null | undefined;
           let localFerryDelayMs = 0;
-          let rerouteStartedAt = job.rerouteStartedAt ? new Date(job.rerouteStartedAt).getTime() : 0;
-          let rerouteArrivesAt = rerouteStartedAt + (job.rerouteDurationMs ?? 0);
-          let reroutePending = false;
-          let lastRerouteCheck = 0;
 
           let frozenFerryMotionTime: number | null = null;
           const scheduleAnimation = () => {
@@ -1583,8 +1420,8 @@ function GameMapView({
                   0,
                   Math.min(
                     1,
-                    (time - Math.max(currentJourney.pickupAt, rerouteStartedAt)) /
-                      Math.max(1, Math.max(currentJourney.arrivesAt, rerouteArrivesAt) - Math.max(currentJourney.pickupAt, rerouteStartedAt)),
+                    (time - currentJourney.pickupAt) /
+                      (currentJourney.arrivesAt - currentJourney.pickupAt),
                   ),
                 );
             const activeRoute = pickingUp ? pickupRoute : passengerRoute;
@@ -1674,7 +1511,7 @@ function GameMapView({
             (
               instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined
             )?.setData(
-              movingVehiclePoint(sourceId, currentPosition, {
+              point(currentPosition, {
                 ferryStatus:
                   ferryState === "waiting"
                     ? "Waiting for ferry"
@@ -1683,42 +1520,9 @@ function GameMapView({
                       : "",
               }),
             );
-            recordTaxiPosition(vehicle.id, currentPosition);
-            if (!ferryState) recordJourneyCheckpoint(job.id, vehicle.id, currentPosition);
-            // Check active OSM closure edges while driving. Persist the new route
-            // and its clock anchor so a page refresh resumes the same detour.
-            if (!pickingUp && !ferryState && !reroutePending &&
-                now - lastRerouteCheck > 10_000 && time < Math.max(currentJourney.arrivesAt, rerouteArrivesAt)) {
-              lastRerouteCheck = now;
-              const remaining = remainingRoute(passengerRoute.coordinates, progress) as Coordinates[];
-              const blocked = activeClosedRoadSegments.some((segment) =>
-                routeIntersectsClosedSegment(remaining, segment));
-              if (blocked) {
-                reroutePending = true;
-                const rerouteFrom = currentPosition;
-                void resolveRoadRoute(rerouteFrom, jobDestination(job), abortController.signal)
-                  .then((detour) => {
-                    if (!detour || abortController.signal.aborted || map.current !== instance) return;
-                    const started = new Date(getJobMotionTime(job, Date.now())).toISOString();
-                    const rerouteDurationMs = Math.max(3_000, detour.durationMinutes * SIMULATED_MINUTE_MS / (taxiTripSpeedMultiplier(vehicle.modelId) * 8));
-                    rerouteStartedAt = new Date(started).getTime();
-                    rerouteArrivesAt = rerouteStartedAt + rerouteDurationMs;
-                    passengerRoute = detour;
-                    passengerMotion = createRouteMotion(detour, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130);
-                    onSaveJobRoute(job.id, detour.coordinates, detour.ferryCrossings);
-                    useGameStore.setState((state) => ({
-                      jobs: state.jobs.map((entry) => entry.id === job.id
-                        ? { ...entry, rerouteStartedAt: started, rerouteDurationMs } : entry),
-                    }));
-                  })
-                  .catch((error) => console.warn("Unable to reroute taxi around closure:", error))
-                  .finally(() => { reroutePending = false; });
-              }
-            }
-
             if (
               now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS ||
-              time >= Math.max(currentJourney.arrivesAt, rerouteArrivesAt)
+              time >= currentJourney.arrivesAt
             ) {
               const routeAhead = pickingUp
                 ? [
@@ -1893,11 +1697,13 @@ function GameMapView({
       const data = featureCollection(features);
       const ownedTerritories = [
         ...stationCoordinates.map(
-          ({ station, coordinates }, index) =>
-            index === 0
-              ? villageTerritory(station.id, coordinates, 1)
-              : realTerritories[station.id] ??
-                villageTerritory(station.id, coordinates, VILLAGE_TERRITORY_RADIUS_KM),
+          ({ station, coordinates }) =>
+            realTerritories[station.id] ??
+            villageTerritory(
+              station.id,
+              coordinates,
+              VILLAGE_TERRITORY_RADIUS_KM,
+            ),
         ),
         ...territoryExpansions
           .filter((expansion) => expansion.source !== "taxi-discovery")
@@ -1929,7 +1735,7 @@ function GameMapView({
       // with village coverage and never replays historical routes.
       const unlockedTerritory = mergeVillageTerritories([
         ...ownedTerritories,
-        ...(liveExploredTerritory ? [liveExploredTerritory] : []),
+        ...(exploredTerritory ? [exploredTerritory] : []),
       ]);
       const coverageData = featureCollection(
         unlockedTerritory ? [unlockedTerritory] : [],
@@ -2065,7 +1871,7 @@ function GameMapView({
     branches,
     customCities,
     territoryExpansions,
-    liveExploredTerritory,
+    exploredTerritory,
     mapRevision,
     realTerritories,
   ]);
@@ -2125,96 +1931,6 @@ function GameMapView({
     };
   }, [mapRevision, postalDepots, vehicles]);
 
-  // Attach symbols after sources exist; the old effect ran before vehicle
-  // sources were created, leaving the original circles visible.
-  useEffect(() => {
-    const instance = map.current;
-    if (!instance) return;
-    let disposed = false;
-    const applyIcons = () => {
-      if (disposed || !instance.isStyleLoaded()) return;
-      // Restore missing vehicle sources on initial hydration and after style reloads.
-      const city = getCity(cityId, customCities);
-      for (const vehicle of vehicles) {
-        if (vehicle.type !== "taxi") continue;
-        const sourceId = vehicleSourceId(vehicle.id);
-        if (instance.getSource(sourceId)) continue;
-        const position = taxiPosition(vehicle.id, Date.now() - 30 * 60_000) ?? vehicle.position ?? city?.coordinates;
-        if (!position) continue;
-        instance.addSource(sourceId, { type: "geojson", data: movingVehiclePoint(vehicle.id, position) });
-        instance.addLayer({
-          id: sourceId, type: "circle", source: sourceId,
-          paint: {
-            "circle-radius": VEHICLE_MARKER_RADIUS,
-            "circle-color": "#10b981",
-            "circle-opacity": 0,
-            "circle-stroke-opacity": 0,
-          },
-        });
-      }
-      if (!instance.hasImage(TAXI_SVG_IMAGE)) { loadIcon(); return; }
-      for (const vehicle of vehicles) {
-        if (vehicle.type !== "taxi") continue;
-        const sourceId = vehicleSourceId(vehicle.id);
-        const layerId = `${sourceId}-taxi-svg`;
-        if (!instance.getSource(sourceId)) continue;
-        if (!instance.getLayer(layerId)) {
-          instance.addLayer({
-            id: layerId,
-            type: "symbol",
-            source: sourceId,
-            layout: {
-              "icon-image": TAXI_SVG_IMAGE,
-              "icon-size": 0.12,
-              "icon-allow-overlap": true,
-              "icon-ignore-placement": true,
-              "icon-rotation-alignment": "map",
-              "icon-pitch-alignment": "map",
-              "icon-rotate": ["coalesce", ["get", "heading"], 0],
-            },
-          });
-        }
-        if (instance.getLayer(sourceId)) {
-          instance.setPaintProperty(sourceId, "circle-opacity", 0);
-          instance.setPaintProperty(sourceId, "circle-stroke-opacity", 0);
-        }
-      }
-    };
-    const loadIcon = () => {
-      if (disposed || !instance.isStyleLoaded()) return;
-      if (instance.hasImage(TAXI_SVG_IMAGE)) { applyIcons(); return; }
-      const img = new Image();
-      img.onerror = () => { console.error("Unable to load taxi SVG:", TAXI_SVG_URL); };
-      img.onload = () => {
-        if (disposed || !instance.isStyleLoaded()) return;
-        const canvas = document.createElement("canvas");
-        canvas.width = 128;
-        canvas.height = 256;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        if (!instance.hasImage(TAXI_SVG_IMAGE)) {
-          instance.addImage(TAXI_SVG_IMAGE, ctx.getImageData(0, 0, canvas.width, canvas.height), { pixelRatio: 2 });
-        }
-        applyIcons();
-      };
-      img.src = TAXI_SVG_URL;
-    };
-    const refresh = () => { loadIcon(); applyIcons(); };
-    instance.on("style.load", refresh);
-    instance.on("idle", applyIcons);
-    // Vehicle sources can be created after the map's first idle event.
-    // Recheck after each render, including after a page refresh/hydration.
-    instance.on("render", applyIcons);
-    refresh();
-    return () => {
-      disposed = true;
-      instance.off("style.load", refresh);
-      instance.off("idle", applyIcons);
-      instance.off("render", applyIcons);
-    };
-  }, [mapRevision, vehicles, cityId, customCities]);
-
   useEffect(() => {
     const instance = map.current;
     if (!instance?.isStyleLoaded()) return;
@@ -2226,7 +1942,7 @@ function GameMapView({
       const sourceId = vehicleSourceId(vehicle.id);
 
       if (!instance.getSource(sourceId)) {
-        const position = taxiPosition(vehicle.id, Date.now() - 30 * 60_000) ?? vehicle.position ?? selected?.coordinates;
+        const position = vehicle.position ?? selected?.coordinates;
         if (!position) return;
 
         instance.addSource(sourceId, {
@@ -2638,9 +2354,8 @@ function GameMapView({
             );
           }
         }
-        if (!ferryState) recordJourneyCheckpoint(job.id, vehicle.id, currentPosition);
         (instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(
-          movingVehiclePoint(taxiSourceId, currentPosition, {
+          point(currentPosition, {
             ferryStatus:
               ferryState === "waiting"
                 ? "Waiting for ferry"
@@ -2834,7 +2549,7 @@ function GameMapView({
           currentPosition = ferryPosition.position;
           ferryState = ferryPosition.state;
         }
-        (instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined)?.setData(movingVehiclePoint(vehicleId, currentPosition, { ferryStatus: ferryState === "waiting" ? "Waiting for ferry" : ferryState === "aboard" ? "On ferry" : "" }));
+        (instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(currentPosition, { ferryStatus: ferryState === "waiting" ? "Waiting for ferry" : ferryState === "aboard" ? "On ferry" : "" }));
         if (ferryState !== lastFerryState && instance.getLayer(vehicleId)) {
           instance.setPaintProperty(vehicleId, "circle-color", ferryState === "waiting" ? vehicleColor.waitingForFerry : ferryState === "aboard" ? vehicleColor.onFerry : vehicleColor.postal);
           lastFerryState = ferryState;
@@ -2956,7 +2671,7 @@ function GameMapView({
           (
             instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined
           )?.setData(
-            movingVehiclePoint(vehicleId, currentPosition, {
+            point(currentPosition, {
               ferryStatus:
                 ferryState === "waiting"
                   ? "Waiting for ferry"

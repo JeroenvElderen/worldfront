@@ -1,3 +1,4 @@
+import { supabase } from '../lib/supabase'
 import type { Coordinates, FerryRouteOption } from '../models/game'
 import { distanceKmBetween } from './jobEngine'
 import { curatedFerryRoutes } from '../data/ferryRoutes'
@@ -169,6 +170,51 @@ const parseRoutes = (elements: OsmElement[], cityCoordinates: Coordinates): Ferr
 
 }
 
+/** Read verified port-to-port connections. The small distance tolerance identifies
+ * the selected port only; it never limits how far its ferry services travel.
+ * Unverified rows or connections without actual route geometry are omitted.
+ */
+async function registryRoutes(coordinates: Coordinates): Promise<FerryRouteOption[]> {
+  if (!supabase) return []
+  const [lon, lat] = coordinates
+  const { data: ports, error: portError } = await supabase.from('maritime_ports')
+    .select('id,name,longitude,latitude')
+    .gte('longitude', lon - 0.08).lte('longitude', lon + 0.08)
+    .gte('latitude', lat - 0.08).lte('latitude', lat + 0.08)
+    .limit(100)
+  if (portError) throw portError
+  const port = (ports ?? []).map((candidate) => ({
+    ...candidate,
+    distance: distanceKmBetween(coordinates, [candidate.longitude, candidate.latitude] as Coordinates),
+  })).sort((a, b) => a.distance - b.distance)[0]
+  if (!port || port.distance > 3) return []
+  const { data: connections, error } = await supabase.from('maritime_connections')
+    .select('id,name,origin_port_id,destination_port_id,distance_km,duration_minutes,route_coordinates,verified_at')
+    .or(`origin_port_id.eq.${port.id},destination_port_id.eq.${port.id}`)
+    .limit(1000)
+  if (error) throw error
+  return (connections ?? []).flatMap((connection): FerryRouteOption[] => {
+    const geometry = connection.route_coordinates
+    if (!Array.isArray(geometry) || geometry.length < 2 ||
+      !geometry.every((point) => Array.isArray(point) && point.length === 2 &&
+        point.every((part) => typeof part === 'number' && Number.isFinite(part)))) return []
+    let path = geometry as Coordinates[]
+    if (connection.destination_port_id === port.id) path = [...path].reverse()
+    return [{
+      id: `registry-ferry-${connection.id}`,
+      name: connection.name,
+      originName: port.name,
+      destinationName: connection.name,
+      originCoordinates: path[0],
+      destinationCoordinates: path[path.length - 1],
+      routeCoordinates: path,
+      distanceKm: connection.distance_km ?? routeDistanceKm(path),
+      durationMinutes: connection.duration_minutes ?? undefined,
+      source: 'registry',
+    }]
+  })
+}
+
 /** Find passenger services whose mapped ferry line starts near a placed harbour. */
 export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signal?: AbortSignal) {
   const [longitude, latitude] = harbourCoordinates
@@ -177,6 +223,11 @@ export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signa
   const query = `[out:json][timeout:25];(relation(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["route"="ferry"];way(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["route"="ferry"];way(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["ferry"="yes"];node(around:${HARBOUR_SEARCH_RADIUS_METRES},${latitude},${longitude})["amenity"="ferry_terminal"];);out tags geom;`
   let lastError: unknown
   const curated = nearbyCuratedRoutes(harbourCoordinates)
+  let registered: FerryRouteOption[] = []
+  try { registered = await registryRoutes(harbourCoordinates) } catch (error) {
+    console.warn('[maritime] Registry unavailable; falling back to mapped routes:', error)
+  }
+  if (registered.length) return registered
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
     const requestController = new AbortController()

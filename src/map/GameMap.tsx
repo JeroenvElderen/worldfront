@@ -2217,6 +2217,21 @@ function GameMapView({
     };
   }, [mapRevision, postalDepots, vehicles]);
 
+  // Taxi position sources may be updated by several animation paths. Keep
+  // their legacy circle layers invisible even before the SVG has loaded.
+  const hideTaxiCircles = (instance: mapboxgl.Map) => {
+    for (const vehicle of vehicles) {
+      if (vehicle.type !== "taxi") continue;
+      const id = vehicleSourceId(vehicle.id);
+      if (instance.getLayer(id)) {
+        instance.setPaintProperty(id, "circle-opacity", 0);
+        instance.setPaintProperty(id, "circle-stroke-opacity", 0);
+      }
+    }
+  };
+
+  // Restore icon visibility after every style change, including layers added
+  // by active taxi journeys while the map is already running.
   // Attach symbols after sources exist; the old effect ran before vehicle
   // sources were created, leaving the original circles visible.
   useEffect(() => {
@@ -2244,6 +2259,7 @@ function GameMapView({
           },
         });
       }
+      hideTaxiCircles(instance);
       if (!instance.hasImage(TAXI_SVG_IMAGE)) { loadIcon(); return; }
       for (const vehicle of vehicles) {
         if (vehicle.type !== "taxi") continue;
@@ -2292,7 +2308,7 @@ function GameMapView({
       };
       img.src = TAXI_SVG_URL;
     };
-    const refresh = () => { loadIcon(); applyIcons(); };
+    const refresh = () => { hideTaxiCircles(instance); loadIcon(); applyIcons(); };
     instance.on("style.load", refresh);
     instance.on("idle", applyIcons);
     // Vehicle sources can be created after the map's first idle event.

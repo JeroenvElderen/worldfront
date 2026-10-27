@@ -87,8 +87,6 @@ export default function App() {
 
   const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, runAutomation, hasHydrated } = game
 
-  const setSection = game.setSection
-
   const availableOfferCapacity = jobOfferCapacity(game.vehicles, game.drivers)
 
   const offeredJobCount = game.jobs.filter(
@@ -429,6 +427,7 @@ export default function App() {
             game.activeSection !== 'jobs' &&
             game.activeSection !== 'postal' &&
             game.activeSection !== 'travel' &&
+            game.activeSection !== 'ferries' &&
             game.activeSection !== 'operations' &&
             game.activeSection !== 'hotels' &&
             game.activeSection !== 'finance' && (

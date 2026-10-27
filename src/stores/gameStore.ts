@@ -344,7 +344,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
     }
   },
   addRandomJob: async () => {
-  set((current) => ({ exploredTerritory: flushPendingExploration(current) }))
+  // Exploration is committed when a taxi completes its trip.
   const state = useGameStore.getState()
 
   const offeredCount = state.jobs.filter(

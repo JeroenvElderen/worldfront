@@ -1341,10 +1341,36 @@ const generationTaxi = selectJobGenerationTaxi(state)
     const operationsManager = employeeFor('operations-manager')
     if (operationsManager) {
       const current = get()
-      const eligibleTaxis = current.vehicles.filter((vehicle) => vehicle.type === 'taxi' && vehicle.cityId === operationsManager.cityId && vehicle.status === 'available' && vehicle.driverId && vehicle.position && vehicle.fuel >= policy.minFuel && vehicle.condition >= policy.minCondition)
-      const offer = current.jobs.filter((job) => job.status === 'offered' && job.fare >= policy.minFare && eligibleTaxis.some((vehicle) => vehicleCanTakeJob(vehicle, job, current.passengers.find((passenger) => job.passengerIds.includes(passenger.id))?.partySize ?? 1) && distanceKmBetween(vehicle.position!, jobPickup(job)) <= policy.maxPickupKm)).sort((left, right) => right.fare - left.fare)[0]
-      // Background dispatch must not interrupt the screen the player is using.
-      if (offer) { get().acceptJob(offer.id, false); if (get().jobs.find((job) => job.id === offer.id)?.status === 'accepted') record(operationsManager.id, 'dispatch', `${operationsManager.name} accepted ${offer.pickupLabel} → ${offer.destinationLabel}`) }
+      const eligibleTaxis = current.vehicles.filter((vehicle) => {
+        const driver = current.drivers.find((candidate) => candidate.id === vehicle.driverId)
+        return vehicle.type === 'taxi' &&
+          vehicle.cityId === operationsManager.cityId &&
+          vehicle.status === 'available' &&
+          driver?.status === 'available' &&
+          vehicle.fuel >= policy.minFuel &&
+          vehicle.condition >= policy.minCondition
+      })
+      // Match exactly the same taxi/driver constraints used by manual dispatch.
+      // Do not require vehicle.position: new taxis can use their city location.
+      const offers = current.jobs
+        .filter((job) => job.status === 'offered' && job.cityId === operationsManager.cityId && job.fare >= policy.minFare)
+        .sort((left, right) => right.fare - left.fare)
+      for (const offer of offers) {
+        const passenger = current.passengers.find((item) => offer.passengerIds.includes(item.id))
+        const suitable = eligibleTaxis.some((vehicle) => {
+          const city = getCity(vehicle.cityId, current.customCities)
+          const position = vehicle.position ?? city?.coordinates
+          return position &&
+            vehicleCanTakeJob(vehicle, offer, passenger?.partySize ?? 1) &&
+            distanceKmBetween(position, jobPickup(offer)) <= policy.maxPickupKm
+        })
+        if (!suitable) continue
+        get().acceptJob(offer.id, false)
+        if (get().jobs.find((job) => job.id === offer.id)?.status === 'accepted') {
+          record(operationsManager.id, 'dispatch', `${operationsManager.name} accepted ${offer.pickupLabel} → ${offer.destinationLabel}`)
+          break
+        }
+      }
     }
 
     const workshopManager = employeeFor('workshop-manager')

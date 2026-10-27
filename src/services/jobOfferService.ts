@@ -25,6 +25,10 @@ const MAPBOX_STREETS_TILESET = 'mapbox.mapbox-streets-v8'
 
 // New jobs should begin close to the taxi that generated the offer.
 export const MAX_PICKUP_DISTANCE_KM = 2
+// Keep newly generated calls clustered around the taxi, with a small
+// allowance for Mapbox snapping the pickup onto the nearest drivable road.
+const PICKUP_SAMPLING_RADIUS_KM = 1.1
+const MAX_SNAPPED_PICKUP_DISTANCE_KM = 1.5
 
 /** A Directions waypoint may snap onto a routable ferry edge offshore. */
 const STOP_TERRAIN_CACHE_TTL_MS = 10 * 60_000
@@ -196,7 +200,7 @@ const randomNearbyPickupLocations = (
     attempt += 1
   ) {
     const distanceKm =
-      Math.sqrt(Math.random()) * MAX_PICKUP_DISTANCE_KM
+      Math.sqrt(Math.random()) * PICKUP_SAMPLING_RADIUS_KM
 
     const angle = Math.random() * Math.PI * 2
 
@@ -327,7 +331,7 @@ routes = shuffled([...uniqueRoutes.values()])
   distanceKmBetween(
     city.coordinates,
     stored.pickupRoad ?? stored.pickup,
-  ) <= MAX_PICKUP_DISTANCE_KM
+  ) <= MAX_SNAPPED_PICKUP_DISTANCE_KM
         ? [{ pickup: { id: signature, name: stored.pickupLabel, coordinates: stored.pickup }, destination: { id: signature, name: stored.destinationLabel, coordinates: stored.destination }, distanceKm: stored.distanceKm, signature, stored }]
         : []
     })).slice(0, count)
@@ -361,7 +365,7 @@ if (
   distanceKmBetween(
     city.coordinates,
     stops.pickupRoad,
-  ) > MAX_PICKUP_DISTANCE_KM
+  ) > MAX_SNAPPED_PICKUP_DISTANCE_KM
 ) {
   return null
 }

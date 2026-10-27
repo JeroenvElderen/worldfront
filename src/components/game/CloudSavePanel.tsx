@@ -43,7 +43,7 @@ export function CloudSavePanel() {
           useGameStore.setState(state as Partial<ReturnType<typeof useGameStore.getState>>);
           setMessage("Cloud save restored. Refresh the page to reload map layers.");
         })}>Restore cloud save</button>
-        <button disabled={busy} onClick={() => void execute(async () => { const { error } = await supabase.auth.signOut(); if (error) throw error; setMessage("Signed out."); })}>Sign out</button>
+        <button disabled={busy} onClick={() => void execute(async () => { const client = supabase; if (!client) throw new Error("Supabase is not configured."); const { error } = await client.auth.signOut(); if (error) throw error; setMessage("Signed out."); })}>Sign out</button>
       </> : <>
         <input aria-label="Cloud account email" type="email" placeholder="Email" value={email} onChange={event => setEmail(event.target.value)} style={{ width: "100%", color: "#111", marginTop: 10 }} />
         <input aria-label="Cloud account password" type="password" placeholder="Password" value={password} onChange={event => setPassword(event.target.value)} style={{ width: "100%", color: "#111", marginTop: 8 }} />

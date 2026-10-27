@@ -718,6 +718,43 @@ function GameMapView({
             ?.position;
         return coordinates ? [{ ...incident, coordinates }] : [];
       });
+    // Render active road closures as red road segments, rather than just pins.
+    // The segment is a visual indication near the incident, not an authoritative
+    // closed-road geometry. The routing provider still decides available roads.
+    const closureFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = activeTraffic
+      .filter((incident) => incident.kind === "closure")
+      .map((incident) => {
+        const [lng, lat] = incident.coordinates;
+        const dx = 0.0008 / Math.max(0.25, Math.cos(lat * Math.PI / 180));
+        return {
+          type: "Feature" as const,
+          properties: { title: incident.title },
+          geometry: { type: "LineString" as const, coordinates: [[lng - dx, lat], [lng + dx, lat]] },
+        };
+      });
+    const closureSourceId = "worldfront-road-closures";
+    const closureLayerId = "worldfront-road-closures-red";
+    const renderClosures = () => {
+      if (!instance.isStyleLoaded()) return;
+      const data: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
+        type: "FeatureCollection",
+        features: closureFeatures,
+      };
+      const source = instance.getSource(closureSourceId) as mapboxgl.GeoJSONSource | undefined;
+      if (source) source.setData(data);
+      else instance.addSource(closureSourceId, { type: "geojson", data });
+      if (!instance.getLayer(closureLayerId)) {
+        instance.addLayer({
+          id: closureLayerId,
+          type: "line",
+          source: closureSourceId,
+          paint: { "line-color": "#ef4444", "line-width": 6, "line-opacity": 0.95 },
+          layout: { "line-cap": "round", "line-join": "round" },
+        });
+      }
+    };
+    instance.on("style.load", renderClosures);
+    renderClosures();
     incidentMarkers.current = [
       ...activeTraffic.map((incident) =>
         new mapboxgl.Marker({
@@ -742,6 +779,9 @@ function GameMapView({
       ),
     ];
     return () => {
+      instance.off("style.load", renderClosures);
+      if (instance.getLayer(closureLayerId)) instance.removeLayer(closureLayerId);
+      if (instance.getSource(closureSourceId)) instance.removeSource(closureSourceId);
       incidentMarkers.current.forEach((marker) => marker.remove());
       incidentMarkers.current = [];
     };

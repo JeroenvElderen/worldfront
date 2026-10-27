@@ -61,7 +61,7 @@ export function getJobMotionJourney(job: TaxiJob, vehicle: Vehicle) {
     ? pickupDistanceKm * job.durationMinutes / job.distanceKm
     : 0)
 
-  const speedMultiplier = (job.travelSpeedMultiplier ?? 1) * taxiTripSpeedMultiplier(vehicle.modelId)
+  const speedMultiplier = 4 * taxiTripSpeedMultiplier(vehicle.modelId)
 
   const pickupDurationMs = Math.max(
     1_000,

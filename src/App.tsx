@@ -107,7 +107,7 @@ export default function App() {
     }
   }, [])
 
-  const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, runAutomation, hasHydrated } = game
+  const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, vehicles, drivers, runAutomation, hasHydrated } = game
 
   const placeHarbour = game.placeHarbour
   const setSection = game.setSection
@@ -371,7 +371,7 @@ export default function App() {
   useEffect(() => {
     if (!automation?.enabled || !company || !hasHydrated) return
     runAutomation()
-  }, [company, automation, hasHydrated, jobs, runAutomation])
+  }, [company, automation?.enabled, hasHydrated, jobs, vehicles, drivers, runAutomation])
 
   // Cloud saves are opened from the bottom navigation More menu.
   if (!game.hasHydrated) {

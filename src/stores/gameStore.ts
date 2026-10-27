@@ -202,10 +202,10 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     const last = previous[previous.length - 1]
     if (last) {
       const distance = distanceKmBetween(last, point)
-      if (distance < 0.015 || distance > 1.5) return state
+      if (distance < 0.015) return state
     }
-    // Persist only actual animation positions; never insert pickup/destination
-    // endpoints or interpolate across missing samples after a reload.
+    // Persist only observed animation positions. Large gaps are retained as
+    // segment breaks at completion, never filled with invented road travel.
     const updated = [...previous.slice(-4999), [point[0], point[1]] as Coordinates]
     const jobs = state.jobs.slice()
     jobs[index] = { ...job, recordedRoute: updated }

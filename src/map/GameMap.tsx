@@ -950,7 +950,7 @@ function GameMapView({
         .filter(
           (area) =>
             area.source !== "taxi-discovery" &&
-            area.source !== "ferry-discovery",
+            area.source !== "ferry-discovery" && !area.regionId,
         )
         .map(({ id, coordinates }) => ({ id, coordinates })),
     ];
@@ -1943,7 +1943,7 @@ function GameMapView({
                 ),
         ),
         ...territoryExpansions
-          .filter((expansion) => expansion.source !== "taxi-discovery")
+          .filter((expansion) => expansion.source !== "taxi-discovery" && !expansion.regionId)
           .map(
             (expansion) =>
               expansion.source === "ferry-discovery"
@@ -1974,6 +1974,17 @@ function GameMapView({
         ...ownedTerritories,
         ...(liveExploredTerritory ? [liveExploredTerritory] : []),
       ]);
+      // Region ownership is a separate overlay; it never opens the exploration fog.
+      const administrativeBorders = featureCollection(
+        territoryExpansions.filter(area => area.regionId && area.regionGeometry)
+          .map(area => ({
+            type: "Feature" as const,
+            properties: { id: area.regionId, name: area.regionName },
+            geometry: area.regionGeometry!,
+          })),
+      );
+      const administrativeSource = instance.getSource("administrative-ownership") as mapboxgl.GeoJSONSource | undefined;
+      if (administrativeSource) administrativeSource.setData(administrativeBorders);
       const coverageData = featureCollection(
         unlockedTerritory ? [unlockedTerritory] : [],
       );
@@ -2028,6 +2039,13 @@ function GameMapView({
           "line-width": 2,
           "line-opacity": 0.85,
         },
+      });
+      instance.addSource("administrative-ownership", { type: "geojson", data: administrativeBorders });
+      instance.addLayer({
+        id: "administrative-ownership-line",
+        type: "line",
+        source: "administrative-ownership",
+        paint: { "line-color": "#fbbf24", "line-width": 2, "line-opacity": 0.85, "line-dasharray": [3, 2] },
       });
       instance.addSource("depot-network", { type: "geojson", data });
       instance.addLayer({

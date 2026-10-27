@@ -718,6 +718,56 @@ function GameMapView({
             ?.position;
         return coordinates ? [{ ...incident, coordinates }] : [];
       });
+    // Snap closure warnings to actual road geometry in the currently loaded map tiles.
+    // Never draw an invented straight line: if no road geometry is available,
+    // the existing incident pin remains visible without a misleading closure.
+    const closureSourceId = "worldfront-closure-road-segments";
+    const closureLayerId = "worldfront-closure-road-segments-line";
+    const updateClosureRoads = () => {
+      if (!instance.isStyleLoaded()) return;
+      const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+      for (const incident of activeTraffic) {
+        if (incident.kind !== "closure") continue;
+        const point = instance.project(incident.coordinates);
+        const nearby = instance.queryRenderedFeatures(
+          [[point.x - 14, point.y - 14], [point.x + 14, point.y + 14]],
+        ).filter((feature) =>
+          feature.geometry.type === "LineString" &&
+          /road|street|transportation/i.test(feature.layer.id) &&
+          !/closure/i.test(feature.layer.id),
+        );
+        let best: GeoJSON.LineString | null = null;
+        let nearest = Number.POSITIVE_INFINITY;
+        for (const candidate of nearby) {
+          const line = candidate.geometry as GeoJSON.LineString;
+          for (const coordinate of line.coordinates) {
+            const projected = instance.project(coordinate as [number, number]);
+            const distance = Math.hypot(projected.x - point.x, projected.y - point.y);
+            if (distance < nearest) { nearest = distance; best = line; }
+          }
+        }
+        if (best && nearest <= 24) features.push({
+          type: "Feature",
+          properties: { title: incident.title, incidentId: incident.id },
+          geometry: best,
+        });
+      }
+      const data: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
+        type: "FeatureCollection", features,
+      };
+      const source = instance.getSource(closureSourceId) as mapboxgl.GeoJSONSource | undefined;
+      if (source) source.setData(data);
+      else instance.addSource(closureSourceId, { type: "geojson", data });
+      if (!instance.getLayer(closureLayerId)) instance.addLayer({
+        id: closureLayerId, type: "line", source: closureSourceId,
+        paint: { "line-color": "#ef4444", "line-width": 7, "line-opacity": 0.95 },
+        layout: { "line-cap": "round", "line-join": "round" },
+      });
+    };
+    instance.on("style.load", updateClosureRoads);
+    instance.on("moveend", updateClosureRoads);
+    instance.on("idle", updateClosureRoads);
+    updateClosureRoads();
     incidentMarkers.current = [
       ...activeTraffic.map((incident) =>
         new mapboxgl.Marker({
@@ -742,6 +792,11 @@ function GameMapView({
       ),
     ];
     return () => {
+      instance.off("style.load", updateClosureRoads);
+      instance.off("moveend", updateClosureRoads);
+      instance.off("idle", updateClosureRoads);
+      if (instance.getLayer(closureLayerId)) instance.removeLayer(closureLayerId);
+      if (instance.getSource(closureSourceId)) instance.removeSource(closureSourceId);
       incidentMarkers.current.forEach((marker) => marker.remove());
       incidentMarkers.current = [];
     };

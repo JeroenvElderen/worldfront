@@ -1270,8 +1270,10 @@ const generationTaxi = selectJobGenerationTaxi(state)
     const cost = 5_000
     const id = harbourId(coordinates)
     if (!state.company || state.company.cash < cost || (state.purchasedHarbours ?? []).some((harbour) => harbour.id === id)) return state
-    const territoryCenters = unlockedTerritoryCenters(state)
-    const insideUnlockedTerritory = isInsideVillageTerritories(coordinates, territoryCenters)
+    // Use the same discovered area as the map. The old check only used
+    // synthetic village circles and ignored permanent taxi exploration.
+    const insideUnlockedTerritory = isInsideVillageTerritories(coordinates, unlockedTerritoryCenters(state)) ||
+      (state.exploredTerritory ? isInsideTerritoryFeatures(coordinates, [state.exploredTerritory]) : false)
     if (!insideUnlockedTerritory) return state
     const purchasedAt = new Date().toISOString()
     const name = routes[0]?.originName ?? `Harbour ${(state.purchasedHarbours ?? []).length + 1}`

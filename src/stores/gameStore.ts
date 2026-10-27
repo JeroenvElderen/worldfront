@@ -1361,11 +1361,42 @@ const generationTaxi = selectJobGenerationTaxi(state)
 
     const operationsManager = employeeFor('operations-manager')
     if (operationsManager) {
-      const current = get()
-      const eligibleTaxis = current.vehicles.filter((vehicle) => vehicle.type === 'taxi' && vehicle.cityId === operationsManager.cityId && vehicle.status === 'available' && vehicle.driverId && vehicle.position && vehicle.fuel >= policy.minFuel && vehicle.condition >= policy.minCondition)
-      const offer = current.jobs.filter((job) => job.status === 'offered' && job.fare >= policy.minFare && eligibleTaxis.some((vehicle) => vehicleCanTakeJob(vehicle, job, current.passengers.find((passenger) => job.passengerIds.includes(passenger.id))?.partySize ?? 1) && distanceKmBetween(vehicle.position!, jobPickup(job)) <= policy.maxPickupKm)).sort((left, right) => right.fare - left.fare)[0]
-      // Background dispatch must not interrupt the screen the player is using.
-      if (offer) { get().acceptJob(offer.id, false); if (get().jobs.find((job) => job.id === offer.id)?.status === 'accepted') record(operationsManager.id, 'dispatch', `${operationsManager.name} accepted ${offer.pickupLabel} → ${offer.destinationLabel}`) }
+      // Dispatch repeatedly until no eligible vehicle/job pair remains. A
+      // manager must keep the whole fleet working, not just accept one offer
+      // per refresh. Re-read state after every assignment to avoid double-booking.
+      const attempted = new Set<string>()
+      while (true) {
+        const current = get()
+        const eligibleTaxis = current.vehicles.filter((vehicle) => {
+          const driver = current.drivers.find(candidate => candidate.id === vehicle.driverId)
+          return vehicle.type === 'taxi' &&
+            vehicle.cityId === operationsManager.cityId &&
+            vehicle.status === 'available' &&
+            Boolean(vehicle.driverId && vehicle.position) &&
+            driver?.status === 'available' &&
+            vehicle.fuel >= policy.minFuel &&
+            vehicle.condition >= policy.minCondition
+        })
+        if (!eligibleTaxis.length) break
+        const offer = current.jobs
+          .filter(job => job.status === 'offered' && job.fare >= policy.minFare && !attempted.has(job.id) &&
+            eligibleTaxis.some(vehicle => {
+              const passenger = current.passengers.find(p => job.passengerIds.includes(p.id))
+              const driver = current.drivers.find(d => d.id === vehicle.driverId)
+              return job.cityId === vehicle.cityId &&
+                vehicleCanTakeJob(vehicle, job, passenger?.partySize ?? 1) &&
+                (job.category !== 'accessible' || (driver?.certifications ?? []).includes('accessible')) &&
+                (job.category !== 'executive' || (driver?.certifications ?? []).includes('executive')) &&
+                distanceKmBetween(vehicle.position!, jobPickup(job)) <= policy.maxPickupKm
+            }))
+          .sort((left, right) => right.fare - left.fare)[0]
+        if (!offer) break
+        attempted.add(offer.id)
+        get().acceptJob(offer.id, false)
+        if (get().jobs.find(job => job.id === offer.id)?.status === 'accepted') {
+          record(operationsManager.id, 'dispatch', `${operationsManager.name} accepted ${offer.pickupLabel} → ${offer.destinationLabel}`)
+        }
+      }
     }
 
     const workshopManager = employeeFor('workshop-manager')

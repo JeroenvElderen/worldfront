@@ -7,7 +7,7 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
 ]
 const HARBOUR_SEARCH_RADIUS_METRES = 50_000
-const MAX_LOCAL_TERMINAL_DISTANCE_KM = 3
+const MAX_LOCAL_TERMINAL_DISTANCE_KM = 5
 
 interface OsmTags {
   name?: string
@@ -182,7 +182,7 @@ export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signa
     const requestController = new AbortController()
     const cancelRequest = () => requestController.abort()
     signal?.addEventListener('abort', cancelRequest, { once: true })
-    const timeout = setTimeout(cancelRequest, curated.length ? 4_000 : 10_000)
+    const timeout = setTimeout(cancelRequest, curated.length ? 4_000 : 15_000)
     try {
       const response = await fetch(endpoint, {
         method: 'POST',

@@ -2673,7 +2673,7 @@ function GameMapView({
             );
           }
         }
-        recordLiveDiscovery(vehicle.id, currentPosition);
+        if (!ferryState) recordJourneyCheckpoint(job.id, vehicle.id, currentPosition);
         (instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(
           movingVehiclePoint(taxiSourceId, currentPosition, {
             ferryStatus:

@@ -47,7 +47,7 @@ interface GameActions {
   setDispatcherStrategy: (dispatcherId: string, strategy: DispatcherStrategy) => void
   respondToReview: (reviewId: string, response: 'thanks' | 'apology' | 'voucher' | 'dispute') => void
 }
-interface GameState extends GameSave { activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
+interface GameState extends GameSave { discoveryAnimations: Array<{ id: string; vehicleId: string; route: Coordinates[] }>; activeSection: Section; focusedJobId: string | null; hasHydrated: boolean; jobsLoading: boolean; jobsError: string | null; setHasHydrated: (value: boolean) => void }
 
 const initialContracts = () => [
   { id: crypto.randomUUID(), name: 'Airport partner', description: 'Complete 5 airport transfers', category: 'airport' as const, target: 5, progress: 0, reward: 4_500, expiresAt: new Date(Date.now() + 7 * 60_000).toISOString(), accepted: false, completed: false },
@@ -189,7 +189,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     }
   }),
 
-  ...blankSave, activeSection: 'map', focusedJobId: null, hasHydrated: false, jobsLoading: false, jobsError: null,
+  ...blankSave, discoveryAnimations: [], activeSection: 'map', focusedJobId: null, hasHydrated: false, jobsLoading: false, jobsError: null,
   setHasHydrated: (hasHydrated) => set({ hasHydrated }),
   setSection: (activeSection) => set({ activeSection }),
   openJob: (focusedJobId) => set({ focusedJobId, activeSection: 'jobs' }),
@@ -785,7 +785,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
     const result = completeJobState(state.company, state.jobs, state.vehicles, jobId)
     if (!result || !job) return state
     const updatedAt = new Date().toISOString()
-    return { ...result, exploredTerritory: addTaxiDiscovery(state.exploredTerritory, job, vehicle?.position), updatedAt }
+    return { ...result, exploredTerritory: addTaxiDiscovery(state.exploredTerritory, job, vehicle?.position), discoveryAnimations: [...state.discoveryAnimations.slice(-15), { id: crypto.randomUUID(), vehicleId: job.assignedVehicleId ?? jobId, route: completedJobRoute(job, vehicle?.position) }], updatedAt }
   }),
   tickJobs: () => set((state) => {
     if (!state.company) return state
@@ -811,6 +811,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
     let drivers = state.drivers
     let financialTransactions = state.financialTransactions ?? []
     let exploredTerritory = state.exploredTerritory
+    const discoveryAnimations = [...(state.discoveryAnimations ?? [])]
     let territoryExpansions = state.territoryExpansions ?? []
     let customerReviews = state.customerReviews ?? []
     let postalPerformance = state.postalPerformance ?? blankSave.postalPerformance
@@ -830,6 +831,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
         // this same tick instead of leaving the taxi unavailable after launch.
         const completedAt = getJobJourney(job, previousVehicle).arrivesAt
         exploredTerritory = addTaxiDiscovery(exploredTerritory, job, previousVehicle.position)
+        discoveryAnimations.push({ id: crypto.randomUUID(), vehicleId: previousVehicle.id, route: completedJobRoute(job, previousVehicle.position) })
         const outcome = calculateJobOutcome(job, previousVehicle, driver)
         const emptyDistanceKm = previousVehicle.position ? distanceKmBetween(previousVehicle.position, jobPickup(job)) : 0
         const journeyDistanceKm = emptyDistanceKm + job.distanceKm
@@ -1119,6 +1121,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
       const destination = arrived.position
       if (!destination || !Number.isFinite(destination[0]) || !Number.isFinite(destination[1])) continue
       try {
+        discoveryAnimations.push({ id: crypto.randomUUID(), vehicleId: previous.id, route: [destination, [destination[0] + 0.00001, destination[1]]] })
         exploredTerritory = extendExploredTerritory(exploredTerritory, [
           destination,
           [destination[0] + 0.00001, destination[1]],
@@ -1128,7 +1131,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
       }
     }
     const maintenanceAlerts = maintenanceAdvisories(vehicles, state.maintenanceAlerts ?? [], now)
-    return { company, jobs: result?.jobs ?? jobs, vehicles, postalPerformance, transportAssets, territoryExpansions, drivers, goals, contracts, driverCandidates, loans, financialTransactions, exploredTerritory, activeEvent, nextEventAt, nextOperatingPaymentAt, worldCondition, competitors, incidents, trafficIncidents, nextTrafficIncidentAt, passengers, customerReviews, maintenanceAlerts, focusedJobId: result ? null : (jobs.some((job) => job.id === state.focusedJobId) ? state.focusedJobId : null), updatedAt: new Date().toISOString() }
+    return { company, jobs: result?.jobs ?? jobs, vehicles, postalPerformance, transportAssets, territoryExpansions, drivers, goals, contracts, driverCandidates, loans, financialTransactions, exploredTerritory, discoveryAnimations: discoveryAnimations.slice(-16), activeEvent, nextEventAt, nextOperatingPaymentAt, worldCondition, competitors, incidents, trafficIncidents, nextTrafficIncidentAt, passengers, customerReviews, maintenanceAlerts, focusedJobId: result ? null : (jobs.some((job) => job.id === state.focusedJobId) ? state.focusedJobId : null), updatedAt: new Date().toISOString() }
   }),
   cleanTaxi: (vehicleId) => set((state) => {
     const vehicle = state.vehicles.find((candidate) => candidate.id === vehicleId && candidate.type === 'taxi')

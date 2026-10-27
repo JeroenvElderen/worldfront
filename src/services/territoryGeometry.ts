@@ -9,7 +9,7 @@ export const VILLAGE_TERRITORY_RADIUS_KM = 6
 // manually purchased village territory retains its separate 6 km radius.
 export const TAXI_DISCOVERY_RADIUS_KM = 0.5
 
-export interface VillageTerritoryCenter { id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; source?: 'village' | 'taxi-discovery' | 'ferry-discovery'; radiusKm?: number }
+export interface VillageTerritoryCenter { id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; source?: 'village' | 'starting-station' | 'taxi-discovery' | 'ferry-discovery'; radiusKm?: number }
 export type { TerritoryFeature } from '../models/game'
 
 const realBoundaryCache = new Map<string, Promise<TerritoryFeature | null>>()
@@ -164,7 +164,9 @@ export const isInsideVillageTerritories = (coordinates: Coordinates, centers: Vi
  */
 export const resolveVillageTerritories = async (centers: VillageTerritoryCenter[]) =>
   Promise.all(centers.map(async (center) =>
-    center.source === 'taxi-discovery'
+    center.source === 'starting-station'
+      ? villageTerritory(center.id, center.coordinates, 1)
+      : center.source === 'taxi-discovery'
       ? center.routeCoordinates && center.routeCoordinates.length >= 2
         ? taxiDiscoveryRouteTerritory(center.id, center.routeCoordinates, center.radiusKm)
         : taxiDiscoveryTerritory(center.id, center.coordinates, center.radiusKm)
@@ -189,5 +191,5 @@ export const lockedTerritoryMask = (unlocked: ReturnType<typeof mergeVillageTerr
   // polygon with hand-written holes. The latter drops interior rings of
   // explored polygons and incorrectly reveals enclosed, untravelled islands.
   // Turf preserves all nested holes and disconnected components.
-  return difference(featureCollection([world, unlocked])) ?? world
+  return difference(featureCollection([world, { ...unlocked, properties: { locked: true } }])) ?? world
 }

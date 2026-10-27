@@ -1104,6 +1104,29 @@ const generationTaxi = selectJobGenerationTaxi(state)
       financialTransactions = addTransactions(financialTransactions, transaction('maintenance', `${vehicle.name}: ${queued.kind}`, -quote.cost, vehicle.id, startedAt))
       return { ...vehicle, queuedService: undefined, status: 'maintenance' as const, maintenanceJob: { kind: queued.kind, mechanicId: mechanic?.id, startedAt, completesAt: new Date(now + quote.durationMs).toISOString(), cost: quote.cost }, lifetimeExpenses: (vehicle.lifetimeExpenses ?? 0) + quote.cost }
     })
+    // Finish exploration when a road vehicle reaches its destination. This is
+    // independent of Mapbox animation frames, so arrivals while the map is
+    // hidden (or between animation samples) still reveal their final stop.
+    // Taxi jobs already backfill their complete routes above.
+    for (const previous of state.vehicles) {
+      const arrived = vehicles.find(vehicle => vehicle.id === previous.id)
+      if (!arrived) continue
+      const completedRoadJourney =
+        (previous.rentalJourney && !arrived.rentalJourney) ||
+        (previous.postalRoute && !arrived.postalRoute) ||
+        (previous.serviceTrip && !arrived.serviceTrip)
+      if (!completedRoadJourney) continue
+      const destination = arrived.position
+      if (!destination || !Number.isFinite(destination[0]) || !Number.isFinite(destination[1])) continue
+      try {
+        exploredTerritory = extendExploredTerritory(exploredTerritory, [
+          destination,
+          [destination[0] + 0.00001, destination[1]],
+        ])
+      } catch (error) {
+        console.warn('[exploration] Destination discovery failed', previous.id, error)
+      }
+    }
     const maintenanceAlerts = maintenanceAdvisories(vehicles, state.maintenanceAlerts ?? [], now)
     return { company, jobs: result?.jobs ?? jobs, vehicles, postalPerformance, transportAssets, territoryExpansions, drivers, goals, contracts, driverCandidates, loans, financialTransactions, exploredTerritory, activeEvent, nextEventAt, nextOperatingPaymentAt, worldCondition, competitors, incidents, trafficIncidents, nextTrafficIncidentAt, passengers, customerReviews, maintenanceAlerts, focusedJobId: result ? null : (jobs.some((job) => job.id === state.focusedJobId) ? state.focusedJobId : null), updatedAt: new Date().toISOString() }
   }),

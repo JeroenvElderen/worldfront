@@ -1,4 +1,4 @@
-import booleanPointInPolygon from '@turf/boolean-point-in-polygon'
+import { booleanPointInPolygon } from '@turf/turf'
 import type { Coordinates, TerritoryFeature } from '../models/game'
 
 // Country-specific administrative divisions match Transport Simulator.

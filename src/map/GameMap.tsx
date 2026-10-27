@@ -2062,7 +2062,25 @@ function GameMapView({
     let disposed = false;
     const applyIcons = () => {
       if (disposed || !instance.isStyleLoaded()) return;
-      // Always ensure the image exists after a style reset before modifying layers.
+      // Restore missing vehicle sources on initial hydration and after style reloads.
+      const city = getCity(cityId, customCities);
+      for (const vehicle of vehicles) {
+        if (vehicle.type !== "taxi") continue;
+        const sourceId = vehicleSourceId(vehicle.id);
+        if (instance.getSource(sourceId)) continue;
+        const position = vehicle.position ?? city?.coordinates;
+        if (!position) continue;
+        instance.addSource(sourceId, { type: "geojson", data: movingVehiclePoint(vehicle.id, position) });
+        instance.addLayer({
+          id: sourceId, type: "circle", source: sourceId,
+          paint: {
+            "circle-radius": VEHICLE_MARKER_RADIUS,
+            "circle-color": "#10b981",
+            "circle-opacity": 0,
+            "circle-stroke-opacity": 0,
+          },
+        });
+      }
       if (!instance.hasImage(TAXI_SVG_IMAGE)) { loadIcon(); return; }
       for (const vehicle of vehicles) {
         if (vehicle.type !== "taxi") continue;
@@ -2124,7 +2142,7 @@ function GameMapView({
       instance.off("idle", applyIcons);
       instance.off("render", applyIcons);
     };
-  }, [mapRevision, vehicles]);
+  }, [mapRevision, vehicles, cityId, customCities]);
 
   useEffect(() => {
     const instance = map.current;

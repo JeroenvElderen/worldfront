@@ -728,6 +728,7 @@ function GameMapView({
     });
   }, [exploredTerritory]);
   const container = useRef<HTMLDivElement>(null);
+  const map = useRef<mapboxgl.Map | null>(null);
   const pickupJobIds = useRef(new Set<string>());
   const pickupHandlers = useRef(
     new Map<

@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
 import type { Company } from '../../models/game'
 import { progressionForReputation } from '../../services/companyProgression'
-import { gameDateAt } from '../../services/gameTime'
+import { gameDateAt, getGameSpeed, setGameSpeed } from '../../services/gameTime'
 import { useCurrency } from './CurrencyContext'
 
 export function TopHud({ company }: { company: Company }) {
   const { money, locale } = useCurrency()
   const progression = progressionForReputation(company.reputation)
   const [gameDate, setGameDate] = useState(() => gameDateAt(company.foundedAt))
+  useEffect(() => {
+    if (getGameSpeed() !== 1) setGameSpeed(1)
+  }, [])
   useEffect(() => {
     const updateClock = () => setGameDate(gameDateAt(company.foundedAt))
     updateClock()

@@ -4,10 +4,9 @@ import { addReputation, levelForReputation } from './companyProgression'
 
 export const MAX_JOB_OFFERS = 12
 export const JOB_OFFER_DURATION_MS = 5 * 60_000
-// Restore the accelerated journey clock used before standard taxi trips were
-// changed to real-time speed. One estimated trip minute takes 3.6 real seconds;
-// model-specific speed bonuses still apply on top of this shared game speed.
-export const REAL_TIME_TRIP_SCALE = 0.06
+// One estimated trip minute corresponds to one real minute.
+// Keep the constant for shared timing across animation, jobs, and rerouting.
+export const REAL_TIME_TRIP_SCALE = 1
 export const SIMULATED_MINUTE_MS = 60_000 * REAL_TIME_TRIP_SCALE
 // Give the driver a brief dispatch window before the taxi pulls away.
 export const JOB_DISPATCH_DELAY_MS = 1_000
@@ -62,7 +61,7 @@ export function getJobMotionJourney(job: TaxiJob, vehicle: Vehicle) {
     ? pickupDistanceKm * job.durationMinutes / job.distanceKm
     : 0)
 
-  const speedMultiplier = taxiTripSpeedMultiplier(vehicle.modelId)
+  const speedMultiplier = 8 * taxiTripSpeedMultiplier(vehicle.modelId)
 
   const pickupDurationMs = Math.max(
     1_000,
@@ -83,7 +82,7 @@ export function getJobMotionJourney(job: TaxiJob, vehicle: Vehicle) {
     acceptedAt,
     departsAt,
     pickupAt: departsAt + pickupDurationMs,
-    arrivesAt: departsAt + pickupDurationMs + passengerDurationMs,
+    arrivesAt: Math.max(departsAt + pickupDurationMs + passengerDurationMs, (job.rerouteStartedAt ? new Date(job.rerouteStartedAt).getTime() : 0) + (job.rerouteDurationMs ?? 0)),
   }
 }
 

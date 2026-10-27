@@ -11,8 +11,7 @@ const saveSnapshot = () => {
   return { ...snapshot, vehicles: snapshotTaxiPositions(snapshot.vehicles) };
 };
 
-export function CloudSavePanel() {
-  const [open, setOpen] = useState(false);
+export function CloudSavePanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -86,9 +85,9 @@ export function CloudSavePanel() {
     try { await operation(); } catch (error) { setMessage(error instanceof Error ? error.message : "Cloud operation failed"); }
     finally { setBusy(false); }
   };
-  return <div style={{ position: "fixed", top: 150, right: 10, zIndex: 1500, fontSize: 13 }}>
-    <button type="button" onClick={() => setOpen(!open)} style={{ padding: "8px 12px", borderRadius: 10, background: "#133c35", color: "white" }}>☁ Cloud</button>
-    {open && <section style={{ width: "min(320px, 90vw)", padding: 14, background: "#12232d", color: "white", borderRadius: 12, boxShadow: "0 8px 24px #0008" }}>
+  return <div style={{ position: "fixed", inset: 0, zIndex: 2500, display: open ? "flex" : "none", alignItems: "center", justifyContent: "center", background: "#0009", padding: 16, fontSize: 13 }} role="presentation" onClick={onClose}>
+    <section role="dialog" aria-modal="true" aria-label="Cloud saves" onClick={(event) => event.stopPropagation()} style={{ width: "min(360px, 92vw)", maxHeight: "80vh", overflowY: "auto", padding: 16, background: "#12232d", color: "white", borderRadius: 12, boxShadow: "0 8px 24px #0008" }}>
+      <button type="button" onClick={onClose} aria-label="Close cloud saves" style={{ float: "right", color: "white", background: "transparent", border: 0, fontSize: 20 }}>×</button>
       <strong>WorldFront cloud saves</strong>
       {!supabase ? <p>Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel.</p> : userEmail ? <>
         <p>Signed in: {userEmail}</p>
@@ -116,6 +115,6 @@ export function CloudSavePanel() {
       </>}
       {message && <p role="status">{message}</p>}
       <p style={{ opacity: 0.7 }}>Local progress remains your primary save. Automatic backups require opt-in each session.</p>
-    </section>}
+    </section>
   </div>;
 }

@@ -185,6 +185,28 @@ const finishRecordedJourney = (
     history: [...history, { id: crypto.randomUUID(), vehicleId: job.assignedVehicleId, jobId: job.id, completedAt, coordinates: points, distanceKm }].slice(-1000),
   }
 }
+// Commit the most recent travelled road samples before opening new territory
+// to mission generation. The map and the generator then share one snapshot.
+const flushPendingExploration = (state: GameState): GameSave['exploredTerritory'] => {
+  let explored = state.exploredTerritory
+  for (const job of state.jobs) {
+    if (job.status !== 'accepted' || !job.assignedVehicleId) continue
+    const points = job.recordedRoute ?? []
+    if (points.length < 2) continue
+    const pending = points.slice(-Math.min(11, (points.length - 1) % 10 + 1))
+    const segments: Coordinates[][] = []
+    let segment: Coordinates[] = [pending[0]]
+    for (let i = 1; i < pending.length; i++) {
+      if (distanceKmBetween(pending[i - 1], pending[i]) > 1.5) {
+        if (segment.length > 1) segments.push(segment)
+        segment = [pending[i]]
+      } else segment.push(pending[i])
+    }
+    if (segment.length > 1) segments.push(segment)
+    if (segments.length) explored = extendExploredTerritorySegments(explored, segments, job.id)
+  }
+  return explored
+}
 const advanceContracts = (contracts: GameSave['contracts'], category: GameSave['contracts'][number]['category']) => contracts.map((contract) => {
   if (!contract.accepted || contract.completed || contract.category !== category) return contract
   const progress = Math.min(contract.target, contract.progress + 1)
@@ -211,8 +233,8 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     // Reveal verified, actually travelled roads periodically while the taxi
     // is moving, rather than waiting for the mission to finish. Use a short
     // rolling window so we never draw a straight line across missing samples.
-    if (updated.length >= 2 && updated.length % 50 === 0) {
-      const recent = updated.slice(-50)
+    if (updated.length >= 2 && updated.length % 10 === 0) {
+      const recent = updated.slice(-11)
       const segments: Coordinates[][] = []
       let segment: Coordinates[] = [recent[0]]
       for (let i = 1; i < recent.length; i++) {
@@ -332,6 +354,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     return { pausedAt: null, updatedAt: new Date().toISOString() }
   }),
   refreshJobs: async () => {
+    set((current) => ({ exploredTerritory: flushPendingExploration(current) }))
     const state = useGameStore.getState()
 const generationTaxi = selectJobGenerationTaxi(state)
     if (!(state.activeCityId ?? state.startingCityId) || state.jobsLoading || !generationTaxi) return
@@ -357,6 +380,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
     }
   },
   addRandomJob: async () => {
+  set((current) => ({ exploredTerritory: flushPendingExploration(current) }))
   const state = useGameStore.getState()
 
   const offeredCount = state.jobs.filter(

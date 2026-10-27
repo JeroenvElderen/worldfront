@@ -1201,6 +1201,9 @@ function GameMapView({
                 currentPosition = ferryPosition.position;
                 ferryState = ferryPosition.state;
               }
+              // Discover only road movement, never ferry crossings or unresolved routes.
+              if (routeReady && !ferryState) recordLiveDiscovery(vehicle.id, currentPosition);
+              else liveDiscoveryCheckpoints.delete(vehicle.id);
               (
                 instance.getSource(sourceId) as
                   | mapboxgl.GeoJSONSource
@@ -1330,6 +1333,9 @@ function GameMapView({
                 currentPosition = ferryPosition.position;
                 ferryState = ferryPosition.state;
               }
+              // Discover only road movement, never ferry crossings or unresolved routes.
+              if (routeReady && !ferryState) recordLiveDiscovery(vehicle.id, currentPosition);
+              else liveDiscoveryCheckpoints.delete(vehicle.id);
               (
                 instance.getSource(sourceId) as
                   | mapboxgl.GeoJSONSource
@@ -2887,6 +2893,8 @@ function GameMapView({
           currentPosition = ferryPosition.position;
           ferryState = ferryPosition.state;
         }
+        if (routeReady && !ferryState) recordLiveDiscovery(vehicle.id, currentPosition);
+        else liveDiscoveryCheckpoints.delete(vehicle.id);
         (instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined)?.setData(movingVehiclePoint(vehicleId, currentPosition, { ferryStatus: ferryState === "waiting" ? "Waiting for ferry" : ferryState === "aboard" ? "On ferry" : "" }));
         if (ferryState !== lastFerryState && instance.getLayer(vehicleId)) {
           instance.setPaintProperty(vehicleId, "circle-color", ferryState === "waiting" ? vehicleColor.waitingForFerry : ferryState === "aboard" ? vehicleColor.onFerry : vehicleColor.postal);
@@ -3006,6 +3014,8 @@ function GameMapView({
             currentPosition = ferryPosition.position;
             ferryState = ferryPosition.state;
           }
+          if (routeReady && !ferryState) recordLiveDiscovery(vehicle.id, currentPosition);
+          else liveDiscoveryCheckpoints.delete(vehicle.id);
           (
             instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined
           )?.setData(

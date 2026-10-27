@@ -1668,3 +1668,54 @@ useGameStore.subscribe((state, previous) => {
     void latest.addRandomJob()
   }, Math.max(REPLENISH_DEBOUNCE_MS, cooldownRemaining))
 })
+
+
+// Taxi missions are dispatched automatically, without requiring an operations
+// manager, an automation toggle, or the player to open the mission board.
+// Defer dispatch until the current Zustand update finishes; accepting a job
+// changes the store and must not recursively dispatch during notification.
+let taxiAutoDispatchTimer: ReturnType<typeof setTimeout> | null = null
+const AUTO_DISPATCH_PICKUP_RADIUS_KM = MAX_PICKUP_DISTANCE_KM
+
+useGameStore.subscribe((state) => {
+  if (!state.hasHydrated || !state.company || state.pausedAt) return
+  if (!state.jobs.some((job) => job.status === 'offered')) return
+  if (!jobGeneratingTaxis(state).length) return
+  if (taxiAutoDispatchTimer) return
+
+  taxiAutoDispatchTimer = setTimeout(() => {
+    taxiAutoDispatchTimer = null
+    // Re-read live state after each acceptance: drivers and vehicles may have
+    // become busy, and accepting one mission can change offer capacity.
+    for (let attempt = 0; attempt < MAX_JOB_OFFERS; attempt += 1) {
+      const current = useGameStore.getState()
+      if (!current.hasHydrated || !current.company || current.pausedAt) break
+      const taxis = jobGeneratingTaxis(current)
+      const candidate = current.jobs
+        .filter((job) => job.status === 'offered')
+        .flatMap((job) => {
+          const passenger = current.passengers.find((item) => job.passengerIds.includes(item.id))
+          return taxis
+            .filter((vehicle) =>
+              vehicle.cityId === job.cityId &&
+              vehicleCanTakeJob(vehicle, job, passenger?.partySize ?? 1) &&
+              distanceKmBetween(
+                taxiJobGenerationPosition(vehicle, getCity(vehicle.cityId, current.customCities)?.coordinates ?? jobPickup(job)),
+                jobPickup(job),
+              ) <= AUTO_DISPATCH_PICKUP_RADIUS_KM,
+            )
+            .map((vehicle) => ({
+              job,
+              distance: distanceKmBetween(
+                taxiJobGenerationPosition(vehicle, jobPickup(job)),
+                jobPickup(job),
+              ),
+            }))
+        })
+        .sort((a, b) => a.distance - b.distance)[0]
+      if (!candidate) break
+      current.acceptJob(candidate.job.id, false)
+      if (useGameStore.getState().jobs.find((job) => job.id === candidate.job.id)?.status !== 'accepted') break
+    }
+  }, 0)
+})

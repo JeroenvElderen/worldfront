@@ -249,38 +249,32 @@ if (destinationPlaces.length < count * 4) {
   ))
 }
 
+// Sample a bounded number of plausible destinations for each pickup instead
+// of constructing the full pickup × destination Cartesian product.
 const uniqueRoutes = new Map<string, (typeof routes)[number]>()
-
-for (const pickup of pickupPlaces) {
-  for (const destination of destinationPlaces) {
-    const distanceKm =
-      Math.round(
-        distanceKmBetween(
-          pickup.coordinates,
-          destination.coordinates,
-        ) * 10,
-      ) / 10
-
+const MAX_DESTINATIONS_PER_PICKUP = 24
+const MAX_CANDIDATES = Math.max(48, count * 36)
+const randomizedPickups = shuffled(pickupPlaces)
+const randomizedDestinations = shuffled(destinationPlaces)
+for (const pickup of randomizedPickups) {
+  if (uniqueRoutes.size >= MAX_CANDIDATES) break
+  const start = Math.floor(Math.random() * Math.max(1, randomizedDestinations.length))
+  for (let offset = 0; offset < Math.min(MAX_DESTINATIONS_PER_PICKUP, randomizedDestinations.length); offset++) {
+    const destination = randomizedDestinations[(start + offset) % randomizedDestinations.length]
+    const distanceKm = Math.round(distanceKmBetween(pickup.coordinates, destination.coordinates) * 10) / 10
+    // Use coordinates for uniqueness: generated display names are not stable identifiers.
     const signature = jobRouteSignature(
-      pickup.name,
-      destination.name,
+      pickup.coordinates.map((value) => value.toFixed(5)).join(','),
+      destination.coordinates.map((value) => value.toFixed(5)).join(','),
     )
-
     if (
       pickup.id !== destination.id &&
-      isUnlocked(pickup.coordinates) &&
-      isUnlocked(destination.coordinates) &&
       distanceKm >= MIN_JOB_DISTANCE_KM &&
       distanceKm <= maxDistanceKm &&
       !excluded.has(signature) &&
       !uniqueRoutes.has(signature)
     ) {
-      uniqueRoutes.set(signature, {
-        pickup,
-        destination,
-        distanceKm,
-        signature,
-      })
+      uniqueRoutes.set(signature, { pickup, destination, distanceKm, signature })
     }
   }
 }

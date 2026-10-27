@@ -50,3 +50,31 @@ export const loadCompanyFromCloud = async (): Promise<CloudSave | null> => {
   if (error) throw error;
   return data as CloudSave | null;
 };
+
+/** Read-only map projection of the authoritative, revisioned company save.
+ * Run supabase/map-state-view.sql before using this optional endpoint.
+ * Never stream animation frames into Supabase: Mapbox renders them locally.
+ */
+export type CloudMapState = {
+  user_id: string;
+  revision: number;
+  saved_at: string;
+  vehicles: unknown[];
+  missions: unknown[];
+  explored_territory: unknown;
+  territory_expansions: unknown[];
+  branches: unknown[];
+  harbours: unknown[];
+  transport_routes: unknown[];
+};
+
+export const loadCloudMapState = async (): Promise<CloudMapState | null> => {
+  const user = await requireUser();
+  const { data, error } = await supabase!
+    .from("worldfront_map_state")
+    .select("user_id,revision,saved_at,vehicles,missions,explored_territory,territory_expansions,branches,harbours,transport_routes")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (error) throw error;
+  return data as CloudMapState | null;
+};

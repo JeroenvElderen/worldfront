@@ -1902,8 +1902,8 @@ function GameMapView({
       const data = featureCollection(features);
       const ownedTerritories = [
         ...stationCoordinates.map(
-          ({ station, coordinates }, index) =>
-            index === 0
+          ({ station, coordinates }) =>
+            station.id === branches[0]?.id
               ? villageTerritory(station.id, coordinates, 1)
               : realTerritories[station.id] ??
                 villageTerritory(station.id, coordinates, VILLAGE_TERRITORY_RADIUS_KM),

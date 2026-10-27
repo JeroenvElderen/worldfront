@@ -6,7 +6,7 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass.private.coffee/api/interpreter',
   'https://overpass-api.de/api/interpreter',
 ]
-const HARBOUR_SEARCH_RADIUS_METRES = 50_000
+const HARBOUR_SEARCH_RADIUS_METRES = 50_000 // Overpass discovery window, not a maximum ferry journey distance
 const MAX_LOCAL_TERMINAL_DISTANCE_KM = 5
 
 interface OsmTags {
@@ -166,7 +166,7 @@ const parseRoutes = (elements: OsmElement[], cityCoordinates: Coordinates): Ferr
     route,
   ])).values()]
     .sort((left, right) => distanceKmBetween(cityCoordinates, left.originCoordinates) - distanceKmBetween(cityCoordinates, right.originCoordinates))
-    .slice(0, 12)
+
 }
 
 /** Find passenger services whose mapped ferry line starts near a placed harbour. */
@@ -182,7 +182,7 @@ export async function discoverFerryRoutes(harbourCoordinates: Coordinates, signa
     const requestController = new AbortController()
     const cancelRequest = () => requestController.abort()
     signal?.addEventListener('abort', cancelRequest, { once: true })
-    const timeout = setTimeout(cancelRequest, curated.length ? 4_000 : 15_000)
+    const timeout = setTimeout(cancelRequest, 20_000)
     try {
       const response = await fetch(endpoint, {
         method: 'POST',

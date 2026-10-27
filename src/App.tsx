@@ -30,6 +30,9 @@ const MaintenancePopup = lazy(() => import('./components/game/MaintenancePopup')
 
 export default function App() {
   const game = useGameStore()
+  useEffect(() => {
+    if (game.activeSection === 'ferries' || game.activeSection === 'travel') game.setSection('map')
+  }, [game.activeSection, game.setSection])
   const [placingStation, setPlacingStation] = useState(false)
   const [placingTerritory, setPlacingTerritory] = useState(false)
   const [placingHotel, setPlacingHotel] = useState(false)

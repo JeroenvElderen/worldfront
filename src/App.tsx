@@ -15,7 +15,7 @@ import { getCity } from './data/cities'
 import { moneyFormatterForCity } from './services/localization'
 import { HOTEL_PURCHASE_COST } from './services/hotelEconomy'
 import { CurrencyProvider } from './components/game/CurrencyContext'
-import { discoverFerryRoutes, simulatedHarbourCircuit } from './services/maritimeRoutes'
+import { worldRoutesForHarbour, nearestWorldHarbour } from './services/worldMaritimeNetwork'
 import { POSTAL_DEPOT_BUILD_COST } from './services/postalDepots'
 
 const JOB_REFRESH_INTERVAL_MS = 60_000
@@ -91,46 +91,23 @@ export default function App() {
   const placeHarbour = game.placeHarbour
   const setSection = game.setSection
   const handlePlaceHarbour = useCallback((coordinates: Parameters<typeof placeHarbour>[0]) => {
-    // Construction is independent of external maritime data availability.
-    const previousCount = useGameStore.getState().purchasedHarbours.length
-    placeHarbour(coordinates, [])
-    if (useGameStore.getState().purchasedHarbours.length === previousCount) {
-      setHarbourError('Harbour rejected: check owned territory, available funds (€5,000), or an existing harbour at this location.')
+    const port = nearestWorldHarbour(coordinates)
+    if (!port) {
+      setHarbourError('Select an existing discovered harbour marker. Arbitrary waterfront placement is disabled.')
+      setPlacingHarbour(true)
+      return
+    }
+    const before = useGameStore.getState().purchasedHarbours.length
+    placeHarbour(port.coordinates, worldRoutesForHarbour(port))
+    if (useGameStore.getState().purchasedHarbours.length === before) {
+      setHarbourError('Unable to purchase: check territory ownership, €5,000 balance, or an already owned harbour.')
       setPlacingHarbour(true)
       return
     }
     setHarbourError(null)
     setPlacingHarbour(false)
     setSection('ferries')
-    // Never undo a successful purchase if a third-party provider is unavailable.
-    void discoverFerryRoutes(coordinates).then((routes) => {
-      useGameStore.getState().addHarbourFerryRoutes(coordinates, routes.length ? routes : [simulatedHarbourCircuit(coordinates)])
-    }).catch((error) => {
-      console.warn('[harbour] Background ferry discovery failed:', error)
-      useGameStore.getState().addHarbourFerryRoutes(coordinates, [simulatedHarbourCircuit(coordinates)])
-    })
   }, [placeHarbour, setSection])
-
-  // Existing purchased harbours also recover routes after deployment or reload.
-  useEffect(() => {
-    if (!game.hasHydrated) return
-    const harbours = useGameStore.getState().purchasedHarbours ?? []
-    let cancelled = false
-    void (async () => {
-      for (const harbour of harbours) {
-        if (cancelled) break
-        const state = useGameStore.getState()
-        if ((state.discoveredFerryRoutes ?? []).some((route) => route.harbourId === harbour.id && route.id !== `${harbour.id}:simulated-harbour-circuit`)) continue
-        try {
-          const routes = await discoverFerryRoutes(harbour.coordinates)
-          if (!cancelled) state.addHarbourFerryRoutes(harbour.coordinates, routes.length ? routes : [simulatedHarbourCircuit(harbour.coordinates)])
-        } catch {
-          if (!cancelled) state.addHarbourFerryRoutes(harbour.coordinates, [simulatedHarbourCircuit(harbour.coordinates)])
-        }
-      }
-    })()
-    return () => { cancelled = true }
-  }, [game.hasHydrated])
 
   const availableOfferCapacity = jobOfferCapacity(game.vehicles, game.drivers)
 
@@ -429,7 +406,7 @@ export default function App() {
           {game.activeSection === 'map' && !placingStation && !placingTerritory && !placingHotel && !placingHarbour && !placingPostalDepot && <>{showExpansionMenu && <aside className="expansion-menu"><b>Expand your network</b><button disabled={game.company.cash < territoryExpansionCost} onClick={() => { setPlacingTerritory(true); setShowExpansionMenu(false) }}><span>◎</span><div><strong>Unlock village territory</strong><small>Choose a village border · {territoryExpansionPrice}</small></div></button><button disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => { setPlacingStation(true); setShowExpansionMenu(false) }} title={stationBuildMessage}><span>＋</span><div><strong>Build a station</strong><small>Start a separate service area · {money.format(stationPackageCost)}</small></div></button></aside>}<button className="station-add-button" onClick={() => setShowExpansionMenu((open) => !open)} aria-label="Territory expansion options" aria-expanded={showExpansionMenu}>＋</button></>}
           {placingStation && <aside className="depot-placement-banner"><span>⌖</span><div><b>Place Station {game.branches.length + 1}</b><small>Tap the map to build a station with one taxi for {money.format(stationPackageCost)}.</small></div><button onClick={() => setPlacingStation(false)}>Cancel</button></aside>}
           {placingTerritory && <aside className="depot-placement-banner"><span>◎</span><div><b>Unlock a village territory</b><small>Tap a village on the map to purchase its organic border for {territoryExpansionPrice.toLocaleLowerCase()}. No station will be built.</small></div><button onClick={() => setPlacingTerritory(false)}>Cancel</button></aside>}
-          {placingHarbour && <aside className="depot-placement-banner"><span>⚓</span><div><b>Place harbour</b><small>Tap a harbour in owned territory. Ferry connections are discovered after construction.</small></div><button onClick={() => { setPlacingHarbour(false); setHarbourError(null) }}>Cancel</button></aside>}
+          {placingHarbour && <aside className="depot-placement-banner"><span>⚓</span><div><b>Place harbour</b><small>Select an existing harbour marker in explored territory. Its connections already exist.</small></div><button onClick={() => { setPlacingHarbour(false); setHarbourError(null) }}>Cancel</button></aside>}
           {placingHarbour && harbourError && <aside role="alert" style={{ position: 'absolute', zIndex: 30, top: 220, left: 20, right: 20, padding: 12, borderRadius: 12, color: '#fff', background: '#8b2635', fontSize: 13 }}>{harbourError}</aside>}
           {placingPostalDepot && <aside className="depot-placement-banner postal-placement-banner"><span>📮</span><div><b>Place Postal Depot {(game.postalDepots ?? []).length + 1}</b><small>Tap inside owned territory to build a dedicated 3-bay postal garage for {money.format(POSTAL_DEPOT_BUILD_COST)}.</small></div><button onClick={() => setPlacingPostalDepot(false)}>Cancel</button></aside>}
           {placingHotel && <aside className="depot-placement-banner hotel-placement-banner"><span>🏨</span><div><b>Place hotel {(game.hotels ?? []).filter((hotel) => hotel.cityId === (game.activeCityId ?? game.startingCityId)).length + 1}</b><small>Tap the exact map location to build this property for {money.format(HOTEL_PURCHASE_COST)}.</small></div><button onClick={() => setPlacingHotel(false)}>Cancel</button></aside>}

@@ -48,6 +48,7 @@ import {
 import { activeFerryServiceForCrossing } from "../services/ferryService";
 import { resolveLandsideFerryTerminals } from "../services/ferryTerminals";
 import { postalDepotCapacity } from "../services/postalDepots";
+import { recordTaxiPosition, taxiPosition, persistTaxiPositions } from "../services/liveTaxiPositions";
 
 interface GameMapProps {
   layoutKey: string;
@@ -242,7 +243,7 @@ const createRouteMotion = (
     }
     const speed = Math.min(
       topSpeedKmh,
-      speedLimitKmh(route.speedLimits[index]) ?? fallbackSpeedKmh,
+      speedLimitKmh(route.speedLimits[index]) ?? Math.min(50, fallbackSpeedKmh),
     );
     phases.push({
       duration: lengths[index] / Math.max(1, speed),
@@ -406,6 +407,10 @@ const resolveRoadRoute: typeof resolveBaseRoadRoute = (
   closedRoadPoints: [...(options.closedRoadPoints ?? []), ...activeClosurePoints],
 });
 
+// Persist animated taxi positions independently of React render frequency.
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", persistTaxiPositions);
+}
 const TAXI_SVG_IMAGE = "worldfront-taxi-svg";
 const TAXI_SVG_URL = `${import.meta.env.BASE_URL}vehicles/taxi-topview.svg`;
 const VEHICLE_MARKER_RADIUS = 4;
@@ -1617,6 +1622,7 @@ function GameMapView({
                       : "",
               }),
             );
+            recordTaxiPosition(vehicle.id, currentPosition);
             if (
               now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS ||
               time >= currentJourney.arrivesAt
@@ -2068,7 +2074,7 @@ function GameMapView({
         if (vehicle.type !== "taxi") continue;
         const sourceId = vehicleSourceId(vehicle.id);
         if (instance.getSource(sourceId)) continue;
-        const position = vehicle.position ?? city?.coordinates;
+        const position = taxiPosition(vehicle.id, Date.now() - 30 * 60_000) ?? vehicle.position ?? city?.coordinates;
         if (!position) continue;
         instance.addSource(sourceId, { type: "geojson", data: movingVehiclePoint(vehicle.id, position) });
         instance.addLayer({
@@ -2155,7 +2161,7 @@ function GameMapView({
       const sourceId = vehicleSourceId(vehicle.id);
 
       if (!instance.getSource(sourceId)) {
-        const position = vehicle.position ?? selected?.coordinates;
+        const position = taxiPosition(vehicle.id, Date.now() - 30 * 60_000) ?? vehicle.position ?? selected?.coordinates;
         if (!position) return;
 
         instance.addSource(sourceId, {

@@ -21,8 +21,7 @@
     "mapbox-gl": "^3.14.0",
     "react": "^19.2.8",
     "react-dom": "19.2.8",
-    "zustand": "^5.0.8",
-    "@supabase/supabase-js": "^2.58.0"
+    "zustand": "^5.0.8"
   },
   "devDependencies": {
     "@capacitor/android": "^7.4.3",

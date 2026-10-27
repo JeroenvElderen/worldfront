@@ -398,6 +398,18 @@ export default function App() {
       {game.company ? (
         <>
           <TopHud company={game.company} />
+          {game.activeSection === 'map' && (
+            <div role="group" aria-label="Taxi travel speed" style={{ position: 'absolute', top: 78, right: 18, zIndex: 15, display: 'flex', gap: 5, alignItems: 'center', background: 'rgba(12, 28, 31, 0.94)', border: '1px solid rgba(94,234,212,.35)', borderRadius: 12, padding: '7px 10px', color: '#e5f7f4', boxShadow: '0 5px 20px #0006' }}>
+              <span style={{ fontSize: 12, marginRight: 5 }}>Taxi speed</span>
+              {([1, 2, 4, 8] as const).map((speed) => (
+                <button key={speed} type="button" aria-pressed={(game.taxiTravelSpeed ?? 4) === speed} onClick={() => game.setTaxiTravelSpeed(speed)}
+                  title={speed === 1 ? 'Real-world taxi travel duration' : `${speed}× taxi travel speed; real-world clock remains unchanged`}
+                  style={{ border: '1px solid rgba(94,234,212,.3)', borderRadius: 7, padding: '5px 8px', cursor: 'pointer', color: (game.taxiTravelSpeed ?? 4) === speed ? '#092722' : '#e5f7f4', background: (game.taxiTravelSpeed ?? 4) === speed ? '#5eead4' : 'transparent', fontWeight: 700 }}>
+                  {speed}×
+                </button>
+              ))}
+            </div>
+          )}
 
           {game.activeSection === 'map' && !placingStation && !placingTerritory && !placingHotel && !placingHarbour && !placingPostalDepot && <><aside className="territory-guide" aria-live="polite"><b>Village borders unlocked: {game.branches.length + unlockedTerritories}</b><small>{territoryProgressMessage}</small></aside>{showExpansionMenu && <aside className="expansion-menu"><b>Expand your network</b><button disabled={game.company.cash < territoryExpansionCost} onClick={() => { setPlacingTerritory(true); setShowExpansionMenu(false) }}><span>◎</span><div><strong>Unlock village territory</strong><small>Choose a village border · {territoryExpansionPrice}</small></div></button><button disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => { setPlacingStation(true); setShowExpansionMenu(false) }} title={stationBuildMessage}><span>＋</span><div><strong>Build a station</strong><small>Start a separate service area · {money.format(stationPackageCost)}</small></div></button></aside>}<button className="station-add-button" onClick={() => setShowExpansionMenu((open) => !open)} aria-label="Territory expansion options" aria-expanded={showExpansionMenu}>＋</button></>}
           {placingStation && <aside className="depot-placement-banner"><span>⌖</span><div><b>Place Station {game.branches.length + 1}</b><small>Tap the map to build a station with one taxi for {money.format(stationPackageCost)}.</small></div><button onClick={() => setPlacingStation(false)}>Cancel</button></aside>}

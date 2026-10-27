@@ -427,11 +427,19 @@ const recordLiveDiscovery = (vehicleId: string, position: Coordinates) => {
   const previous = liveDiscoveryCheckpoints.get(vehicleId);
   if (!previous) {
     liveDiscoveryCheckpoints.set(vehicleId, { position, at: now });
+    // Reveal the first road position immediately instead of waiting for a
+    // second movement checkpoint (important for short trips).
+    try {
+      const offset: Coordinates = [position[0] + 0.00001, position[1]];
+      useGameStore.getState().discoverLiveRoute([position, offset]);
+    } catch (error) {
+      console.warn("[exploration] Initial road discovery failed", error);
+    }
     return;
   }
-  if (now - previous.at < 1_500) return;
+  if (now - previous.at < 750) return;
   const distance = distanceKmBetween(previous.position, position);
-  if (distance < 0.015) return;
+  if (distance < 0.003) return;
   // Avoid connecting teleportation, city switching, or stale positions with
   // a fictional discovered road across the map.
   if (distance > 10) {

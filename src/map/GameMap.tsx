@@ -245,10 +245,14 @@ const createRouteMotion = (
       index = crossing.endIndex;
       continue;
     }
-    const speed = Math.min(
+    // Use the posted road limit when routing provides one; otherwise drive
+    // at a conservative 30 km/h. Never exceed the vehicle's maximum speed.
+    // The 30 km/h baseline is not a minimum: slower posted limits win.
+    const postedLimit = speedLimitKmh(route.speedLimits[index]);
+    const speed = Math.max(1, Math.min(
       topSpeedKmh,
-      speedLimitKmh(route.speedLimits[index]) ?? Math.min(50, fallbackSpeedKmh),
-    );
+      postedLimit !== null ? postedLimit : 30,
+    ));
     phases.push({
       duration: lengths[index] / Math.max(1, speed),
       fromDistance: cumulativeLengths[index],

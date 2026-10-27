@@ -4,9 +4,10 @@ import type { Coordinates, TerritoryFeature, TerritoryGeometry } from '../models
 
 const EARTH_KM_PER_LATITUDE_DEGREE = 110.574
 export const VILLAGE_TERRITORY_RADIUS_KM = 6
-// Keep route discovery local without creating the excessive checkpoint and
-// save-data volume that a street-scale 100 m radius would require.
-export const TAXI_DISCOVERY_RADIUS_KM = 1
+// Reveal only a narrow corridor beside roads actually travelled.
+// This radius applies to live taxi exploration and completed-trip backfill;
+// manually purchased village territory retains its separate 6 km radius.
+export const TAXI_DISCOVERY_RADIUS_KM = 0.15
 
 export interface VillageTerritoryCenter { id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; source?: 'village' | 'taxi-discovery' | 'ferry-discovery'; radiusKm?: number }
 export type { TerritoryFeature } from '../models/game'

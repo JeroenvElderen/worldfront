@@ -6,8 +6,8 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass.private.coffee/api/interpreter',
   'https://overpass-api.de/api/interpreter',
 ]
-const HARBOUR_SEARCH_RADIUS_METRES = 50_000
-const MAX_LOCAL_TERMINAL_DISTANCE_KM = 5
+const HARBOUR_SEARCH_RADIUS_METRES = 50_000 // Only for discovering OSM route objects, not route lengths
+const PORT_IDENTITY_TOLERANCE_KM = 3
 
 interface OsmTags {
   name?: string
@@ -68,7 +68,7 @@ const nearestTerminalName = (coordinate: Coordinates, terminals: OsmElement[]) =
 const nearbyCuratedRoutes = (cityCoordinates: Coordinates): FerryRouteOption[] => curatedFerryRoutes.flatMap((route) => {
   const startDistance = distanceKmBetween(cityCoordinates, route.coordinates[0])
   const endDistance = distanceKmBetween(cityCoordinates, route.coordinates.at(-1)!)
-  if (Math.min(startDistance, endDistance) > MAX_LOCAL_TERMINAL_DISTANCE_KM) return []
+  if (Math.min(startDistance, endDistance) > PORT_IDENTITY_TOLERANCE_KM) return []
   const reversed = endDistance < startDistance
   const routeCoordinates = reversed ? [...route.coordinates].reverse() : route.coordinates
   return [{
@@ -133,7 +133,7 @@ const parseRoutes = (elements: OsmElement[], cityCoordinates: Coordinates): Ferr
     if (reversed) coordinates = [...coordinates].reverse()
     const localDistance = Math.min(startDistance, endDistance)
     const distanceKm = routeDistanceKm(coordinates)
-    if (localDistance > MAX_LOCAL_TERMINAL_DISTANCE_KM || distanceKm < .5) return []
+    if (localDistance > PORT_IDENTITY_TOLERANCE_KM || distanceKm < .5) return []
 
     const originTerminal = nearestTerminalName(coordinates[0], terminals)
     const destinationTerminal = nearestTerminalName(coordinates.at(-1)!, terminals)
@@ -166,7 +166,7 @@ const parseRoutes = (elements: OsmElement[], cityCoordinates: Coordinates): Ferr
     route,
   ])).values()]
     .sort((left, right) => distanceKmBetween(cityCoordinates, left.originCoordinates) - distanceKmBetween(cityCoordinates, right.originCoordinates))
-    .slice(0, 12)
+
 }
 
 /** Find passenger services whose mapped ferry line starts near a placed harbour. */

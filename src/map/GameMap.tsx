@@ -48,7 +48,8 @@ import {
 import { activeFerryServiceForCrossing } from "../services/ferryService";
 import { resolveLandsideFerryTerminals } from "../services/ferryTerminals";
 import { postalDepotCapacity } from "../services/postalDepots";
-import { resolveClosedRoadSegment, type ClosedRoadSegment } from "../services/closedRoadSegments";
+import { resolveClosedRoadSegment, routeIntersectsClosedSegment, type ClosedRoadSegment } from "../services/closedRoadSegments";
+import { useGameStore } from "../stores/gameStore";
 import { recordTaxiPosition, taxiPosition, persistTaxiPositions } from "../services/liveTaxiPositions";
 
 interface GameMapProps {
@@ -1491,6 +1492,9 @@ function GameMapView({
           let lastPickingUp: boolean | null = null;
           let lastFerryState: "waiting" | "aboard" | null | undefined;
           let localFerryDelayMs = 0;
+          let rerouteStartedAt = job.rerouteStartedAt ? new Date(job.rerouteStartedAt).getTime() : 0;
+          let reroutePending = false;
+          let lastRerouteCheck = 0;
 
           let frozenFerryMotionTime: number | null = null;
           const scheduleAnimation = () => {
@@ -1552,8 +1556,8 @@ function GameMapView({
                   0,
                   Math.min(
                     1,
-                    (time - currentJourney.pickupAt) /
-                      (currentJourney.arrivesAt - currentJourney.pickupAt),
+                    (time - Math.max(currentJourney.pickupAt, rerouteStartedAt)) /
+                      Math.max(1, currentJourney.arrivesAt - Math.max(currentJourney.pickupAt, rerouteStartedAt)),
                   ),
                 );
             const activeRoute = pickingUp ? pickupRoute : passengerRoute;
@@ -1653,6 +1657,35 @@ function GameMapView({
               }),
             );
             recordTaxiPosition(vehicle.id, currentPosition);
+            // Check active OSM closure edges while driving. Persist the new route
+            // and its clock anchor so a page refresh resumes the same detour.
+            if (!pickingUp && !ferryState && !reroutePending &&
+                now - lastRerouteCheck > 10_000 && time < currentJourney.arrivesAt) {
+              lastRerouteCheck = now;
+              const remaining = remainingRoute(passengerRoute.coordinates, progress) as Coordinates[];
+              const blocked = activeClosedRoadSegments.some((segment) =>
+                routeIntersectsClosedSegment(remaining, segment));
+              if (blocked) {
+                reroutePending = true;
+                const rerouteFrom = currentPosition;
+                void resolveRoadRoute(rerouteFrom, jobDestination(job), abortController.signal)
+                  .then((detour) => {
+                    if (!detour || abortController.signal.aborted || map.current !== instance) return;
+                    const started = new Date().toISOString();
+                    rerouteStartedAt = new Date(started).getTime();
+                    passengerRoute = detour;
+                    passengerMotion = createRouteMotion(detour, fallbackSpeedKmh, vehicle.topSpeedKmh ?? 130);
+                    onSaveJobRoute(job.id, detour.coordinates, detour.ferryCrossings);
+                    useGameStore.setState((state) => ({
+                      jobs: state.jobs.map((entry) => entry.id === job.id
+                        ? { ...entry, rerouteStartedAt: started } : entry),
+                    }));
+                  })
+                  .catch((error) => console.warn("Unable to reroute taxi around closure:", error))
+                  .finally(() => { reroutePending = false; });
+              }
+            }
+
             if (
               now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS ||
               time >= currentJourney.arrivesAt

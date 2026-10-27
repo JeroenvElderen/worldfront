@@ -405,6 +405,7 @@ const movingVehiclePoint = (id: string, position: Coordinates, properties: Recor
 let activeClosurePoints: Coordinates[] = [];
 let activeClosedRoadSegments: ClosedRoadSegment[] = [];
 const closureGeometryCache = new Map<string, ClosedRoadSegment>();
+const closureFallbackGeometryCache = new Map<string, GeoJSON.LineString>();
 const resolveRoadRoute: typeof resolveBaseRoadRoute = (
   from, to, signal, profiles, options = {},
 ) => resolveBaseRoadRoute(from, to, signal, profiles, {
@@ -738,7 +739,7 @@ function GameMapView({
       .flatMap((incident) => {
         const coordinates =
           incident.coordinates ??
-          vehicles.find((vehicle) => vehicle.id === incident.vehicleId)
+          useGameStore.getState().vehicles.find((vehicle) => vehicle.id === incident.vehicleId)
             ?.position;
         return coordinates ? [{ ...incident, coordinates }] : [];
       });
@@ -780,6 +781,15 @@ function GameMapView({
           });
           continue;
         }
+        const cachedFallback = closureFallbackGeometryCache.get(incident.id);
+        if (cachedFallback) {
+          features.push({
+            type: "Feature",
+            properties: { title: incident.title, incidentId: incident.id },
+            geometry: cachedFallback,
+          });
+          continue;
+        }
         const point = instance.project(incident.coordinates);
         const nearby = instance.queryRenderedFeatures(
           [[point.x - 14, point.y - 14], [point.x + 14, point.y + 14]],
@@ -798,11 +808,14 @@ function GameMapView({
             if (distance < nearest) { nearest = distance; best = line; }
           }
         }
-        if (best && nearest <= 24) features.push({
+        if (best && nearest <= 24) {
+          closureFallbackGeometryCache.set(incident.id, best);
+          features.push({
           type: "Feature",
           properties: { title: incident.title, incidentId: incident.id },
           geometry: best,
         });
+        }
       }
       const data: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
         type: "FeatureCollection", features,
@@ -817,7 +830,6 @@ function GameMapView({
       });
     };
     instance.on("style.load", updateClosureRoads);
-    instance.on("moveend", updateClosureRoads);
     instance.once("idle", updateClosureRoads);
     updateClosureRoads();
     incidentMarkers.current = [
@@ -846,14 +858,13 @@ function GameMapView({
     return () => {
       closureLookupDisposed = true;
       instance.off("style.load", updateClosureRoads);
-      instance.off("moveend", updateClosureRoads);
       instance.off("idle", updateClosureRoads);
       if (instance.getLayer(closureLayerId)) instance.removeLayer(closureLayerId);
       if (instance.getSource(closureSourceId)) instance.removeSource(closureSourceId);
       incidentMarkers.current.forEach((marker) => marker.remove());
       incidentMarkers.current = [];
     };
-  }, [cityId, mapRevision, trafficIncidents, vehicleIncidents, vehicles]);
+  }, [cityId, mapRevision, trafficIncidents, vehicleIncidents]);
   // Mapbox reads the container dimensions during construction. In Android
   // WebViews the first passive effect can run before the viewport has completed
   // its initial layout, so wait for a genuinely drawable box.

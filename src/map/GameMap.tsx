@@ -192,10 +192,20 @@ const speedLimitKmh = (limit: RouteSpeedLimit | undefined) => {
   );
 };
 
+const congestionForJob = (id: string, longitude: number) => {
+  const hour = ((Date.now() / 3600000 + longitude / 15) % 24 + 24) % 24;
+  const peak = (hour >= 7 && hour < 9.5) || (hour >= 16.5 && hour < 19);
+  const shoulder = (hour >= 6 && hour < 11) || (hour >= 15 && hour < 21);
+  const seed = [...id].reduce((n, c) => n + c.charCodeAt(0), 0) % 4;
+  const level = Math.min(3, (peak ? 2 : shoulder ? 1 : 0) + (seed === 0 ? 1 : 0));
+  return { level, factor: [1, 0.75, 0.5, 0.25][level] };
+};
+
 const createRouteMotion = (
   route: RouteDetails,
   _fallbackSpeedKmh: number,
   topSpeedKmh: number,
+  congestionFactor = 1,
 ) => {
   const lengths = routeLengths(route.coordinates);
   const totalLength = lengths.reduce((sum, length) => sum + length, 0);
@@ -254,7 +264,7 @@ const createRouteMotion = (
       postedLimit !== null ? postedLimit : 30,
     ));
     phases.push({
-      duration: lengths[index] / Math.max(1, speed),
+      duration: lengths[index] / Math.max(1, speed * congestionFactor),
       fromDistance: cumulativeLengths[index],
       toDistance: cumulativeLengths[index + 1],
       ferryState: null,
@@ -750,11 +760,7 @@ function GameMapView({
   // Keep it consistent when a route layer is recreated during a journey.
   const trafficColorForJob = (jobId: string): string => {
     const longitude = map.current?.getCenter().lng ?? 0;
-    const hour = ((Date.now() / 3_600_000 + longitude / 15) % 24 + 24) % 24;
-    const peak = (hour >= 7 && hour < 9.5) || (hour >= 16.5 && hour < 19);
-    const shoulder = (hour >= 6 && hour < 11) || (hour >= 15 && hour < 21);
-    const seed = [...jobId].reduce((n, c) => n + c.charCodeAt(0), 0) % 4;
-    const severity = (peak ? 2 : shoulder ? 1 : 0) + (seed === 0 ? 1 : 0);
+    const severity = congestionForJob(jobId, longitude).level;
     return severity >= 3 ? "#ef4444" : severity === 2 ? "#f97316" : severity === 1 ? "#eab308" : "#22c55e";
   };
   useEffect(() => {
@@ -1149,6 +1155,7 @@ function GameMapView({
               roadRoute,
               40,
               vehicle.topSpeedKmh ?? 130,
+            congestionForJob(job.id, jobPickup(job)[0]).factor,
             );
             if (token) {
               void resolveRoadRouteThrough(
@@ -1162,6 +1169,7 @@ function GameMapView({
                     roadRoute,
                     40,
                     vehicle.topSpeedKmh ?? 130,
+            congestionForJob(job.id, jobPickup(job)[0]).factor,
                   );
                   routeReady = true;
                 })
@@ -1418,11 +1426,13 @@ function GameMapView({
             pickupRoute,
             fallbackSpeedKmh,
             vehicle.topSpeedKmh ?? 130,
+            congestionForJob(job.id, jobPickup(job)[0]).factor,
           );
           let passengerMotion = createRouteMotion(
             passengerRoute,
             fallbackSpeedKmh,
             vehicle.topSpeedKmh ?? 130,
+            congestionForJob(job.id, jobPickup(job)[0]).factor,
           );
           if (job && token) {
             const fetchRoute = async (from: Coordinates, to: Coordinates) => {
@@ -1449,6 +1459,7 @@ function GameMapView({
                   pickupRoute,
                   fallbackSpeedKmh,
                   vehicle.topSpeedKmh ?? 130,
+            congestionForJob(job.id, jobPickup(job)[0]).factor,
                 );
                 if (
                   !job.pickupRouteCoordinates ||
@@ -1495,6 +1506,7 @@ function GameMapView({
                     passengerRoute,
                     fallbackSpeedKmh,
                     vehicle.topSpeedKmh ?? 130,
+            congestionForJob(job.id, jobPickup(job)[0]).factor,
                   );
                   (
                     instance.getSource(jobRouteSourceId(job.id)) as
@@ -2564,11 +2576,13 @@ function GameMapView({
         pickupRoute,
         fallbackSpeedKmh,
         vehicle.topSpeedKmh ?? 130,
+            congestionForJob(job.id, jobPickup(job)[0]).factor,
       );
       let passengerMotion = createRouteMotion(
         passengerRoute,
         fallbackSpeedKmh,
         vehicle.topSpeedKmh ?? 130,
+            congestionForJob(job.id, jobPickup(job)[0]).factor,
       );
       let lastRouteUpdateAt = 0;
       let lastPickingUp: boolean | null = null;
@@ -2591,6 +2605,7 @@ function GameMapView({
             pickupRoute,
             fallbackSpeedKmh,
             vehicle.topSpeedKmh ?? 130,
+            congestionForJob(job.id, jobPickup(job)[0]).factor,
           );
           if (
             !job.pickupRouteCoordinates ||
@@ -2648,6 +2663,7 @@ function GameMapView({
                 passengerRoute,
                 fallbackSpeedKmh,
                 vehicle.topSpeedKmh ?? 130,
+            congestionForJob(job.id, jobPickup(job)[0]).factor,
               );
               (
                 instance.getSource(routeSourceId) as
@@ -3047,6 +3063,7 @@ function GameMapView({
           roadRoute,
           45,
           vehicle.topSpeedKmh ?? 130,
+            congestionForJob(job.id, jobPickup(job)[0]).factor,
         );
         ensureFerryWaitLabel(instance, vehicleId);
 
@@ -3063,6 +3080,7 @@ function GameMapView({
                 roadRoute,
                 45,
                 vehicle.topSpeedKmh ?? 130,
+            congestionForJob(job.id, jobPickup(job)[0]).factor,
               );
               routeReady = true;
             })

@@ -2624,7 +2624,8 @@ function GameMapView({
         const time = frozenFerryMotionTime ?? liveMotionTime;
 
         if (!pickupRouteReady) {
-          (instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(
+          recordLiveDiscovery(vehicle.id, currentPosition);
+        (instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(
             point(start),
           );
           (

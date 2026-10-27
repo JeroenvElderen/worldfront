@@ -1421,7 +1421,7 @@ function GameMapView({
             coordinates:
               job?.routeCoordinates ??
               (job ? [jobPickup(job), jobDestination(job)] : [start]),
-            speedLimits: [],
+            speedLimits: job?.routeSpeedLimits ?? [],
             ferryCrossings: job?.ferryCrossings ?? [],
           };
           const fallbackSpeedKmh =
@@ -2568,7 +2568,7 @@ function GameMapView({
           jobPickup(job),
           jobDestination(job),
         ],
-        speedLimits: [],
+        speedLimits: job.routeSpeedLimits ?? [],
         ferryCrossings: resolveLandsideFerryTerminals(
           job.routeCoordinates ?? [jobPickup(job), jobDestination(job)],
           job.ferryCrossings ?? [],

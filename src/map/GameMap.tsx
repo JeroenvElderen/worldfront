@@ -378,6 +378,24 @@ const mapVehicleColor = (vehicle: Vehicle, standardColor: string) =>
     ? EXCLUSIVE_VEHICLE_COLOR
     : standardColor;
 
+// Screen-independent heading derived from the direction of travel.
+const vehicleHeadingState = new Map<string, { position: Coordinates; heading: number }>();
+const movingVehiclePoint = (id: string, position: Coordinates, properties: Record<string, unknown> = {}) => {
+  const previous = vehicleHeadingState.get(id);
+  let heading = previous?.heading ?? 0;
+  if (previous) {
+    const dx = (position[0] - previous.position[0]) * Math.cos(position[1] * Math.PI / 180);
+    const dy = position[1] - previous.position[1];
+    if (Math.hypot(dx, dy) > 0.0000001) {
+      const target = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
+      const delta = ((target - heading + 540) % 360) - 180;
+      heading = (heading + delta * 0.35 + 360) % 360;
+    }
+  }
+  vehicleHeadingState.set(id, { position, heading });
+  return point(position, { ...properties, heading });
+};
+
 const TAXI_SVG_IMAGE = "worldfront-taxi-svg";
 const TAXI_SVG_URL = `${import.meta.env.BASE_URL}vehicles/taxi-topview.svg`;
 const VEHICLE_MARKER_RADIUS = 4;
@@ -1033,7 +1051,7 @@ function GameMapView({
                   | mapboxgl.GeoJSONSource
                   | undefined
               )?.setData(
-                point(currentPosition, {
+                movingVehiclePoint(sourceId, currentPosition, {
                   ferryStatus:
                     ferryState === "waiting"
                       ? "Waiting for ferry"
@@ -1162,7 +1180,7 @@ function GameMapView({
                   | mapboxgl.GeoJSONSource
                   | undefined
               )?.setData(
-                point(currentPosition, {
+                movingVehiclePoint(sourceId, currentPosition, {
                   ferryStatus:
                     ferryState === "waiting"
                       ? "Waiting for ferry"
@@ -1522,7 +1540,7 @@ function GameMapView({
             (
               instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined
             )?.setData(
-              point(currentPosition, {
+              movingVehiclePoint(sourceId, currentPosition, {
                 ferryStatus:
                   ferryState === "waiting"
                     ? "Waiting for ferry"
@@ -2457,7 +2475,7 @@ function GameMapView({
           }
         }
         (instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(
-          point(currentPosition, {
+          movingVehiclePoint(taxiSourceId, currentPosition, {
             ferryStatus:
               ferryState === "waiting"
                 ? "Waiting for ferry"
@@ -2651,7 +2669,7 @@ function GameMapView({
           currentPosition = ferryPosition.position;
           ferryState = ferryPosition.state;
         }
-        (instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined)?.setData(point(currentPosition, { ferryStatus: ferryState === "waiting" ? "Waiting for ferry" : ferryState === "aboard" ? "On ferry" : "" }));
+        (instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined)?.setData(movingVehiclePoint(vehicleId, currentPosition, { ferryStatus: ferryState === "waiting" ? "Waiting for ferry" : ferryState === "aboard" ? "On ferry" : "" }));
         if (ferryState !== lastFerryState && instance.getLayer(vehicleId)) {
           instance.setPaintProperty(vehicleId, "circle-color", ferryState === "waiting" ? vehicleColor.waitingForFerry : ferryState === "aboard" ? vehicleColor.onFerry : vehicleColor.postal);
           lastFerryState = ferryState;
@@ -2773,7 +2791,7 @@ function GameMapView({
           (
             instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined
           )?.setData(
-            point(currentPosition, {
+            movingVehiclePoint(vehicleId, currentPosition, {
               ferryStatus:
                 ferryState === "waiting"
                   ? "Waiting for ferry"

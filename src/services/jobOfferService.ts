@@ -178,7 +178,6 @@ export async function generateJobOffers(
   exploredTerritory: TerritoryFeature | null = null,
   transportRoutes: TransportRoute[] = [],
   transportAssets: TransportAsset[] = [],
-  administrativeTerritories: TerritoryFeature[] = [],
 ): Promise<{ jobs: TaxiJob[]; passengers: Passenger[]; signatures: string[] }> {
   const excluded = new Set(excludedRoutes)
   // Use the exact OSM/fallback polygons rendered by GameMap. Previously this
@@ -187,7 +186,6 @@ export async function generateJobOffers(
   const villageTerritories = await resolveVillageTerritories(territoryCenters)
   const unlockedTerritory = mergeVillageTerritories([
     ...villageTerritories,
-    ...administrativeTerritories,
     ...(exploredTerritory ? [exploredTerritory] : []),
   ])
   const ownedTerritories = unlockedTerritory ? [unlockedTerritory] : []

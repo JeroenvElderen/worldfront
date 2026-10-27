@@ -49,7 +49,7 @@ export type PassengerStoryKind = 'missed-flight' | 'medical-appointment' | 'vip'
 export interface PassengerStory { kind: PassengerStoryKind; headline: string; description: string; priority: 'routine' | 'urgent' | 'critical'; fareMultiplier: number; reputationBonus: number }
 export type DepotFacility = 'parking' | 'workshop' | 'energy' | 'lounge'
 export interface DepotFacilities { parking: number; workshop: number; energy: number; lounge: number }
-export interface TerritoryExpansion { id: string; coordinates: Coordinates; regionId?: string; regionName?: string; regionGeometry?: TerritoryFeature['geometry']; routeCoordinates?: Coordinates[]; purchasedAt: string; source?: 'purchase' | 'taxi-discovery' | 'ferry-discovery'; radiusKm?: number }
+export interface TerritoryExpansion { id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; purchasedAt: string; source?: 'purchase' | 'taxi-discovery' | 'ferry-discovery'; radiusKm?: number }
 export interface Branch { id: string; cityId: string; name: string; openedAt: string; coordinates?: Coordinates; managerName?: string; isHeadquarters?: boolean; depot?: DepotFacilities }
 export interface Hotel { id: string; cityId: string; name: string; coordinates?: Coordinates; level: number; rooms: number; purchasedAt: string; lastCollectedAt: string; lifetimeRevenue: number }
 export interface CityEconomy { cityId: string; population: number; tourism: number; business: number; prosperity: number; costIndex: number; trend: number }

@@ -40,7 +40,7 @@ export default function App() {
   const [placingHarbour, setPlacingHarbour] = useState(false)
   const [placingPostalDepot, setPlacingPostalDepot] = useState(false)
   const [showExpansionMenu, setShowExpansionMenu] = useState(false)
-  const purchasedTerritories = (game.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery' && area.source !== 'ferry-discovery').length
+  const purchasedTerritories = (game.territoryExpansions ?? []).filter((area) => Boolean(area.regionId)).length
   const territoryExpansionCost = purchasedTerritories === 0 ? 0 : ADMIN_REGION_PRICE
   const stationPackageCost = Math.round(15_000 * (game.specialization === 'mobility' ? .9 : 1) * (hasResearch(game.completedResearch ?? [], 'prefab-depots') ? .8 : 1)) + getTaxiModel('toyota-corolla').price
   const researchFleetSlots = (hasResearch(game.completedResearch ?? [], 'autonomous-operations') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'global-network') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'regional-hubs') ? game.branches.length : 0)
@@ -62,7 +62,7 @@ export default function App() {
     buildStation(coordinates)
     setPlacingStation(false)
   }, [buildStation])
-  const handleExpandTerritory = useCallback(async (coordinates: Parameters<typeof expandTerritory>[0]) => {
+  const handleExpandTerritory = useCallback(async (coordinates: Parameters<typeof game.expandTerritory>[0]) => {
     if (regionPurchasePending) return
     setRegionPurchasePending(true)
     try {
@@ -424,7 +424,7 @@ export default function App() {
           <TopHud company={game.company} />
           {game.activeSection === 'map' && !placingStation && !placingTerritory && !placingHotel && !placingHarbour && !placingPostalDepot && <>{showExpansionMenu && <aside className="expansion-menu"><b>Expand your network</b><button disabled={game.company.cash < territoryExpansionCost} onClick={() => { setPlacingTerritory(true); setShowExpansionMenu(false) }}><span>◎</span><div><strong>Claim administrative region</strong><small>Real regional borders · {territoryExpansionPrice}</small></div></button><button disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => { setPlacingStation(true); setShowExpansionMenu(false) }} title={stationBuildMessage}><span>＋</span><div><strong>Build a station</strong><small>Start a separate service area · {money.format(stationPackageCost)}</small></div></button></aside>}<button className="station-add-button" onClick={() => setShowExpansionMenu((open) => !open)} aria-label="Territory expansion options" aria-expanded={showExpansionMenu}>＋</button></>}
           {placingStation && <aside className="depot-placement-banner"><span>⌖</span><div><b>Place Station {game.branches.length + 1}</b><small>Tap the map to build a station with one taxi for {money.format(stationPackageCost)}.</small></div><button onClick={() => setPlacingStation(false)}>Cancel</button></aside>}
-          {placingTerritory && <aside className="depot-placement-banner"><span>◎</span><div><b>Unlock a village territory</b><small>Tap a village on the map to purchase its organic border for {territoryExpansionPrice.toLocaleLowerCase()}. No station will be built.</small></div><button onClick={() => setPlacingTerritory(false)}>Cancel</button></aside>}
+          {placingTerritory && <aside className="depot-placement-banner"><span>◎</span><div><b>Claim administrative region</b><small>Tap a location to select its real administrative border for {territoryExpansionPrice.toLocaleLowerCase()}. Exploration stays unchanged.</small></div><button onClick={() => setPlacingTerritory(false)}>Cancel</button></aside>}
           {placingHarbour && <aside className="depot-placement-banner"><span>⚓</span><div><b>Place harbour</b><small>Tap inside owned territory. Routes starting within 5 km of this point will be discovered.</small></div><button onClick={() => setPlacingHarbour(false)}>Cancel</button></aside>}
           {placingPostalDepot && <aside className="depot-placement-banner postal-placement-banner"><span>📮</span><div><b>Place Postal Depot {(game.postalDepots ?? []).length + 1}</b><small>Tap inside owned territory to build a dedicated 3-bay postal garage for {money.format(POSTAL_DEPOT_BUILD_COST)}.</small></div><button onClick={() => setPlacingPostalDepot(false)}>Cancel</button></aside>}
           {placingHotel && <aside className="depot-placement-banner hotel-placement-banner"><span>🏨</span><div><b>Place hotel {(game.hotels ?? []).filter((hotel) => hotel.cityId === (game.activeCityId ?? game.startingCityId)).length + 1}</b><small>Tap the exact map location to build this property for {money.format(HOTEL_PURCHASE_COST)}.</small></div><button onClick={() => setPlacingHotel(false)}>Cancel</button></aside>}

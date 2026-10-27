@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { BottomNav } from './components/game/BottomNav'
 import { CloudSavePanel } from './components/game/CloudSavePanel'
+
 import { OperationsControlCentre } from './components/game/OperationsControlCentre'
 import { TopHud } from './components/game/TopHud'
 import { useGameStore } from './stores/gameStore'
@@ -342,12 +343,15 @@ export default function App() {
     }
   }, [company, game.hasHydrated, tickJobs])
 
+  const [cloudPanelOpen, setCloudPanelOpen] = useState(false)
+
   /** Let a hired branch manager dispatch qualifying calls for larger fleets. */
   useEffect(() => {
     if (!automation?.enabled || !company || !hasHydrated) return
     runAutomation()
   }, [company, automation, hasHydrated, jobs, runAutomation])
 
+  // Cloud saves are opened from the bottom navigation More menu.
   if (!game.hasHydrated) {
     return (
       <div className="loading">
@@ -614,6 +618,7 @@ export default function App() {
             active={game.activeSection}
             onChange={game.setSection}
             availableJobCount={offeredJobCount}
+            onCloudClick={() => setCloudPanelOpen(true)}
           />
         </>
       ) : (
@@ -622,7 +627,7 @@ export default function App() {
         /></Suspense>
       )}
     </div>
-      {game.hasHydrated && <CloudSavePanel />}
+      {game.hasHydrated && <CloudSavePanel open={cloudPanelOpen} onClose={() => setCloudPanelOpen(false)} />}
     </CurrencyProvider>
   )
 }

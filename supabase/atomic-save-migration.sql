@@ -10,13 +10,13 @@ declare next_revision bigint;
 begin
   if auth.uid() is null then raise exception 'Sign in required' using errcode = '28000'; end if;
   if expected_revision = 0 then
-    insert into public.worldfront_saves(user_id, save_data, revision, saved_at)
-    values(auth.uid(), payload, 1, clock_timestamp())
+    insert into public.worldfront_saves(user_id, payload, revision, updated_at, saved_at)
+    values(auth.uid(), payload::text, 1, clock_timestamp(), clock_timestamp())
     on conflict (user_id) do nothing
     returning revision into next_revision;
   else
     update public.worldfront_saves
-    set save_data = payload, revision = revision + 1, saved_at = clock_timestamp()
+    set payload = worldfront_save_if_current.payload::text, revision = revision + 1, updated_at = clock_timestamp(), saved_at = clock_timestamp()
     where user_id = auth.uid() and revision = expected_revision
     returning revision into next_revision;
   end if;

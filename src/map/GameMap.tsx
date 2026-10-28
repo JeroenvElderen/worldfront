@@ -444,9 +444,10 @@ const refreshFleetClusters = (instance: mapboxgl.Map) => {
       if (typeof clusterId !== "number" || !clusterSource) return;
       if (!feature?.geometry || feature.geometry.type !== "Point") return;
       const center = feature.geometry.coordinates as [number, number];
-      void clusterSource.getClusterExpansionZoom(clusterId).then((zoom) => {
+      clusterSource.getClusterExpansionZoom(clusterId, (error, zoom) => {
+        if (error || zoom == null) return;
         instance.easeTo({ center, zoom });
-      }).catch(() => undefined);
+      });
     });
   }
   (instance.getSource(sourceId) as mapboxgl.GeoJSONSource).setData(

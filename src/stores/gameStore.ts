@@ -159,32 +159,47 @@ const finishRecordedJourney = (
   job: GameSave['jobs'][number],
   completedAt: string,
 ): { explored: GameSave['exploredTerritory']; history: VehicleJourney[] } => {
-  // The completed navigation route is authoritative; animation samples may be
-  // sparse or missing when the browser was suspended.
+  // Resolve each navigation leg independently: joining the pickup and
+  // passenger routes can create a false connector when one leg is missing.
+  // Directions geometry is authoritative even when its vertices are sparse.
   const pickup = job.pickupRouteCoordinates ?? []
   const passenger = job.routeCoordinates ?? []
-  const navigation = [...pickup, ...passenger]
-  const points = navigation.length >= 2 ? navigation : (job.recordedRoute ?? [])
-  if (!job.assignedVehicleId || points.length < 2 || history.some((trip) => trip.jobId === job.id)) {
+  const recorded = job.recordedRoute ?? []
+  const hasNavigation = pickup.length >= 2 || passenger.length >= 2
+  const legs = hasNavigation
+    ? [
+        { points: pickup, ferries: job.pickupFerryCrossings ?? [] },
+        { points: passenger, ferries: job.ferryCrossings ?? [] },
+      ]
+    : [{ points: recorded, ferries: [] }]
+  const points = hasNavigation ? [...pickup, ...passenger] : recorded
+  if (!job.assignedVehicleId || history.some((trip) => trip.jobId === job.id)) {
     return { explored, history }
   }
-  // Reject discontinuities instead of revealing a straight-line shortcut.
   const segments: Coordinates[][] = []
-  let segment: Coordinates[] = [points[0]]
-  const ferryEdges = new Set<number>()
-  for (const crossing of job.pickupFerryCrossings ?? [])
-    for (let i = crossing.startIndex; i < crossing.endIndex; i++) ferryEdges.add(i)
-  for (const crossing of job.ferryCrossings ?? [])
-    for (let i = crossing.startIndex; i < crossing.endIndex; i++) ferryEdges.add(pickup.length + i)
-  for (let i = 1; i < points.length; i++) {
-    if (ferryEdges.has(i - 1) || distanceKmBetween(points[i - 1], points[i]) > 1.5) {
-      if (segment.length > 1) segments.push(segment)
-      segment = [points[i]]
-    } else {
-      segment.push(points[i])
+  for (const leg of legs) {
+    if (leg.points.length < 2) continue
+    const ferryEdges = new Set<number>()
+    for (const crossing of leg.ferries) {
+      for (let i = crossing.startIndex; i < crossing.endIndex; i++) ferryEdges.add(i)
     }
+    let segment: Coordinates[] = [leg.points[0]]
+    for (let i = 1; i < leg.points.length; i++) {
+      const previous = leg.points[i - 1]
+      const current = leg.points[i]
+      // Only animation samples need a gap threshold. Real Directions route
+      // vertices may legitimately be farther apart on straight roads.
+      const discontinuity = ferryEdges.has(i - 1) ||
+        (!hasNavigation && distanceKmBetween(previous, current) > 1.5)
+      if (discontinuity) {
+        if (segment.length > 1) segments.push(segment)
+        segment = [current]
+      } else {
+        segment.push(current)
+      }
+    }
+    if (segment.length > 1) segments.push(segment)
   }
-  if (segment.length > 1) segments.push(segment)
   if (!segments.length) return { explored, history }
   const nextExplored = extendExploredTerritorySegments(explored, segments, job.id)
   const distanceKm = segments.reduce((total, route) => total + route.slice(1).reduce(

@@ -1,4 +1,4 @@
-import { fetchAdministrativeBoundaries, toGeoBoundariesCountryCode, type AdministrativeBoundaries } from './services/administrativeBoundaries'
+import { fetchAdministrativeBoundaries, regionAtCoordinates, toGeoBoundariesCountryCode, type AdministrativeBoundaries } from './services/administrativeBoundaries'
 import { AdministrativeRegions } from './components/AdministrativeRegions'
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
@@ -59,7 +59,15 @@ export default function App() {
       return
     }
     void fetchAdministrativeBoundaries(adminCountryCode, adminCountryName)
-      .then((data) => { if (!cancelled) setAdministrativeBoundaries(data) })
+      .then((data) => {
+        if (cancelled) return
+        setAdministrativeBoundaries(data)
+        const startingCity = getCity(useGameStore.getState().startingCityId, useGameStore.getState().customCities ?? [])
+        if (startingCity) {
+          const startingRegion = regionAtCoordinates(data, startingCity.coordinates)
+          if (startingRegion) useGameStore.getState().registerStartingAdministrativeRegion(startingRegion.properties.gameRegionId)
+        }
+      })
       .catch((error: unknown) => {
         if (!cancelled) {
           setAdministrativeBoundaries(null)

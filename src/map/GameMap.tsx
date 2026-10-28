@@ -399,6 +399,67 @@ const mapVehicleColor = (vehicle: Vehicle, standardColor: string) =>
 
 // Screen-independent heading derived from the direction of travel.
 const vehicleHeadingState = new Map<string, { position: Coordinates; heading: number }>();
+// Shared, clustered fleet overlay at regional zoom levels. Individual markers
+// remain available at city/street zoom; simulation and mission logic are unchanged.
+const fleetPositions = new WeakMap<mapboxgl.Map, Map<string, Coordinates>>();
+const fleetRefreshTimers = new WeakMap<mapboxgl.Map, ReturnType<typeof setTimeout>>();
+const FLEET_CLUSTER_ZOOM = 9;
+const refreshFleetClusters = (instance: mapboxgl.Map) => {
+  if (!instance.isStyleLoaded()) return;
+  const positions = fleetPositions.get(instance);
+  if (!positions) return;
+  const sourceId = "worldfront-fleet-clusters";
+  if (!instance.getSource(sourceId)) {
+    instance.addSource(sourceId, {
+      type: "geojson", cluster: true, clusterMaxZoom: 8, clusterRadius: 48,
+      data: featureCollection([]),
+    });
+    instance.addLayer({
+      id: "worldfront-fleet-cluster-bubbles", type: "circle", source: sourceId,
+      maxzoom: FLEET_CLUSTER_ZOOM,
+      filter: ["has", "point_count"],
+      paint: {
+        "circle-color": "#0d9488",
+        "circle-radius": ["step", ["get", "point_count"], 14, 10, 19, 50, 25],
+        "circle-stroke-width": 2, "circle-stroke-color": "#ffffff",
+      },
+    });
+    instance.addLayer({
+      id: "worldfront-fleet-cluster-counts", type: "symbol", source: sourceId,
+      maxzoom: FLEET_CLUSTER_ZOOM,
+      filter: ["has", "point_count"],
+      layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 12, "text-allow-overlap": false },
+      paint: { "text-color": "#ffffff" },
+    });
+    instance.addLayer({
+      id: "worldfront-fleet-single-dots", type: "circle", source: sourceId,
+      maxzoom: FLEET_CLUSTER_ZOOM,
+      filter: ["!", ["has", "point_count"]],
+      paint: { "circle-color": "#0d9488", "circle-radius": 5, "circle-stroke-width": 1.5, "circle-stroke-color": "#ffffff" },
+    });
+    instance.on("click", "worldfront-fleet-cluster-bubbles", (event) => {
+      const feature = event.features?.[0];
+      const clusterId = feature?.properties?.cluster_id;
+      const clusterSource = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+      if (typeof clusterId !== "number" || !clusterSource) return;
+      clusterSource.getClusterExpansionZoom(clusterId, (error, zoom) => {
+        if (error || zoom == null || !feature?.geometry || feature.geometry.type !== "Point") return;
+        instance.easeTo({ center: feature.geometry.coordinates as [number, number], zoom });
+      });
+    });
+  }
+  (instance.getSource(sourceId) as mapboxgl.GeoJSONSource).setData(
+    featureCollection([...positions.entries()].map(([id, coordinates]) => point(coordinates, { id }))),
+  );
+};
+const scheduleFleetClusterRefresh = (instance: mapboxgl.Map) => {
+  if (fleetRefreshTimers.has(instance)) return;
+  const timer = setTimeout(() => {
+    fleetRefreshTimers.delete(instance);
+    if (instance.getContainer().isConnected) refreshFleetClusters(instance);
+  }, 250);
+  fleetRefreshTimers.set(instance, timer);
+};
 // Dispatch-style rendering: journeys continue to simulate offscreen, while
 // Mapbox only receives marker updates for vehicles inside the visible map.
 const updateVisibleVehicleMarker = (
@@ -409,6 +470,10 @@ const updateVisibleVehicleMarker = (
 ) => {
   const source = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
   if (!source) return;
+  let fleet = fleetPositions.get(instance);
+  if (!fleet) { fleet = new Map(); fleetPositions.set(instance, fleet); }
+  fleet.set(sourceId, position);
+  if (instance.getZoom() < FLEET_CLUSTER_ZOOM) scheduleFleetClusterRefresh(instance);
   const bounds = instance.getBounds();
   if (!bounds || !bounds.contains(position as [number, number])) return;
   source.setData(movingVehiclePoint(sourceId, position, properties));

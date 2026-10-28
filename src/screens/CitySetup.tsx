@@ -13,7 +13,7 @@ export async function reversePlace([longitude, latitude]: Coordinates): Promise<
     const feature = data.features?.find((item) => ['place', 'locality'].includes(item.properties?.feature_type ?? '')) ?? data.features?.[0]
     const context = feature?.properties?.context
     const name = (feature?.properties?.feature_type === 'country' ? undefined : feature?.properties?.name) ?? context?.place?.name ?? context?.region?.name ?? context?.country?.name
-    const countryCode = context?.country?.country_code?.toUpperCase()
+    const countryCode = (context?.country?.country_code ?? (feature?.properties?.feature_type === 'country' ? feature.properties.short_code : undefined))?.toUpperCase()
     if (!countryCode) throw new Error('Select a location on land within a country.')
     return { name, region: context?.region?.name ?? name, regionCode: context?.region?.region_code ?? context?.region?.name ?? name, country: context?.country?.name ?? countryCode, countryCode }
   }

@@ -151,6 +151,19 @@ export default function App() {
     }
   }, [placeHarbour, setSection])
 
+  // The starter taxi should dispatch itself; automation employees are optional.
+  // The store validates passenger capacity and driver availability on accept.
+  const dispatchStarterTaxi = () => {
+    const state = useGameStore.getState()
+    if (!state.company || state.vehicles.filter((vehicle) => vehicle.type === 'taxi').length !== 1) return
+    const taxi = state.vehicles.find((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available')
+    if (!taxi || !taxi.driverId || !state.drivers.some((driver) => driver.id === taxi.driverId && driver.status === 'available')) return
+    for (const offer of state.jobs.filter((job) => job.status === 'offered' && job.cityId === taxi.cityId)) {
+      state.acceptJob(offer.id, false)
+      if (useGameStore.getState().jobs.some((job) => job.id === offer.id && job.status !== 'offered')) break
+    }
+  }
+
   const availableOfferCapacity = jobOfferCapacity(game.vehicles, game.drivers)
 
   const offeredJobCount = game.jobs.filter(
@@ -176,7 +189,7 @@ export default function App() {
 
       // Smart roof signs attract an additional request for their taxi.
       if (availableOffers > offered) {
-        void addRandomJob().then(() => useGameStore.getState().runAutomation())
+        void addRandomJob().then(() => { useGameStore.getState().runAutomation(); dispatchStarterTaxi() })
       }
     }
 
@@ -215,6 +228,7 @@ export default function App() {
       const state = useGameStore.getState()
       if (!state.company) return
       state.runAutomation()
+      dispatchStarterTaxi()
       state.tickJobs()
     }, 0)
     return () => window.clearTimeout(start)
@@ -394,7 +408,7 @@ export default function App() {
     const recover = () => {
       if (document.visibilityState === 'hidden') return
       tickJobs()
-      void useGameStore.getState().addRandomJob().then(() => useGameStore.getState().runAutomation())
+      void useGameStore.getState().addRandomJob().then(() => { useGameStore.getState().runAutomation(); dispatchStarterTaxi() })
     }
 
     recover()

@@ -10,6 +10,8 @@ const database = openDB('travel-empire', 1, { upgrade(db) { db.createObjectStore
 const DATABASE_TIMEOUT_MS = 4_000
 const DATABASE_WRITE_DELAY_MS = 250
 const LOCAL_BACKUP_WRITE_DELAY_MS = 2_000
+let resettingGame = false
+const RESET_MARKER = 'worldfront-reset-pending-v1'
 const pendingWrites = new Map<string, { value: string; timeout: number }>()
 const pendingBackupWrites = new Map<string, string>()
 let backupTimeout: number | undefined
@@ -63,6 +65,7 @@ const localBackup = {
 
 export const indexedDbStorage: StateStorage = {
   async getItem(name) {
+    if (window.localStorage.getItem(RESET_MARKER) === '1') return null
     try {
       const saved = await withTimeout(database.then((db) => db.get('saves', name)))
       if (saved) localBackup.set(name, saved)
@@ -72,6 +75,7 @@ export const indexedDbStorage: StateStorage = {
     }
   },
   async setItem(name, value) {
+    if (resettingGame || window.localStorage.getItem(RESET_MARKER) === '1') return
     // Coalesce the fallback copy so serializing frequent game updates does not
     // repeatedly block the UI thread; backgrounding always flushes it at once.
     localBackup.set(name, value)
@@ -92,4 +96,17 @@ export const indexedDbStorage: StateStorage = {
     localBackup.remove(name)
     try { await withTimeout(database.then((db) => db.delete('saves', name))) } catch { /* Nothing else to remove. */ }
   },
+}
+
+/** Prevent active timers and Zustand subscriptions from resurrecting a deleted save. */
+export async function wipeLocalGameSave(): Promise<void> {
+  resettingGame = true
+  window.localStorage.setItem(RESET_MARKER, '1')
+  for (const pending of pendingWrites.values()) window.clearTimeout(pending.timeout)
+  pendingWrites.clear()
+  if (backupTimeout !== undefined) window.clearTimeout(backupTimeout)
+  backupTimeout = undefined
+  pendingBackupWrites.clear()
+  localBackup.remove('save:autosave')
+  await withTimeout(database.then((db) => db.delete('saves', 'save:autosave')))
 }

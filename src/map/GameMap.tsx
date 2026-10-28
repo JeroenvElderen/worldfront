@@ -399,6 +399,19 @@ const mapVehicleColor = (vehicle: Vehicle, standardColor: string) =>
 
 // Screen-independent heading derived from the direction of travel.
 const vehicleHeadingState = new Map<string, { position: Coordinates; heading: number }>();
+// Limit per-vehicle Mapbox source mutations without slowing the simulation clock.
+// Keep the latest location when a vehicle stops, and reset on map teardown.
+const markerPaintState = new Map<string, { position: Coordinates; at: number; status: string }>();
+const shouldPaintVehicle = (id: string, position: Coordinates, status: string, now: number) => {
+  const previous = markerPaintState.get(id);
+  if (previous && previous.status === status) {
+    if (previous.position[0] === position[0] && previous.position[1] === position[1]) return false;
+    if (now - previous.at < 100) return false;
+  }
+  markerPaintState.set(id, { position, at: now, status });
+  return true;
+};
+
 const movingVehiclePoint = (id: string, position: Coordinates, properties: Record<string, unknown> = {}) => {
   const previous = vehicleHeadingState.get(id);
   let heading = previous?.heading ?? 0;
@@ -1903,6 +1916,8 @@ function GameMapView({
       instance.off("error", handleMapError);
       instance.off("style.load", handleStyleLoad);
       instance.off("load", handleLoad);
+      markerPaintState.clear();
+      vehicleHeadingState.clear();
       map.current = null;
       instance.remove();
     };
@@ -2823,16 +2838,13 @@ function GameMapView({
           }
         }
         if (!ferryState) recordJourneyCheckpoint(job.id, vehicle.id, currentPosition);
-        (instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(
-          movingVehiclePoint(taxiSourceId, currentPosition, {
-            ferryStatus:
-              ferryState === "waiting"
-                ? "Waiting for ferry"
-                : ferryState === "aboard"
-                  ? "On ferry"
-                  : "",
-          }),
-        );
+        const markerStatus = ferryState === "waiting" ? "Waiting for ferry"
+          : ferryState === "aboard" ? "On ferry" : "";
+        if (shouldPaintVehicle(taxiSourceId, currentPosition, markerStatus, now)) {
+          (instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(
+            movingVehiclePoint(taxiSourceId, currentPosition, { ferryStatus: markerStatus }),
+          );
+        }
         if (
           SHOW_DRIVING_ROUTE_LINES && (now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS ||
           time >= journey.arrivesAt)

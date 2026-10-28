@@ -59,6 +59,7 @@ interface GameMapProps {
   layoutKey: string;
   onSelectStartingLocation?: (coordinates: Coordinates) => void;
   administrativeBoundaries?: AdministrativeBoundaries | null;
+  ownedAdministrativeRegionIds?: string[];
   cityId: string | null;
   customCities: import("../models/game").City[];
   branches: Branch[];
@@ -702,6 +703,7 @@ function GameMapView({
   layoutKey,
   onSelectStartingLocation,
   administrativeBoundaries,
+  ownedAdministrativeRegionIds = [],
   cityId,
   customCities,
   branches,
@@ -754,36 +756,62 @@ function GameMapView({
   const map = useRef<mapboxgl.Map | null>(null);
   const [containerReady, setContainerReady] = useState(false);
   const [mapInitialized, setMapInitialized] = useState(false);
-  // Region outlines are updated only when the selected boundary dataset changes.
-  // Never subscribe to map render/move events: large datasets would lag on phones.
+  // GADM region ownership and taxi exploration are separate map states.
   useEffect(() => {
     const instance = map.current;
     if (!instance) return;
     const sourceId = "administrative-region-boundaries";
-    const layerId = "administrative-region-outlines";
+    const fillId = "administrative-region-unowned";
+    const borderId = "administrative-region-outlines";
     const update = () => {
       if (!instance.isStyleLoaded()) return;
       if (!administrativeBoundaries) {
-        if (instance.getLayer(layerId)) instance.removeLayer(layerId);
+        if (instance.getLayer(borderId)) instance.removeLayer(borderId);
+        if (instance.getLayer(fillId)) instance.removeLayer(fillId);
         if (instance.getSource(sourceId)) instance.removeSource(sourceId);
         return;
       }
-      const data = administrativeBoundaries as unknown as GeoJSON.FeatureCollection;
+      const owned = new Set(ownedAdministrativeRegionIds);
+      const data: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features: administrativeBoundaries.features.map((feature) => ({
+          ...feature,
+          properties: { ...feature.properties, isOwned: owned.has(feature.properties.gameRegionId) ? 1 : 0 },
+        })),
+      };
       const existing = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
       if (existing) existing.setData(data);
       else instance.addSource(sourceId, { type: "geojson", data });
-      if (!instance.getLayer(layerId)) instance.addLayer({
-        id: layerId, type: "line", source: sourceId,
-        paint: { "line-color": "#43ddb5", "line-width": 2, "line-opacity": 0.85 },
+      if (!instance.getLayer(fillId)) instance.addLayer({
+        id: fillId, type: "fill", source: sourceId,
+        filter: ["==", ["get", "isOwned"], 0],
+        paint: { "fill-color": "#68717c", "fill-opacity": 0.48 },
+      });
+      if (!instance.getLayer(borderId)) instance.addLayer({
+        id: borderId, type: "line", source: sourceId,
+        paint: { "line-color": "#a6b2bf", "line-width": 1.7, "line-opacity": 0.95 },
       });
     };
     instance.on("style.load", update);
     update();
     return () => {
       instance.off("style.load", update);
-      if (instance.getLayer(layerId)) instance.removeLayer(layerId);
+      if (instance.getLayer(borderId)) instance.removeLayer(borderId);
+      if (instance.getLayer(fillId)) instance.removeLayer(fillId);
       if (instance.getSource(sourceId)) instance.removeSource(sourceId);
     };
+  }, [administrativeBoundaries, ownedAdministrativeRegionIds, mapInitialized]);
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    const syncLegacyFog = () => {
+      if (instance.getLayer("locked-territory-fill")) {
+        instance.setPaintProperty("locked-territory-fill", "fill-opacity", administrativeBoundaries ? 0 : 0.24);
+      }
+    };
+    instance.on("style.load", syncLegacyFog);
+    syncLegacyFog();
+    return () => { instance.off("style.load", syncLegacyFog); };
   }, [administrativeBoundaries, mapInitialized]);
   const pickupJobIds = useRef(new Set<string>());
   const pickupHandlers = useRef(
@@ -2079,7 +2107,7 @@ function GameMapView({
         id: "locked-territory-fill",
         type: "fill",
         source: "locked-territory",
-        paint: { "fill-color": "#ef7777", "fill-opacity": 0.24 },
+        paint: { "fill-color": "#68717c", "fill-opacity": administrativeBoundaries ? 0 : 0.24 },
       });
       instance.addSource("service-coverage", {
         type: "geojson",
@@ -3565,6 +3593,7 @@ export const GameMap = memo(
     previous.layoutKey === next.layoutKey &&
     previous.onSelectStartingLocation === next.onSelectStartingLocation &&
     previous.administrativeBoundaries === next.administrativeBoundaries &&
+    previous.ownedAdministrativeRegionIds === next.ownedAdministrativeRegionIds &&
     previous.cityId === next.cityId &&
     previous.customCities === next.customCities &&
     previous.branches === next.branches &&

@@ -7,6 +7,7 @@ import { getPostVehicleModel } from '../data/postVehicles'
 import type { AutomationRole, BrandStrategy, City, CleaningService, Company, Coordinates, DepotFacility, Difficulty, DispatcherStrategy, Driver, DriverCertification, ExteriorAccessory, FerryRouteOption, FinancialTransaction, GameSave, IncidentResponse, MaintenanceKind, PostalDepot, PostalRoutePlan, RefuelStrategy, ResearchId, Specialization, TaxiFerryCrossing, TerritoryExpansion, TireType, TransactionCategory, TransportMode, Vehicle, PendingExploration, VehicleUpgrade } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
 import { loadRemoteExploration, submitExplorationQueue, subscribeRemoteExploration } from '../services/remoteExploration'
+import { mergeVillageTerritories } from '../services/territoryGeometry'
 import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import {
   generateJobOffers,
@@ -1718,6 +1719,7 @@ if (useGameStore.getState().hasHydrated && useGameStore.getState().pendingExplor
 // Keep local processing as a fallback until mission settlement is server-authoritative.
 let remoteSyncStarted = false
 let remoteSyncBusy = false
+let lastRemoteGeometry = ''
 const syncRemoteExploration = async () => {
   if (remoteSyncBusy) return
   const state = useGameStore.getState()
@@ -1725,7 +1727,8 @@ const syncRemoteExploration = async () => {
   remoteSyncBusy = true
   try {
     const remote = await loadRemoteExploration()
-    if (remote) {
+    if (remote && JSON.stringify(remote.geometry) !== lastRemoteGeometry) {
+      lastRemoteGeometry = JSON.stringify(remote.geometry)
       const latest = useGameStore.getState()
       const merged = mergeVillageTerritories([
         ...(latest.exploredTerritory ? [latest.exploredTerritory] : []),

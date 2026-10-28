@@ -1,0 +1,12 @@
+{
+  "name": "worldfront-exploration-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node exploration.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.58.0",
+    "@turf/turf": "^7.2.0"
+  }
+}

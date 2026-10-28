@@ -414,8 +414,8 @@ const updateVisibleVehicleMarker = (
 ) => {
   const source = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
   if (!source) return;
-  const bounds = instance.getBounds();
-  if (!bounds || !bounds.contains(position as [number, number])) return;
+  // Never skip offscreen positions: stale sources make taxis appear frozen
+  // after panning, zooming, returning from background, or changing styles.
   source.setData(movingVehiclePoint(sourceId, position, properties));
 };
 
@@ -2419,8 +2419,8 @@ function GameMapView({
             layout: {
               "icon-image": TAXI_SVG_IMAGE,
               "icon-size": 0.12,
-              "icon-allow-overlap": false,
-              "icon-ignore-placement": false,
+              "icon-allow-overlap": true,
+              "icon-ignore-placement": true,
               "icon-rotation-alignment": "map",
               "icon-pitch-alignment": "map",
               "icon-rotate": ["coalesce", ["get", "heading"], 0],

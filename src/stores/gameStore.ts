@@ -278,9 +278,15 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     // Only the starting region may be granted for free. Never grant a second
     // free region on later country switches or save restores.
     const hasRealRegion = (state.territoryLicenses ?? []).some((id) => /:[Aa][Dd][Mm][123]:/.test(id))
-    if (hasRealRegion || ledger.purchasedRegionIds.length) return state
+    if ((state.territoryLicenses ?? []).includes(regionId)) return state
+    // Upgrade the previous free Greece ADM1 licence to the smaller ADM2
+    // starting municipality without granting additional territory.
+    const legacyGreek = (state.territoryLicenses ?? []).filter((id) => /^GRC:ADM1:/.test(id))
+    const canMigrateGreek = regionId.startsWith('GRC:ADM2:') &&
+      legacyGreek.length === 1 && !ledger.purchasedRegionIds.length
+    if ((hasRealRegion && !canMigrateGreek) || ledger.purchasedRegionIds.length) return state
     return {
-      territoryLicenses: [...new Set([...(state.territoryLicenses ?? []), regionId])],
+      territoryLicenses: [...new Set([...(state.territoryLicenses ?? []).filter((id) => !canMigrateGreek || !legacyGreek.includes(id)), regionId])],
       updatedAt: new Date().toISOString(),
     }
   }),

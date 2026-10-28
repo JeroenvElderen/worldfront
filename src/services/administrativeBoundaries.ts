@@ -5,7 +5,7 @@
  * Requests therefore originate in the browser; a same-origin proxy may be
  * needed if the upstream GeoJSON host disallows CORS.
  */
-import booleanPointInPolygon from '@turf/boolean-point-in-polygon'
+import { booleanPointInPolygon } from '@turf/turf'
 import { point } from '@turf/helpers'
 import type { Coordinates } from '../models/game'
 

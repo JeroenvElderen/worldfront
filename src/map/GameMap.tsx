@@ -1227,6 +1227,8 @@ function GameMapView({
     };
     const handleLoad = async () => {
       if (import.meta.env.DEV) console.debug("[GameMap] Mapbox map loaded");
+      // Job effects may have run before the style was available on a fresh game.
+      setMapRevision((revision) => revision + 1);
       try {
         keepMapFlatAndBuildingFree(instance);
         instance.addSource("company-base", {

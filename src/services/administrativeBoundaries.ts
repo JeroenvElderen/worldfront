@@ -1,10 +1,4 @@
-/**
- * Administrative boundaries use the same geoBoundaries gbOpen dataset and
- * ADM-level selection as the transport-simulator reference project.
- * Unlike its Next.js API route, WorldFront is a Vite client application.
- * Requests therefore originate in the browser; a same-origin proxy may be
- * needed if the upstream GeoJSON host disallows CORS.
- */
+/** GADM 4.1 boundaries for private, non-commercial WorldFront use only. */
 import { booleanPointInPolygon } from '@turf/turf'
 import { point } from '@turf/helpers'
 import type { Coordinates } from '../models/game'
@@ -45,7 +39,6 @@ const OVERRIDES: Record<string, [AdministrativeLevel, string]> = {
   BRA: ['ADM1', 'State'], IND: ['ADM1', 'State / Territory'],
   CHN: ['ADM1', 'Province-level Division'],
 }
-type BoundaryMetadata = { simplifiedGeometryGeoJSON?: string; gjDownloadURL?: string }
 type RawFeature = { type: 'Feature'; properties?: Record<string, unknown>; geometry: GeoJSON.Geometry }
 type RawCollection = { type: 'FeatureCollection'; features: RawFeature[] }
 const cache = new Map<string, Promise<AdministrativeBoundaries>>()
@@ -53,14 +46,13 @@ const levelsFor = (code: string): AdministrativeLevel[] =>
   [...new Set([OVERRIDES[code]?.[0] ?? 'ADM1', 'ADM1', 'ADM2'])] as AdministrativeLevel[]
 
 async function fetchLevel(code: string, level: AdministrativeLevel): Promise<RawCollection | null> {
-  const response = await fetch(`https://www.geoboundaries.org/api/current/gbOpen/${code}/${level}/`)
-  if (!response.ok) return null
-  const metadata = await response.json() as BoundaryMetadata
-  const geometryUrl = metadata.simplifiedGeometryGeoJSON || metadata.gjDownloadURL
-  if (!geometryUrl) return null
-  const geometryResponse = await fetch(geometryUrl)
-  if (!geometryResponse.ok) return null
-  const data = await geometryResponse.json() as RawCollection
+  // Browser requests go through our own origin, avoiding geoBoundaries CORS.
+  const response = await fetch(`/api/boundaries?country=${encodeURIComponent(code)}&level=${level}`)
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({})) as { error?: string }
+    throw new Error(detail.error ?? `Boundary service returned ${response.status}`)
+  }
+  const data = await response.json() as RawCollection
   return data.type === 'FeatureCollection' && Array.isArray(data.features) ? data : null
 }
 
@@ -73,16 +65,17 @@ export async function fetchAdministrativeBoundaries(countryCode3: string, countr
   const task = (async () => {
     for (const level of levelsFor(code)) {
       let data: RawCollection | null
-      try { data = await fetchLevel(code, level) } catch { continue }
+      try { data = await fetchLevel(code, level) } catch (error) { console.warn('[WorldFront] Region boundary request failed', code, level, error); continue }
       if (!data) continue
       const features: AdministrativeRegionFeature[] = data.features.flatMap((feature, index) => {
         if (feature.geometry.type !== 'Polygon' && feature.geometry.type !== 'MultiPolygon') return []
         const props = feature.properties ?? {}
-        const shapeID = typeof props.shapeID === 'string' ? props.shapeID : `${level}-${index}`
+        const gid = props[`GID_${level.slice(-1)}`]
+        const shapeID = typeof gid === 'string' ? gid : `${level}-${index}`
         return [{
           type: 'Feature' as const, id: index + 1, geometry: feature.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon,
           properties: {
-            shapeID, shapeName: typeof props.shapeName === 'string' ? props.shapeName : `Region ${index + 1}`,
+            shapeID, shapeName: typeof props[`NAME_${level.slice(-1)}`] === 'string' ? String(props[`NAME_${level.slice(-1)}`]) : `Region ${index + 1}`,
             gameRegionId: `${code}:${level}:${shapeID}`, countryCode: code,
             countryName, administrativeLevel: level,
           },

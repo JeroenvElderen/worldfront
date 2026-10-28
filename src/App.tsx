@@ -142,6 +142,9 @@ export default function App() {
     }
 
     requestOfferForAvailableTaxi()
+    // A transient routing failure must not leave a new company without jobs.
+    // The store's jobsLoading guard prevents overlapping generation attempts.
+    const missionRetry = window.setInterval(requestOfferForAvailableTaxi, 20_000)
 
     document.addEventListener(
       'visibilitychange',
@@ -149,6 +152,7 @@ export default function App() {
     )
 
     return () => {
+      window.clearInterval(missionRetry)
       document.removeEventListener(
         'visibilitychange',
         requestOfferForAvailableTaxi,

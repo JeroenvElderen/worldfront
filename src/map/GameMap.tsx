@@ -752,6 +752,7 @@ function GameMapView({
   }, [exploredTerritory]);
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
+  const [containerReady, setContainerReady] = useState(false);
   // Region outlines are updated only when the selected boundary dataset changes.
   // Never subscribe to map render/move events: large datasets would lag on phones.
   useEffect(() => {
@@ -811,7 +812,7 @@ function GameMapView({
   transportAssetsRef.current = transportAssets;
   transportRoutesRef.current = transportRoutes;
   const [mapRevision, setMapRevision] = useState(0);
-  const [containerReady, setContainerReady] = useState(false);
+
   // Every active taxi route has its own simulated congestion colour.
   // Keep it consistent when a route layer is recreated during a journey.
   // Each taxi keeps a distinct colour family. Darker shades mean more congestion.

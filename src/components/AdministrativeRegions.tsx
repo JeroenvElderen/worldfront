@@ -2,7 +2,7 @@ import { calculateAdministrativeTerritoryCoverage } from '../services/administra
 import { useEffect, useMemo, useState } from 'react'
 import { useGameStore } from '../stores/gameStore'
 import { fetchAdministrativeBoundaries, regionAtCoordinates, toGeoBoundariesCountryCode, type AdministrativeBoundaries } from '../services/administrativeBoundaries'
-import { availableRegionCredits, regionRoadProgress, REGION_PURCHASE_COST } from '../services/administrativeProgression'
+import { availableRegionCredits, regionRoadProgress, REGION_PURCHASE_COST, countryExplorationProgress, countryTerritoryCost, COUNTRY_EXPLORATION_THRESHOLD } from '../services/administrativeProgression'
 import type { City } from '../models/game'
 
 /** A small, on-demand region manager. No additional Mapbox render loop. */
@@ -24,6 +24,7 @@ export function AdministrativeRegions({ city, onClose, onBoundaries }: {
   const registerStart = useGameStore((state) => state.registerStartingAdministrativeRegion)
   const purchase = useGameStore((state) => state.purchaseAdministrativeRegion)
   const claim = useGameStore((state) => state.claimAdministrativeCredits)
+  const purchaseCountry = useGameStore((state) => state.purchaseCountryTerritory)
   const iso3 = toGeoBoundariesCountryCode(city.countryCode)
   useEffect(() => {
     let cancelled = false
@@ -60,6 +61,11 @@ export function AdministrativeRegions({ city, onClose, onBoundaries }: {
     return () => window.clearTimeout(timer)
   }, [boundaries, explored, updateCoverage])
   useEffect(() => { claim() }, [claim, coverage])
+  const countryOwned = !!iso3 && (ledger?.purchasedCountryIds ?? []).includes(iso3)
+  const countryProgress = iso3 ? countryExplorationProgress(iso3, coverage ?? []) : null
+  const countryArea = boundaries?.features.reduce((sum, feature) => sum + ((coverage ?? []).find((item) => item.regionId === feature.properties.gameRegionId)?.eligibleAreaKm2 ?? 0), 0) ?? 0
+  const countryCost = countryTerritoryCost(countryArea)
+  const completeCountryCoverage = !!boundaries && boundaries.features.every((feature) => (coverage ?? []).some((item) => item.regionId === feature.properties.gameRegionId && (item.eligibleAreaKm2 ?? 0) > 0))
   const credits = availableRegionCredits(ledger ?? { creditedRegionIds: [], purchasedRegionIds: [] })
   const filtered = useMemo(() => (boundaries?.features ?? []).filter((feature) =>
     (feature.properties.shapeName ?? '').toLowerCase().includes(query.toLowerCase())
@@ -80,11 +86,24 @@ export function AdministrativeRegions({ city, onClose, onBoundaries }: {
     {busy && <div role="status">Loading administrative borders…</div>}
     {error && <div role="alert">{error}</div>}
     {boundaries && <>
+      <section style={{ padding: 10, border: '1px solid #b99343', borderRadius: 10 }}>
+        <strong>Country territory · {city.countryName}</strong>
+        <div style={{ fontSize: 12, marginTop: 5 }}>
+          {countryOwned ? 'Purchased — all administrative districts unlocked' :
+            countryProgress === null ? 'Calculating country exploration…' :
+            `${Math.round(countryProgress * 100)}% explored · 25% required`}
+        </div>
+        {!countryOwned && <button style={{ marginTop: 7 }}
+          disabled={!completeCountryCoverage || countryProgress === null || countryProgress < COUNTRY_EXPLORATION_THRESHOLD || cash < countryCost || !Number.isFinite(countryArea) || countryArea <= 0}
+          onClick={() => iso3 && purchaseCountry(iso3, countryArea, boundaries.features.length)}>
+          Purchase country · €{countryCost.toLocaleString()}
+        </button>}
+      </section>
       <input aria-label="Search regions" placeholder="Search regions" value={query} onChange={(event) => setQuery(event.target.value)} />
       <div style={{ overflowY: 'auto', flex: 1, display: 'grid', alignContent: 'start', gap: 8 }}>
         {filtered.map((feature) => {
           const id = feature.properties.gameRegionId
-          const owned = (licenses ?? []).includes(id)
+          const owned = countryOwned || (licenses ?? []).includes(id)
           const data = (coverage ?? []).find((item) => item.regionId === id)
           const progress = data ? regionRoadProgress(data) : null
           const canBuy = !owned && credits > 0 && cash >= REGION_PURCHASE_COST
@@ -93,7 +112,7 @@ export function AdministrativeRegions({ city, onClose, onBoundaries }: {
               <strong>{feature.properties.shapeName}</strong>
               <small>{owned ? 'Owned' : 'Locked'}</small>
             </div>
-            <div style={{ fontSize: 12, marginTop: 4 }}>{progress === null ? 'Territory coverage unavailable' : `${Math.round(progress * 100)}% roads explored`}</div>
+            <div style={{ fontSize: 12, marginTop: 4 }}>{progress === null ? 'Territory coverage unavailable' : `${Math.round(progress * 100)}% territory explored`}</div>
             {!owned && <button style={{ marginTop: 7 }} disabled={!canBuy} onClick={() => purchase(id)}>
               Unlock · €25,000 + 1 credit
             </button>}

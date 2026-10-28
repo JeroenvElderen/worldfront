@@ -33,7 +33,7 @@ const OVERRIDES: Record<string, [AdministrativeLevel, string]> = {
   IRL: ['ADM2', 'County'], NLD: ['ADM1', 'Province'],
   DEU: ['ADM1', 'Federal State'], USA: ['ADM1', 'State'],
   GBR: ['ADM2', 'Administrative Area'], FRA: ['ADM2', 'Department'],
-  GRC: ['ADM1', 'Region'], SWE: ['ADM1', 'County'],
+  GRC: ['ADM3', 'Municipality'], SWE: ['ADM1', 'County'],
   JPN: ['ADM1', 'Prefecture'], POL: ['ADM1', 'Voivodeship'],
   CAN: ['ADM1', 'Province / Territory'], AUS: ['ADM1', 'State / Territory'],
   BRA: ['ADM1', 'State'], IND: ['ADM1', 'State / Territory'],
@@ -43,7 +43,7 @@ type RawFeature = { type: 'Feature'; properties?: Record<string, unknown>; geome
 type RawCollection = { type: 'FeatureCollection'; features: RawFeature[] }
 const cache = new Map<string, Promise<AdministrativeBoundaries>>()
 const levelsFor = (code: string): AdministrativeLevel[] =>
-  [...new Set([OVERRIDES[code]?.[0] ?? 'ADM1', 'ADM1', 'ADM2'])] as AdministrativeLevel[]
+  [...new Set([OVERRIDES[code]?.[0] ?? 'ADM1', 'ADM1', 'ADM2', 'ADM3'])] as AdministrativeLevel[]
 
 async function fetchLevel(code: string, level: AdministrativeLevel): Promise<RawCollection | null> {
   // Browser requests go through our own origin, avoiding geoBoundaries CORS.

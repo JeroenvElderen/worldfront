@@ -7,7 +7,7 @@ export const VILLAGE_TERRITORY_RADIUS_KM = 6
 // Reveal only a narrow corridor beside roads actually travelled.
 // This radius applies to live taxi exploration and completed-trip backfill;
 // manually purchased village territory retains its separate 6 km radius.
-export const TAXI_DISCOVERY_RADIUS_KM = 0.5
+export const TAXI_DISCOVERY_RADIUS_KM = 0.01
 
 export interface VillageTerritoryCenter { id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; source?: 'village' | 'starting-station' | 'taxi-discovery' | 'ferry-discovery'; radiusKm?: number }
 export type { TerritoryFeature } from '../models/game'
@@ -94,7 +94,7 @@ export const taxiDiscoveryTerritory = (id: string, center: Coordinates, radiusKm
 
 /** Treat one completed taxi journey as one buffered territory checkpoint. */
 export const taxiDiscoveryRouteTerritory = (id: string, route: Coordinates[], radiusKm = TAXI_DISCOVERY_RADIUS_KM): TerritoryFeature =>
-  buffer(simplify(lineString(route, { id, unlocked: true }), { tolerance: .0001, highQuality: false }), radiusKm, { steps: 8, units: 'kilometers' }) as TerritoryFeature
+  buffer(lineString(route, { id, unlocked: true }), radiusKm, { steps: 8, units: 'kilometers' }) as TerritoryFeature
 
 export const mergeVillageTerritories = (territories: TerritoryFeature[]) => {
   if (!territories.length) return null
@@ -133,7 +133,7 @@ export const extendExploredTerritory = (
   const discovery = taxiDiscoveryRouteTerritory(id, route)
   const merged = mergeVillageTerritories(existing ? [existing, discovery] : [discovery])
   if (!merged) return existing
-  const optimized = simplify(merged, { tolerance: .00005, highQuality: false }) as TerritoryFeature
+  const optimized = simplify(merged, { tolerance: .000001, highQuality: false }) as TerritoryFeature
   return { ...optimized, properties: { id: 'taxi-exploration', unlocked: true as const } }
 }
 
@@ -150,7 +150,7 @@ export const extendExploredTerritorySegments = (
   const discoveries = valid.map((segment, index) => taxiDiscoveryRouteTerritory(`${id}-${index}`, segment))
   const merged = mergeVillageTerritories([...(existing ? [existing] : []), ...discoveries])
   if (!merged) return existing
-  const optimized = simplify(merged, { tolerance: .00005, highQuality: false }) as TerritoryFeature
+  const optimized = simplify(merged, { tolerance: .000001, highQuality: false }) as TerritoryFeature
   return { ...optimized, properties: { id: 'taxi-exploration', unlocked: true as const } }
 }
 
@@ -163,7 +163,7 @@ export const compactLegacyDiscoveries = (
   const legacy = appendDiscoveriesToTerritory([], discoveries)
   const merged = mergeVillageTerritories([...(existing ? [existing] : []), ...(legacy ? [legacy] : [])])
   if (!merged) return existing ?? null
-  const optimized = simplify(merged, { tolerance: .00005, highQuality: false }) as TerritoryFeature
+  const optimized = simplify(merged, { tolerance: .000001, highQuality: false }) as TerritoryFeature
   return { ...optimized, properties: { id: 'taxi-exploration', unlocked: true as const } }
 }
 

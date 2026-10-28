@@ -2283,8 +2283,8 @@ function GameMapView({
             layout: {
               "icon-image": TAXI_SVG_IMAGE,
               "icon-size": 0.12,
-              "icon-allow-overlap": true,
-              "icon-ignore-placement": true,
+              "icon-allow-overlap": false,
+              "icon-ignore-placement": false,
               "icon-rotation-alignment": "map",
               "icon-pitch-alignment": "map",
               "icon-rotate": ["coalesce", ["get", "heading"], 0],

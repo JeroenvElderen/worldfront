@@ -1686,13 +1686,14 @@ const generationTaxi = selectJobGenerationTaxi(state)
 // Process exploration after mission settlement has been persisted. Retry failed
 // geometry on later ticks and after rehydration, without losing the route.
 let explorationTimer: ReturnType<typeof setTimeout> | null = null
+let explorationRetryAfter = 0
 const scheduleExploration = () => {
   if (explorationTimer) return
   explorationTimer = setTimeout(() => {
     explorationTimer = null
     const state = useGameStore.getState()
     if (!state.hasHydrated || !(state.pendingExploration?.length)) return
-    const result = processExplorationQueue(state)
+    if (Date.now() < explorationRetryAfter) {\n      explorationTimer = setTimeout(() => { explorationTimer = null; scheduleExploration() }, explorationRetryAfter - Date.now())\n      return\n    }\n    const result = processExplorationQueue(state)\n    explorationRetryAfter = result.pendingExploration?.length ? Date.now() + 15_000 : 0
     useGameStore.setState(result)
     if (result.pendingExploration?.length) {
       // A transient geometry failure must not create a tight retry loop.

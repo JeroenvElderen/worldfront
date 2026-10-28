@@ -3073,6 +3073,58 @@ function GameMapView({
     onTaxiArrived,
   ]);
 
+  // Authoritative live taxi-position reconciliation. Job timestamps are the
+  // source of truth, not the lifecycle of a Mapbox animation callback.
+  // This also recovers markers after style changes and iOS tab suspension.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    let disposed = false;
+    const syncTaxiPositions = () => {
+      if (disposed || map.current !== instance || !instance.isStyleLoaded()) return;
+      const now = Date.now();
+      for (const job of jobs) {
+        if (job.status !== "accepted" || !job.assignedVehicleId) continue;
+        const vehicle = vehicles.find((item) => item.id === job.assignedVehicleId);
+        if (!vehicle || vehicle.type !== "taxi") continue;
+        const sourceId = vehicleSourceId(vehicle.id);
+        if (!instance.getSource(sourceId)) continue;
+        const journey = getJobMotionJourney(job, vehicle);
+        const time = getJobMotionTime(job, now);
+        const start = taxiPosition(vehicle.id, now - 30 * 60_000)
+          ?? vehicle.position
+          ?? getCity(cityId, customCities)?.coordinates;
+        if (!start) continue;
+        const pickup = jobPickup(job);
+        const destination = jobDestination(job);
+        const pickupPath = job.pickupRouteCoordinates?.length && job.pickupRouteCoordinates.length >= 2
+          ? job.pickupRouteCoordinates : [start, pickup];
+        const passengerPath = job.routeCoordinates?.length && job.routeCoordinates.length >= 2
+          ? job.routeCoordinates : [pickup, destination];
+        const pickingUp = time < journey.pickupAt;
+        const from = pickingUp ? journey.departsAt : journey.pickupAt;
+        const to = pickingUp ? journey.pickupAt : journey.arrivesAt;
+        const progress = Math.max(0, Math.min(1, (time - from) / Math.max(1, to - from)));
+        const position = routePosition(pickingUp ? pickupPath : passengerPath, progress);
+        if (!Number.isFinite(position[0]) || !Number.isFinite(position[1])) continue;
+        updateVisibleVehicleMarker(instance, sourceId, position);
+      }
+    };
+    const interval = window.setInterval(syncTaxiPositions, 100);
+    const resume = () => { if (document.visibilityState !== "hidden") syncTaxiPositions(); };
+    instance.on("style.load", resume);
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("pageshow", resume);
+    syncTaxiPositions();
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      instance.off("style.load", resume);
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("pageshow", resume);
+    };
+  }, [jobs, vehicles, cityId, customCities, mapRevision]);
+
   // Mission markers are driven by mission lifecycle, never by route availability.
   // Pickup remains until the actual pickup deadline (including ferry delays);
   // destination remains until the mission is completed and removed above.

@@ -1,10 +1,4 @@
-/**
- * Administrative boundaries use the same geoBoundaries gbOpen dataset and
- * ADM-level selection as the transport-simulator reference project.
- * Unlike its Next.js API route, WorldFront is a Vite client application.
- * Requests therefore originate in the browser; a same-origin proxy may be
- * needed if the upstream GeoJSON host disallows CORS.
- */
+/** GADM 4.1 boundaries for private, non-commercial WorldFront use only. */
 import { booleanPointInPolygon } from '@turf/turf'
 import { point } from '@turf/helpers'
 import type { Coordinates } from '../models/game'
@@ -77,11 +71,12 @@ export async function fetchAdministrativeBoundaries(countryCode3: string, countr
       const features: AdministrativeRegionFeature[] = data.features.flatMap((feature, index) => {
         if (feature.geometry.type !== 'Polygon' && feature.geometry.type !== 'MultiPolygon') return []
         const props = feature.properties ?? {}
-        const shapeID = typeof props.shapeID === 'string' ? props.shapeID : `${level}-${index}`
+        const gid = props[`GID_${level.slice(-1)}`]
+        const shapeID = typeof gid === 'string' ? gid : `${level}-${index}`
         return [{
           type: 'Feature' as const, id: index + 1, geometry: feature.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon,
           properties: {
-            shapeID, shapeName: typeof props.shapeName === 'string' ? props.shapeName : `Region ${index + 1}`,
+            shapeID, shapeName: typeof props[`NAME_${level.slice(-1)}`] === 'string' ? String(props[`NAME_${level.slice(-1)}`]) : `Region ${index + 1}`,
             gameRegionId: `${code}:${level}:${shapeID}`, countryCode: code,
             countryName, administrativeLevel: level,
           },

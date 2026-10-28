@@ -58,24 +58,31 @@ export default function App() {
       setAdministrativeBoundaries(null)
       return
     }
-    void fetchAdministrativeBoundaries(adminCountryCode, adminCountryName)
-      .then((data) => {
-        if (cancelled) return
-        setAdministrativeBoundaries(data)
-        const state = useGameStore.getState()
-        const startingCity = getCity(state.startingCityId, state.customCities ?? [])
-        if (startingCity && toGeoBoundariesCountryCode(startingCity.countryCode) === adminCountryCode) {
-          const startingRegion = regionAtCoordinates(data, startingCity.coordinates)
-          if (startingRegion) state.registerStartingAdministrativeRegion(startingRegion.properties.gameRegionId)
-        }
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setAdministrativeBoundaries(null)
-          console.warn('[WorldFront] GADM boundaries unavailable', error)
-        }
-      })
-    return () => { cancelled = true }
+    let retryTimer: number | undefined
+    const loadBoundaries = (attempt: number) => {
+      void fetchAdministrativeBoundaries(adminCountryCode, adminCountryName)
+        .then((data) => {
+          if (cancelled) return
+          setAdministrativeBoundaries(data)
+          const state = useGameStore.getState()
+          const startingCity = getCity(state.startingCityId, state.customCities ?? [])
+          if (startingCity && toGeoBoundariesCountryCode(startingCity.countryCode) === adminCountryCode) {
+            const startingRegion = regionAtCoordinates(data, startingCity.coordinates)
+            if (startingRegion) state.registerStartingAdministrativeRegion(startingRegion.properties.gameRegionId)
+          }
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return
+          console.warn('[WorldFront] GADM boundary load failed', attempt + 1, error)
+          // Mobile refresh can briefly interrupt a large GADM download.
+          // Retry rather than permanently dropping the gold region borders.
+          if (attempt < 3) {
+            retryTimer = window.setTimeout(() => loadBoundaries(attempt + 1), 1500 * (attempt + 1))
+          }
+        })
+    }
+    loadBoundaries(0)
+    return () => { cancelled = true; if (retryTimer !== undefined) window.clearTimeout(retryTimer) }
   }, [Boolean(game.company), adminCountryCode, adminCountryName])
   const startingCityForRegion = getCity(game.startingCityId, game.customCities ?? [])
   const startingRegionId = administrativeBoundaries && startingCityForRegion &&

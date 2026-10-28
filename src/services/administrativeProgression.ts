@@ -13,6 +13,7 @@ export interface RegionRoadCoverage {
 export interface RegionExpansionLedger {
   creditedRegionIds: string[]
   purchasedRegionIds: string[]
+  purchasedCountryIds?: string[]
 }
 /** Null means the complete eligible-road inventory is not available. */
 export function regionRoadProgress(coverage: RegionRoadCoverage): number | null {
@@ -37,4 +38,18 @@ export function canPurchaseRegion(regionId: string, ownedRegionIds: readonly str
     && !ledger.purchasedRegionIds.includes(regionId)
     && cash >= REGION_PURCHASE_COST
     && availableRegionCredits(ledger) > 0
+}
+
+/** Area-weighted exploration, never an average of municipalities. */
+export const COUNTRY_EXPLORATION_THRESHOLD = 0.25
+export function countryExplorationProgress(countryIso3: string, coverages: RegionRoadCoverage[]): number | null {
+  const entries = coverages.filter((item) => item.regionId.startsWith(countryIso3 + ':ADM'))
+  if (!entries.length || entries.some((item) => !Number.isFinite(item.eligibleAreaKm2) || (item.eligibleAreaKm2 ?? 0) <= 0 || !Number.isFinite(item.exploredAreaKm2))) return null
+  const total = entries.reduce((sum, item) => sum + (item.eligibleAreaKm2 ?? 0), 0)
+  const explored = entries.reduce((sum, item) => sum + Math.min(item.eligibleAreaKm2 ?? 0, Math.max(0, item.exploredAreaKm2 ?? 0)), 0)
+  return total > 0 ? Math.min(1, explored / total) : null
+}
+/** Larger countries cost more, without making small countries free. */
+export function countryTerritoryCost(countryAreaKm2: number): number {
+  return 100_000 + Math.ceil(Math.max(0, countryAreaKm2) / 1000) * 1000
 }

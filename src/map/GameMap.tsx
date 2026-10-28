@@ -3211,6 +3211,8 @@ function GameMapView({
     };
   }, [vehicles, mapRevision]);
 
+  const discoveredFerryRoutes = useGameStore((state) => state.discoveredFerryRoutes);
+
   // Display the exact mapped sea lanes used by operating ferry markers and
   // embarked taxis. Restore the layer after Mapbox style reloads.
   useEffect(() => {
@@ -3220,14 +3222,21 @@ function GameMapView({
     const layerId = "worldfront-ferry-sea-lanes-line";
     const refresh = () => {
       if (!instance.isStyleLoaded()) return;
-      const features = transportRoutes
-        .filter((route) => route.mode === "ferry" && (route.routeCoordinates?.length ?? 0) >= 2)
-        .map((route) => ({
+      // Harbour discoveries exist before a player creates or dispatches a ferry.
+      // Render those routes too, avoiding duplicate active routes by source ID.
+      const activeSourceIds = new Set(transportRoutes.map(route => route.sourceRouteId).filter(Boolean));
+      const visibleRoutes = [
+        ...transportRoutes.filter(route => route.mode === "ferry"),
+        ...discoveredFerryRoutes.filter(route => !activeSourceIds.has(route.id)),
+      ];
+      const features = visibleRoutes
+        .filter(route => (route.routeCoordinates?.length ?? 0) >= 2)
+        .map(route => ({
           type: "Feature" as const,
           properties: { name: route.name },
           geometry: {
             type: "LineString" as const,
-            coordinates: route.routeCoordinates!,
+            coordinates: route.routeCoordinates,
           },
         }));
       const data = { type: "FeatureCollection" as const, features };
@@ -3255,7 +3264,7 @@ function GameMapView({
       if (instance.getLayer(layerId)) instance.removeLayer(layerId);
       if (instance.getSource(sourceId)) instance.removeSource(sourceId);
     };
-  }, [transportRoutes, mapRevision]);
+  }, [transportRoutes, discoveredFerryRoutes, mapRevision]);
 
   // Boat markers are DOM markers kept across state transitions. Cancelling and
   // restarting their animation never removes them, so a shuttle changing

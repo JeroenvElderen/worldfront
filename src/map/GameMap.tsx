@@ -1575,13 +1575,6 @@ function GameMapView({
             continue;
           }
           let journey = job ? getJobMotionJourney(job, vehicle) : null;
-          let pickupRouteReady =
-            !job ||
-            Boolean(
-              job.pickupRouteCoordinates?.length &&
-              job.pickupRouteCoordinates.length >= 2 &&
-              (!token || job.pickupFerryCrossings !== undefined),
-            );
           let pickupRoute: RouteDetails = {
             coordinates:
               job?.pickupRouteCoordinates ?? (job ? [start, start] : [start]),
@@ -1631,7 +1624,6 @@ function GameMapView({
                   return;
                 if (!toPickup) return;
                 pickupRoute = toPickup;
-                pickupRouteReady = true;
                 pickupMotion = createRouteMotion(
                   pickupRoute,
                   fallbackSpeedKmh,
@@ -1781,20 +1773,6 @@ function GameMapView({
               getJobMotionTime(job, now) - localFerryDelayMs;
 
             const time = frozenFerryMotionTime ?? liveMotionTime;
-            if (!pickupRouteReady) {
-              (
-                instance.getSource(sourceId) as
-                  | mapboxgl.GeoJSONSource
-                  | undefined
-              )?.setData(point(start));
-              (
-                instance.getSource(routeSourceId) as
-                  | mapboxgl.GeoJSONSource
-                  | undefined
-              )?.setData(lineString(passengerRoute.coordinates));
-              scheduleAnimation();
-              return;
-            }
             const currentJourney = journey!;
             const pickupFerryKey = `${vehicle.id}:job:${job.id}:pickup`;
             job.completedPickupFerryCrossings?.forEach((index) =>
@@ -2733,13 +2711,8 @@ function GameMapView({
 
       liveJobIds.current.add(job.id);
       let journey = getJobMotionJourney(job, vehicle);
-      let pickupRouteReady = Boolean(
-        job.pickupRouteCoordinates?.length &&
-        job.pickupRouteCoordinates.length >= 2 &&
-        (!token || job.pickupFerryCrossings !== undefined),
-      );
       let pickupRoute: RouteDetails = {
-        coordinates: job.pickupRouteCoordinates ?? [start, start],
+        coordinates: job.pickupRouteCoordinates ?? [start, jobPickup(job)],
         speedLimits: [],
         ferryCrossings: resolveLandsideFerryTerminals(
           job.pickupRouteCoordinates ?? [start, start],
@@ -2789,7 +2762,6 @@ function GameMapView({
           if (!liveJobIds.current.has(job.id) || map.current !== instance)
             return;
           pickupRoute = toPickup;
-          pickupRouteReady = true;
           pickupMotion = createRouteMotion(
             pickupRoute,
             fallbackSpeedKmh,
@@ -2836,7 +2808,7 @@ function GameMapView({
                   error,
                 );
               window.setTimeout(() => {
-                if (!pickupRouteReady && liveJobIds.current.has(job.id))
+                if (liveJobIds.current.has(job.id))
                   requestPickupRoute();
               }, 2_000);
             });
@@ -2889,19 +2861,6 @@ function GameMapView({
 
         const time = frozenFerryMotionTime ?? liveMotionTime;
 
-        if (!pickupRouteReady) {
-          (instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(
-            point(start),
-          );
-          (
-            instance.getSource(routeSourceId) as
-              | mapboxgl.GeoJSONSource
-              | undefined
-          )?.setData(lineString(passengerRoute.coordinates));
-          if (document.visibilityState !== "hidden")
-            liveJobTimers.current.set(job.id, scheduleMapFrame(animate));
-          return;
-        }
         const pickupFerryKey = `${vehicle.id}:job:${job.id}:pickup`;
         job.completedPickupFerryCrossings?.forEach((index) =>
           completedFerryCrossings.current.add(`${pickupFerryKey}:${index}`),

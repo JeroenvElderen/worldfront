@@ -1219,6 +1219,9 @@ function GameMapView({
     };
     const handleStyleLoad = () => {
       if (import.meta.env.DEV) console.debug("[GameMap] Mapbox style loaded");
+      // Re-run layer effects after Mapbox has a usable style on initial load
+      // and after browser refresh / style restoration.
+      setMapInitialized((value) => !value);
     };
     const handleLoad = async () => {
       if (import.meta.env.DEV) console.debug("[GameMap] Mapbox map loaded");

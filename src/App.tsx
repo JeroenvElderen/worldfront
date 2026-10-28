@@ -403,38 +403,6 @@ export default function App() {
             />
           )}
 
-          {game.activeSection === 'ferries' && (
-            <FerryDispatch
-              company={game.company}
-                   discoveredRoutes={game.discoveredFerryRoutes ?? []}
-              transportAssets={game.transportAssets ?? []}
-              transportRoutes={game.transportRoutes ?? []}
-         purchasedHarbours={[]}
-              onRefreshRoutes={() => {
-                void (async () => {
-                  const harbours = useGameStore.getState().purchasedHarbours ?? []
-                  let found = 0
-                  for (const harbour of harbours) {
-                    try {
-                      const routes = await discoverFerryRoutes(harbour.coordinates)
-                      useGameStore.getState().addHarbourFerryRoutes(harbour.coordinates, routes)
-                      found += routes.length
-                    } catch (error) {
-                      console.warn('Ferry discovery failed for', harbour.name, error)
-                    }
-                  }
-                  if (!found) window.alert('No ferry connections found. The map provider may be unavailable for these harbours.')
-                })()
-              }}
-              onPlaceHarbour={() => { setPlacingHarbour(true); game.setSection('map') }}
-              onBuyFerry={() => game.buyTransportAsset('ferry')}
-              onCreateRoute={game.createFerryRoute}
-              onDispatch={game.dispatchTransport}
-              onSetTimetable={(routeId, departureHour, frequencyHours) => game.setRouteTimetable('transport', routeId, departureHour, frequencyHours)}
-              onClose={() => game.setSection('map')}
-            />
-          )}
-
           {game.activeSection === 'postal' && (
             <PostalDashboard
               company={game.company}

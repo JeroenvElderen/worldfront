@@ -65,6 +65,7 @@ export function AdministrativeRegions({ city, onClose, onBoundaries }: {
   const countryProgress = iso3 ? countryExplorationProgress(iso3, coverage ?? []) : null
   const countryArea = boundaries?.features.reduce((sum, feature) => sum + ((coverage ?? []).find((item) => item.regionId === feature.properties.gameRegionId)?.eligibleAreaKm2 ?? 0), 0) ?? 0
   const countryCost = countryTerritoryCost(countryArea)
+  const completeCountryCoverage = !!boundaries && boundaries.features.every((feature) => (coverage ?? []).some((item) => item.regionId === feature.properties.gameRegionId && (item.eligibleAreaKm2 ?? 0) > 0))
   const credits = availableRegionCredits(ledger ?? { creditedRegionIds: [], purchasedRegionIds: [] })
   const filtered = useMemo(() => (boundaries?.features ?? []).filter((feature) =>
     (feature.properties.shapeName ?? '').toLowerCase().includes(query.toLowerCase())
@@ -93,8 +94,8 @@ export function AdministrativeRegions({ city, onClose, onBoundaries }: {
             `${Math.round(countryProgress * 100)}% explored · 25% required`}
         </div>
         {!countryOwned && <button style={{ marginTop: 7 }}
-          disabled={countryProgress === null || countryProgress < COUNTRY_EXPLORATION_THRESHOLD || cash < countryCost || !Number.isFinite(countryArea) || countryArea <= 0}
-          onClick={() => iso3 && purchaseCountry(iso3, countryArea)}>
+          disabled={!completeCountryCoverage || countryProgress === null || countryProgress < COUNTRY_EXPLORATION_THRESHOLD || cash < countryCost || !Number.isFinite(countryArea) || countryArea <= 0}
+          onClick={() => iso3 && purchaseCountry(iso3, countryArea, boundaries.features.length)}>
           Purchase country · €{countryCost.toLocaleString()}
         </button>}
       </section>

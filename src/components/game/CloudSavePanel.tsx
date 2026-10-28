@@ -116,27 +116,41 @@ export function CloudSavePanel({ open, onClose }: { open: boolean; onClose: () =
       </>}
       <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #6b3434' }}>
         <p style={{ fontWeight: 700, color: '#fca5a5' }}>Danger zone</p>
-        <p>Delete this browser's WorldFront company, taxis, missions and explored map. This cannot be undone. Cloud database records are not deleted.</p>
+        <p>Permanently delete your local company and this account's cloud save, exploration jobs and explored territories. This cannot be undone. Other devices may still hold offline copies.</p>
         <button disabled={busy} style={{ background: '#9f2525', color: 'white', padding: '12px 16px', borderRadius: 8 }}
           onClick={() => void (async () => {
-            if (!window.confirm('Permanently delete this browser\'s WorldFront game and start over?')) return;
-            if (window.prompt('Type RESET to confirm deletion') !== 'RESET') return;
+            if (!window.confirm('Permanently wipe your WorldFront game on this device AND Supabase?')) return;
+            if (window.prompt('Type RESET to confirm permanent deletion') !== 'RESET') return;
             setBusy(true);
+            setMessage('');
             try {
               setAutoBackup(false);
+              // Remote deletion MUST succeed before removing the local save.
+              // Otherwise an inaccessible cloud save could later restore old progress.
+              if (supabase) {
+                const { data: { user }, error: authError } = await supabase.auth.getUser();
+                if (authError) throw authError;
+                if (user) {
+                  const { error } = await supabase.rpc('reset_worldfront_player_data');
+                  if (error) throw new Error('Cloud reset failed (install the reset SQL migration first): ' + error.message);
+                }
+              }
               await indexedDbStorage.removeItem('save:autosave');
               for (const key of Object.keys(window.localStorage)) {
                 if (key.startsWith('worldfront-') || key.startsWith('travel-empire') || key === 'save:autosave') {
                   window.localStorage.removeItem(key);
                 }
               }
-              if (supabase) await supabase.auth.signOut({ scope: 'local' });
+              if (supabase) {
+                const { error } = await supabase.auth.signOut({ scope: 'local' });
+                if (error) throw error;
+              }
               window.location.replace(window.location.origin + window.location.pathname);
             } catch (error) {
-              setMessage('Reset failed: ' + String(error));
+              setMessage('Reset stopped: ' + String(error));
               setBusy(false);
             }
-          })()}>Reset this device's game</button>
+          })()}>Wipe game everywhere & start over</button>
       </div>
       {message && <p role="status">{message}</p>}
       <p style={{ opacity: 0.7 }}>Local progress remains your primary save. Automatic backups require opt-in each session.</p>

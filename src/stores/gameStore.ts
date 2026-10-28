@@ -1557,7 +1557,6 @@ const generationTaxi = selectJobGenerationTaxi(state)
     const customCities = saved.customCities ?? []
     const savedVersion = saved.version ?? 0
     const savedExpansions = saved.territoryExpansions ?? []
-    const legacyDiscoveries = savedExpansions.filter((area) => area.source === 'taxi-discovery')
     let territoryExpansions = savedExpansions.filter((area) => area.source !== 'taxi-discovery').map((area) => {
       if (area.source !== 'ferry-discovery' || area.routeCoordinates?.length) return area
       const routeId = area.id.startsWith('ferry-discovery:') ? area.id.slice('ferry-discovery:'.length) : null

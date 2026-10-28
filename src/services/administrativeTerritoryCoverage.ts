@@ -16,7 +16,7 @@ export function calculateAdministrativeTerritoryCoverage(
     const eligibleAreaKm2 = area(feature) / 1e6
     let exploredAreaKm2 = 0
     try {
-      const clipped = intersect(featureCollection([feature, discovered]))
+      const clipped = intersect(featureCollection([feature, discovered] as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>[]))
       if (clipped) exploredAreaKm2 = Math.min(eligibleAreaKm2, area(clipped) / 1e6)
     } catch (error) {
       // Invalid upstream geometry must never grant free exploration credits.

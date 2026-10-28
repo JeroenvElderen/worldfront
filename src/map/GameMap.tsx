@@ -811,7 +811,11 @@ function GameMapView({
     if (!instance) return;
     const syncLegacyFog = () => {
       if (instance.getLayer("locked-territory-fill")) {
-        instance.setPaintProperty("locked-territory-fill", "fill-opacity", administrativeBoundaries ? 0 : 0.24);
+        instance.setPaintProperty("locked-territory-fill", "fill-color", "#e97070");
+        instance.setPaintProperty("locked-territory-fill", "fill-opacity", administrativeBoundaries ? 0.13 : 0.24);
+        // Keep grey unowned regions and gold borders above the red unexplored mask.
+        if (instance.getLayer("administrative-region-unowned")) instance.moveLayer("administrative-region-unowned");
+        if (instance.getLayer("administrative-region-outlines")) instance.moveLayer("administrative-region-outlines");
       }
     };
     instance.on("style.load", syncLegacyFog);
@@ -2112,7 +2116,7 @@ function GameMapView({
         id: "locked-territory-fill",
         type: "fill",
         source: "locked-territory",
-        paint: { "fill-color": "#68717c", "fill-opacity": administrativeBoundaries ? 0 : 0.24 },
+        paint: { "fill-color": "#e97070", "fill-opacity": administrativeBoundaries ? 0.13 : 0.24 },
       });
       instance.addSource("service-coverage", {
         type: "geojson",

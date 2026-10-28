@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
+import type { AdministrativeBoundaries } from "../services/administrativeBoundaries";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { featureCollection, lineString, point } from "@turf/helpers";
@@ -57,6 +58,7 @@ import { recordTaxiPosition, taxiPosition, persistTaxiPositions } from "../servi
 interface GameMapProps {
   layoutKey: string;
   onSelectStartingLocation?: (coordinates: Coordinates) => void;
+  administrativeBoundaries?: AdministrativeBoundaries | null;
   cityId: string | null;
   customCities: import("../models/game").City[];
   branches: Branch[];
@@ -699,6 +701,7 @@ const missionColor = (jobId: string) => {
 function GameMapView({
   layoutKey,
   onSelectStartingLocation,
+  administrativeBoundaries,
   cityId,
   customCities,
   branches,
@@ -749,6 +752,38 @@ function GameMapView({
   }, [exploredTerritory]);
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
+  const [containerReady, setContainerReady] = useState(false);
+  // Region outlines are updated only when the selected boundary dataset changes.
+  // Never subscribe to map render/move events: large datasets would lag on phones.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    const sourceId = "administrative-region-boundaries";
+    const layerId = "administrative-region-outlines";
+    const update = () => {
+      if (!instance.isStyleLoaded()) return;
+      if (!administrativeBoundaries) {
+        if (instance.getLayer(layerId)) instance.removeLayer(layerId);
+        if (instance.getSource(sourceId)) instance.removeSource(sourceId);
+        return;
+      }
+      const data = administrativeBoundaries as unknown as GeoJSON.FeatureCollection;
+      const existing = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+      if (existing) existing.setData(data);
+      else instance.addSource(sourceId, { type: "geojson", data });
+      if (!instance.getLayer(layerId)) instance.addLayer({
+        id: layerId, type: "line", source: sourceId,
+        paint: { "line-color": "#43ddb5", "line-width": 2, "line-opacity": 0.85 },
+      });
+    };
+    instance.on("style.load", update);
+    update();
+    return () => {
+      instance.off("style.load", update);
+      if (instance.getLayer(layerId)) instance.removeLayer(layerId);
+      if (instance.getSource(sourceId)) instance.removeSource(sourceId);
+    };
+  }, [administrativeBoundaries, containerReady]);
   const pickupJobIds = useRef(new Set<string>());
   const pickupHandlers = useRef(
     new Map<
@@ -777,7 +812,7 @@ function GameMapView({
   transportAssetsRef.current = transportAssets;
   transportRoutesRef.current = transportRoutes;
   const [mapRevision, setMapRevision] = useState(0);
-  const [containerReady, setContainerReady] = useState(false);
+
   // Every active taxi route has its own simulated congestion colour.
   // Keep it consistent when a route layer is recreated during a journey.
   // Each taxi keeps a distinct colour family. Darker shades mean more congestion.
@@ -3526,6 +3561,7 @@ export const GameMap = memo(
   (previous, next) =>
     previous.layoutKey === next.layoutKey &&
     previous.onSelectStartingLocation === next.onSelectStartingLocation &&
+    previous.administrativeBoundaries === next.administrativeBoundaries &&
     previous.cityId === next.cityId &&
     previous.customCities === next.customCities &&
     previous.branches === next.branches &&

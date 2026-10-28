@@ -107,3 +107,20 @@ export function regionAtCoordinates(boundaries: AdministrativeBoundaries, coordi
   const location = point(coordinates)
   return boundaries.features.find((feature) => booleanPointInPolygon(location, feature.geometry)) ?? null
 }
+
+/** The game stores ISO alpha-2 codes while geoBoundaries requires alpha-3. */
+const ISO2_TO_3: Record<string, string> = {
+  IE: 'IRL', NL: 'NLD', DE: 'DEU', GR: 'GRC', GB: 'GBR', UK: 'GBR',
+  FR: 'FRA', US: 'USA', SE: 'SWE', PL: 'POL', CA: 'CAN', AU: 'AUS',
+  JP: 'JPN', BR: 'BRA', IN: 'IND', CN: 'CHN', BE: 'BEL', ES: 'ESP',
+  IT: 'ITA', PT: 'PRT', AT: 'AUT', CH: 'CHE', DK: 'DNK', NO: 'NOR',
+  FI: 'FIN', CZ: 'CZE', SK: 'SVK', HU: 'HUN', RO: 'ROU', BG: 'BGR',
+  HR: 'HRV', SI: 'SVN', EE: 'EST', LV: 'LVA', LT: 'LTU', LU: 'LUX',
+  NZ: 'NZL', ZA: 'ZAF', MX: 'MEX', AR: 'ARG', CL: 'CHL', TR: 'TUR',
+  IS: 'ISL', CY: 'CYP', MT: 'MLT', UA: 'UKR',
+}
+export function toGeoBoundariesCountryCode(countryCode: string): string | null {
+  const code = countryCode.trim().toUpperCase()
+  if (/^[A-Z]{3}$/.test(code)) return code
+  return ISO2_TO_3[code] ?? null
+}

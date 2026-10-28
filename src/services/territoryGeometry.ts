@@ -182,7 +182,7 @@ export const isInsideVillageTerritories = (coordinates: Coordinates, centers: Vi
 export const resolveVillageTerritories = async (centers: VillageTerritoryCenter[]) =>
   Promise.all(centers.map(async (center) =>
     center.source === 'starting-station'
-      ? villageTerritory(center.id, center.coordinates, 1)
+      ? villageTerritory(center.id, center.coordinates, 0.35)
       : center.source === 'taxi-discovery'
       ? center.routeCoordinates && center.routeCoordinates.length >= 2
         ? taxiDiscoveryRouteTerritory(center.id, center.routeCoordinates, center.radiusKm)

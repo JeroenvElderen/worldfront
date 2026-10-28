@@ -7,6 +7,8 @@ export interface RegionRoadCoverage {
   eligibleRoadKm: number
   exploredRoadKm: number
   inventoryComplete: boolean
+  eligibleAreaKm2?: number
+  exploredAreaKm2?: number
 }
 export interface RegionExpansionLedger {
   creditedRegionIds: string[]
@@ -14,9 +16,8 @@ export interface RegionExpansionLedger {
 }
 /** Null means the complete eligible-road inventory is not available. */
 export function regionRoadProgress(coverage: RegionRoadCoverage): number | null {
-  if (!coverage.inventoryComplete || !Number.isFinite(coverage.eligibleRoadKm) || coverage.eligibleRoadKm <= 0) return null
-  if (!Number.isFinite(coverage.exploredRoadKm) || coverage.exploredRoadKm < 0) return null
-  return Math.min(1, coverage.exploredRoadKm / coverage.eligibleRoadKm)
+  if (Number.isFinite(coverage.eligibleAreaKm2) && (coverage.eligibleAreaKm2 ?? 0) > 0 && Number.isFinite(coverage.exploredAreaKm2)) return Math.min(1, Math.max(0, coverage.exploredAreaKm2 ?? 0) / (coverage.eligibleAreaKm2 ?? 1))
+  return null
 }
 export function regionQualifiesForCredit(coverage: RegionRoadCoverage): boolean {
   const progress = regionRoadProgress(coverage)

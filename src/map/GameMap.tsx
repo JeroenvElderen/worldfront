@@ -3211,6 +3211,52 @@ function GameMapView({
     };
   }, [vehicles, mapRevision]);
 
+  // Display the exact mapped sea lanes used by operating ferry markers and
+  // embarked taxis. Restore the layer after Mapbox style reloads.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    const sourceId = "worldfront-ferry-sea-lanes";
+    const layerId = "worldfront-ferry-sea-lanes-line";
+    const refresh = () => {
+      if (!instance.isStyleLoaded()) return;
+      const features = transportRoutes
+        .filter((route) => route.mode === "ferry" && (route.routeCoordinates?.length ?? 0) >= 2)
+        .map((route) => ({
+          type: "Feature" as const,
+          properties: { name: route.name },
+          geometry: {
+            type: "LineString" as const,
+            coordinates: route.routeCoordinates!,
+          },
+        }));
+      const data = { type: "FeatureCollection" as const, features };
+      const source = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+      if (source) source.setData(data);
+      else instance.addSource(sourceId, { type: "geojson", data });
+      if (!instance.getLayer(layerId)) {
+        instance.addLayer({
+          id: layerId,
+          type: "line",
+          source: sourceId,
+          paint: {
+            "line-color": "#25c7df",
+            "line-width": ["interpolate", ["linear"], ["zoom"], 3, 1.5, 10, 3.5],
+            "line-opacity": 0.85,
+            "line-dasharray": [2, 1.5],
+          },
+        });
+      }
+    };
+    if (instance.isStyleLoaded()) refresh();
+    instance.on("style.load", refresh);
+    return () => {
+      instance.off("style.load", refresh);
+      if (instance.getLayer(layerId)) instance.removeLayer(layerId);
+      if (instance.getSource(sourceId)) instance.removeSource(sourceId);
+    };
+  }, [transportRoutes, mapRevision]);
+
   // Boat markers are DOM markers kept across state transitions. Cancelling and
   // restarting their animation never removes them, so a shuttle changing
   // direction cannot blink out. Live route lines are intentionally omitted.

@@ -860,7 +860,8 @@ const generationTaxi = selectJobGenerationTaxi(state)
     let drivers = state.drivers
     let financialTransactions = state.financialTransactions ?? []
     let exploredTerritory = state.exploredTerritory
-    let vehicleJourneys = state.vehicleJourneys ?? []\n    let pendingExploration = state.pendingExploration ?? []
+    let vehicleJourneys = state.vehicleJourneys ?? []
+    let pendingExploration = state.pendingExploration ?? []
     let territoryExpansions = state.territoryExpansions ?? []
     let customerReviews = state.customerReviews ?? []
     let postalPerformance = state.postalPerformance ?? blankSave.postalPerformance
@@ -1693,7 +1694,12 @@ const scheduleExploration = () => {
     explorationTimer = null
     const state = useGameStore.getState()
     if (!state.hasHydrated || !(state.pendingExploration?.length)) return
-    if (Date.now() < explorationRetryAfter) {\n      explorationTimer = setTimeout(() => { explorationTimer = null; scheduleExploration() }, explorationRetryAfter - Date.now())\n      return\n    }\n    const result = processExplorationQueue(state)\n    explorationRetryAfter = result.pendingExploration?.length ? Date.now() + 15_000 : 0
+    if (Date.now() < explorationRetryAfter) {
+      explorationTimer = setTimeout(() => { explorationTimer = null; scheduleExploration() }, explorationRetryAfter - Date.now())
+      return
+    }
+    const result = processExplorationQueue(state)
+    explorationRetryAfter = result.pendingExploration?.length ? Date.now() + 15_000 : 0
     useGameStore.setState(result)
     if (result.pendingExploration?.length) {
       // A transient geometry failure must not create a tight retry loop.

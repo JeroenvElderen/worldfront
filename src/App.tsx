@@ -16,7 +16,6 @@ import type { Coordinates } from './models/game'
 import { moneyFormatterForCity } from './services/localization'
 import { HOTEL_PURCHASE_COST } from './services/hotelEconomy'
 import { CurrencyProvider } from './components/game/CurrencyContext'
-import { discoverFerryRoutes } from './services/maritimeRoutes'
 import { POSTAL_DEPOT_BUILD_COST } from './services/postalDepots'
 
 const JOB_REFRESH_INTERVAL_MS = 60_000
@@ -24,7 +23,6 @@ const JOB_REFRESH_INTERVAL_MS = 60_000
 const CitySetup = lazy(() => import('./screens/CitySetup').then(({ CitySetup: component }) => ({ default: component })))
 const TaxiCallPopup = lazy(() => import('./components/game/TaxiCallPopup').then(({ TaxiCallPopup: component }) => ({ default: component })))
 const PostalDashboard = lazy(() => import('./components/game/PostalDashboard').then(({ PostalDashboard: component }) => ({ default: component })))
-const FerryDispatch = lazy(() => import('./components/game/FerryDispatch').then(({ FerryDispatch: component }) => ({ default: component })))
 const SectionSheet = lazy(() => import('./components/game/SectionSheet').then(({ SectionSheet: component }) => ({ default: component })))
 const FinancialDashboard = lazy(() => import('./components/game/FinancialDashboard').then(({ FinancialDashboard: component }) => ({ default: component })))
 const HotelDashboard = lazy(() => import('./components/game/HotelDashboard').then(({ HotelDashboard: component }) => ({ default: component })))
@@ -37,7 +35,6 @@ export default function App() {
   const [placingStation, setPlacingStation] = useState(false)
   const [placingTerritory, setPlacingTerritory] = useState(false)
   const [placingHotel, setPlacingHotel] = useState(false)
-  const [placingHarbour, setPlacingHarbour] = useState(false)
   const [placingPostalDepot, setPlacingPostalDepot] = useState(false)
   const [showExpansionMenu, setShowExpansionMenu] = useState(false)
   const purchasedTerritories = (game.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery' && area.source !== 'ferry-discovery').length
@@ -88,31 +85,6 @@ export default function App() {
   }, [])
 
   const { company, addRandomJob, pauseGame, resumeGame, tickJobs, automation, jobs, runAutomation, hasHydrated } = game
-
-  const placeHarbour = game.placeHarbour
-  const setSection = game.setSection
-  const handlePlaceHarbour = useCallback(async (coordinates: Parameters<typeof placeHarbour>[0]) => {
-    setPlacingHarbour(false)
-    const harbourCount = useGameStore.getState().purchasedHarbours.length
-    // A third-party route lookup must never prevent harbour purchase.
-    placeHarbour(coordinates, [])
-    if (useGameStore.getState().purchasedHarbours.length === harbourCount) {
-      const current = useGameStore.getState()
-      const reason = !current.company ? 'Create a company first.'
-        : current.company.cash < 5_000 ? 'You need 5,000 to purchase a harbour.'
-        : 'This harbour is outside your unlocked territory, or has already been purchased.'
-      window.alert(`Harbour not placed: ${reason}`)
-      setPlacingHarbour(true)
-      return
-    }
-    setSection('ferries')
-    try {
-      const routes = await discoverFerryRoutes(coordinates)
-      useGameStore.getState().addHarbourFerryRoutes(coordinates, routes)
-    } catch (error) {
-      console.warn('Harbour purchased; ferry route discovery failed', error)
-    }
-  }, [placeHarbour, setSection])
 
   const availableOfferCapacity = jobOfferCapacity(game.vehicles, game.drivers)
 
@@ -409,7 +381,7 @@ export default function App() {
       {game.company ? (
         <>
           <TopHud company={game.company} />
-          {game.activeSection === 'map' && !placingStation && !placingTerritory && !placingHotel && !placingHarbour && !placingPostalDepot && <>{showExpansionMenu && <aside className="expansion-menu"><b>Expand your network</b><button disabled={game.company.cash < territoryExpansionCost} onClick={() => { setPlacingTerritory(true); setShowExpansionMenu(false) }}><span>◎</span><div><strong>Unlock village territory</strong><small>Choose a village border · {territoryExpansionPrice}</small></div></button><button disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => { setPlacingStation(true); setShowExpansionMenu(false) }} title={stationBuildMessage}><span>＋</span><div><strong>Build a station</strong><small>Start a separate service area · {money.format(stationPackageCost)}</small></div></button></aside>}<button className="station-add-button" onClick={() => setShowExpansionMenu((open) => !open)} aria-label="Territory expansion options" aria-expanded={showExpansionMenu}>＋</button></>}
+          {game.activeSection === 'map' && !placingStation && !placingTerritory && !placingHotel && !placingPostalDepot && <>{showExpansionMenu && <aside className="expansion-menu"><b>Expand your network</b><button disabled={game.company.cash < territoryExpansionCost} onClick={() => { setPlacingTerritory(true); setShowExpansionMenu(false) }}><span>◎</span><div><strong>Unlock village territory</strong><small>Choose a village border · {territoryExpansionPrice}</small></div></button><button disabled={game.company.level < 2 || game.company.cash < stationPackageCost || stationFleetFull} onClick={() => { setPlacingStation(true); setShowExpansionMenu(false) }} title={stationBuildMessage}><span>＋</span><div><strong>Build a station</strong><small>Start a separate service area · {money.format(stationPackageCost)}</small></div></button></aside>}<button className="station-add-button" onClick={() => setShowExpansionMenu((open) => !open)} aria-label="Territory expansion options" aria-expanded={showExpansionMenu}>＋</button></>}
           {placingStation && <aside className="depot-placement-banner"><span>⌖</span><div><b>Place Station {game.branches.length + 1}</b><small>Tap the map to build a station with one taxi for {money.format(stationPackageCost)}.</small></div><button onClick={() => setPlacingStation(false)}>Cancel</button></aside>}
           {placingTerritory && <aside className="depot-placement-banner"><span>◎</span><div><b>Unlock a village territory</b><small>Tap a village on the map to purchase its organic border for {territoryExpansionPrice.toLocaleLowerCase()}. No station will be built.</small></div><button onClick={() => setPlacingTerritory(false)}>Cancel</button></aside>}
           {placingHarbour && <aside className="depot-placement-banner"><span>⚓</span><div><b>Place harbour</b><small>Tap inside owned territory. Routes starting within 5 km of this point will be discovered.</small></div><button onClick={() => setPlacingHarbour(false)}>Cancel</button></aside>}
@@ -435,8 +407,7 @@ export default function App() {
           {game.activeSection === 'ferries' && (
             <FerryDispatch
               company={game.company}
-              purchasedHarbours={game.purchasedHarbours ?? []}
-              discoveredRoutes={game.discoveredFerryRoutes ?? []}
+                   discoveredRoutes={game.discoveredFerryRoutes ?? []}
               transportAssets={game.transportAssets ?? []}
               transportRoutes={game.transportRoutes ?? []}
               onRefreshRoutes={() => {

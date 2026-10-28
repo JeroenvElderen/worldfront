@@ -789,7 +789,12 @@ function GameMapView({
       });
       if (!instance.getLayer(borderId)) instance.addLayer({
         id: borderId, type: "line", source: sourceId,
-        paint: { "line-color": "#a6b2bf", "line-width": 1.7, "line-opacity": 0.95 },
+        paint: {
+          "line-color": "#e9b949",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 3, 1.1, 7, 1.8, 12, 2.5],
+          "line-opacity": 0.96,
+          "line-blur": 0.15,
+        },
       });
     };
     instance.on("style.load", update);

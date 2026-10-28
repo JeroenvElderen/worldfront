@@ -753,6 +753,7 @@ function GameMapView({
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [containerReady, setContainerReady] = useState(false);
+  const [mapInitialized, setMapInitialized] = useState(false);
   // Region outlines are updated only when the selected boundary dataset changes.
   // Never subscribe to map render/move events: large datasets would lag on phones.
   useEffect(() => {
@@ -783,7 +784,7 @@ function GameMapView({
       if (instance.getLayer(layerId)) instance.removeLayer(layerId);
       if (instance.getSource(sourceId)) instance.removeSource(sourceId);
     };
-  }, [administrativeBoundaries, containerReady]);
+  }, [administrativeBoundaries, mapInitialized]);
   const pickupJobIds = useRef(new Set<string>());
   const pickupHandlers = useRef(
     new Map<
@@ -1105,6 +1106,7 @@ function GameMapView({
     onBuildHotel,
     onPlaceHarbour,
     onBuildPostalDepot,
+    mapInitialized,
   ]);
 
   useEffect(() => {
@@ -1137,6 +1139,7 @@ function GameMapView({
       maxTileCacheSize: 24,
     });
     map.current = instance;
+    setMapInitialized(true);
     const resizeObserver = new ResizeObserver(() => {
       instance.resize();
       instance.triggerRepaint();

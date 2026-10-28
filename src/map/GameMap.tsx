@@ -1060,6 +1060,7 @@ function GameMapView({
     };
   }, [
     containerReady,
+    mapRevision,
     placingStation,
     placingTerritory,
     placingHotel,
@@ -1103,6 +1104,9 @@ function GameMapView({
       maxTileCacheSize: 24,
     });
     map.current = instance;
+    // Notify placement effects that the Mapbox instance now exists.
+    // containerReady alone changes before this effect creates the map.
+    setMapRevision((revision) => revision + 1);
     const resizeObserver = new ResizeObserver(() => {
       instance.resize();
       instance.triggerRepaint();

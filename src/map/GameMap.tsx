@@ -3091,8 +3091,10 @@ function GameMapView({
         if (!instance.getSource(sourceId)) continue;
         const journey = getJobMotionJourney(job, vehicle);
         const time = getJobMotionTime(job, now);
-        const start = taxiPosition(vehicle.id, now - 30 * 60_000)
-          ?? vehicle.position
+        // Never use the latest live checkpoint as the origin of a route.
+        // That checkpoint moves every frame and turns a fallback path into
+        // a sliding straight line, overriding the actual road animation.
+        const start = vehicle.position
           ?? getCity(cityId, customCities)?.coordinates;
         if (!start) continue;
         const pickup = jobPickup(job);
@@ -3107,6 +3109,11 @@ function GameMapView({
         const progress = Math.max(0, Math.min(1, (time - from) / Math.max(1, to - from)));
         const position = routePosition(pickingUp ? pickupPath : passengerPath, progress);
         if (!Number.isFinite(position[0]) || !Number.isFinite(position[1])) continue;
+        // The accepted-job runner owns live road geometry (including routes
+        // returned by Directions before React has persisted them). Do not
+        // overwrite its road-following position with stale fallback geometry.
+        // Reconciliation takes over only when that runner is unavailable.
+        if (liveJobRunners.current.has(job.id)) continue;
         updateVisibleVehicleMarker(instance, sourceId, position);
       }
     };

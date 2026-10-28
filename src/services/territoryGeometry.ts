@@ -7,7 +7,7 @@ export const VILLAGE_TERRITORY_RADIUS_KM = 6
 // Reveal only a narrow corridor beside roads actually travelled.
 // This radius applies to live taxi exploration and completed-trip backfill;
 // manually purchased village territory retains its separate 6 km radius.
-export const TAXI_DISCOVERY_RADIUS_KM = 0.05
+export const TAXI_DISCOVERY_RADIUS_KM = 0.15
 
 export interface VillageTerritoryCenter { id: string; coordinates: Coordinates; routeCoordinates?: Coordinates[]; source?: 'village' | 'starting-station' | 'taxi-discovery' | 'ferry-discovery'; radiusKm?: number }
 export type { TerritoryFeature } from '../models/game'

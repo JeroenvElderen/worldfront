@@ -282,7 +282,7 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     // Upgrade the previous free Greece ADM1 licence to the smaller ADM2
     // starting municipality without granting additional territory.
     const legacyGreek = (state.territoryLicenses ?? []).filter((id) => /^GRC:ADM1:/.test(id))
-    const canMigrateGreek = regionId.startsWith('GRC:ADM3:') &&
+    const canMigrateGreek = /^GRC:ADM[23]:/.test(regionId) &&
       legacyGreek.length === 1 && !ledger.purchasedRegionIds.length
     if ((hasRealRegion && !canMigrateGreek) || ledger.purchasedRegionIds.length) return state
     return {

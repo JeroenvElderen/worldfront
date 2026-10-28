@@ -36,6 +36,59 @@ const STOP_TERRAIN_CACHE_LIMIT = 500
 const stopTerrainCache = new Map<string, { water: boolean; expiresAt: number }>()
 const pendingTerrainChecks = new Map<string, Promise<boolean>>()
 
+// Mapbox Streets road classes are checked at the final Directions-snapped
+// stops, not at the random candidate points. Motorways and trunk roads,
+// including their ramps, are unsuitable places for passenger stops.
+const unsafeStopRoadClasses = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link'])
+const stopRoadCache = new Map<string, { safe: boolean; expiresAt: number }>()
+const pendingRoadChecks = new Map<string, Promise<boolean>>()
+async function isSafePassengerStop(coordinates: Coordinates, signal?: AbortSignal): Promise<boolean> {
+  if (!mapboxAccessToken) return false
+  const key = coordinates.map((value) => value.toFixed(5)).join(',')
+  const cached = stopRoadCache.get(key)
+  if (!signal && cached && cached.expiresAt > Date.now()) return cached.safe
+  if (!signal && pendingRoadChecks.has(key)) return pendingRoadChecks.get(key)!
+  const check = async () => {
+    const query = new URLSearchParams({
+      layers: 'road',
+      geometry: 'linestring',
+      radius: '15',
+      limit: '10',
+      access_token: mapboxAccessToken,
+    })
+    const response = await fetch(`https://api.mapbox.com/v4/${MAPBOX_STREETS_TILESET}/tilequery/${coordinates.join(',')}.json?${query}`, { signal })
+    if (!response.ok) return false
+    const data = await response.json() as { features?: Array<{ properties?: { class?: string; structure?: string; tilequery?: { distance?: number } } }> }
+    const roads = (data.features ?? []).filter((feature) => typeof feature.properties?.class === 'string')
+    if (!roads.length) return false
+    const nearestDistance = Math.min(...roads.map((road) => road.properties?.tilequery?.distance ?? Infinity))
+    // At junctions a minor road may be nearby while the stop is actually
+    // on a motorway. Reject when a prohibited road is equally close.
+    const nearby = roads.filter((road) => (road.properties?.tilequery?.distance ?? Infinity) <= nearestDistance + 5)
+    return nearby.length > 0 && nearby.every((road) =>
+      !unsafeStopRoadClasses.has(road.properties!.class!.toLowerCase()))
+  }
+  const request = check().catch((error: unknown) => {
+    if ((error as Error).name === 'AbortError') throw error
+    return false
+  })
+  if (!signal) pendingRoadChecks.set(key, request)
+  try {
+    const safe = await request
+    if (!signal) {
+      stopRoadCache.set(key, { safe, expiresAt: Date.now() + STOP_TERRAIN_CACHE_TTL_MS })
+      if (stopRoadCache.size > STOP_TERRAIN_CACHE_LIMIT) {
+        const oldest = stopRoadCache.keys().next().value
+        if (oldest) stopRoadCache.delete(oldest)
+      }
+    }
+    return safe
+  } finally {
+    if (!signal) pendingRoadChecks.delete(key)
+  }
+}
+
+
 /** Check whether a snapped stop lies in water; share duplicate requests. */
 async function isWaterCoordinate(coordinates: Coordinates, signal?: AbortSignal): Promise<boolean> {
   if (!mapboxAccessToken) return false
@@ -91,6 +144,11 @@ async function roadStops(from: Coordinates, to: Coordinates, signal?: AbortSigna
       isWaterCoordinate(route.destination, signal),
     ])
     if (originIsWater || destinationIsWater) return null
+    const [pickupSafe, destinationSafe] = await Promise.all([
+      isSafePassengerStop(route.origin, signal),
+      isSafePassengerStop(route.destination, signal),
+    ])
+    if (!pickupSafe || !destinationSafe) return null
     return {
       pickupRoad: route.origin,
       destinationRoad: route.destination,
@@ -346,6 +404,8 @@ routes = shuffled([...uniqueRoutes.values()])
       ? { pickupRoad: route.stored.pickupRoad ?? route.pickup.coordinates, destinationRoad: route.stored.destinationRoad ?? route.destination.coordinates, routeCoordinates: route.stored.routeCoordinates ?? [route.stored.pickup, route.stored.destination], speedLimits: [] as import('./roadRoutes').RouteSpeedLimit[], ferryCrossings: route.stored.ferryCrossings ?? [], durationMinutes: route.stored.durationMinutes, distanceKm: route.stored.distanceKm }
       : await roadStops(route.pickup.coordinates, route.destination.coordinates, signal)
     if (!stops) return null
+    // Offline cached jobs were validated when originally generated. Live
+    // requests always recheck both snapped stop road classes.
     // A ferry edge in Directions is not a vehicle-owned boat. Cross-water work
     // is available only when the player has dispatched a purchased ferry on the
     // same terminal pair; otherwise island offers stay off the board.

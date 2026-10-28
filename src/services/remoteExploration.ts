@@ -41,8 +41,9 @@ export async function loadRemoteExploration(): Promise<TerritoryFeature | null> 
 
 export function subscribeRemoteExploration(onChange: () => void) {
   if (!supabase) return () => {}
-  const channel = supabase.channel('worldfront-exploration')
+  const client = supabase
+  const channel = client.channel('worldfront-exploration')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'exploration_territories' }, onChange)
     .subscribe()
-  return () => { void supabase.removeChannel(channel) }
+  return () => { void client.removeChannel(channel) }
 }

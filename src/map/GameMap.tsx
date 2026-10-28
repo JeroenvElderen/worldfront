@@ -1221,7 +1221,9 @@ function GameMapView({
       if (import.meta.env.DEV) console.debug("[GameMap] Mapbox style loaded");
       // Re-run layer effects after Mapbox has a usable style on initial load
       // and after browser refresh / style restoration.
-      setMapInitialized((value) => !value);
+      // The map instance stays mounted; rerun job/vehicle synchronization once
+      // the style is ready, including when the style is restored on mobile.
+      setMapRevision((revision) => revision + 1);
     };
     const handleLoad = async () => {
       if (import.meta.env.DEV) console.debug("[GameMap] Mapbox map loaded");

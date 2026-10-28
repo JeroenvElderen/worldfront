@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { buffer, featureCollection, lineString, simplify, union } from '@turf/turf'
+import { buffer, featureCollection, lineString, union } from '@turf/turf'
 
 const url = process.env.SUPABASE_URL
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -20,7 +20,7 @@ function routePolygon(segments, jobId) {
       point.every((coordinate) => Number.isFinite(coordinate)))
     if (valid.length < 2) continue
     const path = lineString(valid)
-    const shape = buffer(simplify(path, { tolerance: 0.0001, highQuality: false }), 0.5, { steps: 8, units: 'kilometers' })
+    const shape = buffer(path, 0.01, { steps: 8, units: 'kilometers' })
     if (shape) polygons.push(shape)
   }
   if (!polygons.length) throw new Error('No usable land route segments')

@@ -1,3 +1,4 @@
+import { calculateAdministrativeTerritoryCoverage } from '../services/administrativeTerritoryCoverage'
 import { useEffect, useMemo, useState } from 'react'
 import { useGameStore } from '../stores/gameStore'
 import { fetchAdministrativeBoundaries, regionAtCoordinates, toGeoBoundariesCountryCode, type AdministrativeBoundaries } from '../services/administrativeBoundaries'
@@ -18,6 +19,8 @@ export function AdministrativeRegions({ city, onClose, onBoundaries }: {
   const ledger = useGameStore((state) => state.administrativeExpansionLedger)
   const coverage = useGameStore((state) => state.administrativeRoadCoverage)
   const cash = useGameStore((state) => state.company?.cash ?? 0)
+  const explored = useGameStore((state) => state.exploredTerritory)
+  const updateCoverage = useGameStore((state) => state.updateAdministrativeCoverage)
   const registerStart = useGameStore((state) => state.registerStartingAdministrativeRegion)
   const purchase = useGameStore((state) => state.purchaseAdministrativeRegion)
   const claim = useGameStore((state) => state.claimAdministrativeCredits)
@@ -47,6 +50,15 @@ export function AdministrativeRegions({ city, onClose, onBoundaries }: {
     })
     return () => { cancelled = true; onBoundaries?.(null) }
   }, [iso3, city.countryName, city.coordinates, onBoundaries, registerStart])
+  useEffect(() => {
+    if (!boundaries) return
+    // Allow the exploration engine to finish merging its latest journey before
+    // performing the potentially expensive polygon intersection work.
+    const timer = window.setTimeout(() => {
+      updateCoverage(calculateAdministrativeTerritoryCoverage(boundaries, explored))
+    }, 500)
+    return () => window.clearTimeout(timer)
+  }, [boundaries, explored, updateCoverage])
   useEffect(() => { claim() }, [claim, coverage])
   const credits = availableRegionCredits(ledger ?? { creditedRegionIds: [], purchasedRegionIds: [] })
   const filtered = useMemo(() => (boundaries?.features ?? []).filter((feature) =>
@@ -64,7 +76,7 @@ export function AdministrativeRegions({ city, onClose, onBoundaries }: {
     </header>
     <small>{city.countryName} · {boundaries?.metadata.divisionName ?? 'Loading boundaries'}</small>
     <div style={{ fontSize: 13 }}>Expansion credits: <strong>{credits}</strong> · New region: €{REGION_PURCHASE_COST.toLocaleString()}</div>
-    <small>Earn one credit after exploring 50% of a region's eligible roads. Road inventory must be complete before credits can be awarded.</small>
+    <small>Earn one credit after discovering 50% of an administrative region's area with taxis.</small>
     {busy && <div role="status">Loading administrative borders…</div>}
     {error && <div role="alert">{error}</div>}
     {boundaries && <>
@@ -81,7 +93,7 @@ export function AdministrativeRegions({ city, onClose, onBoundaries }: {
               <strong>{feature.properties.shapeName}</strong>
               <small>{owned ? 'Owned' : 'Locked'}</small>
             </div>
-            <div style={{ fontSize: 12, marginTop: 4 }}>{progress === null ? 'Road coverage unavailable' : `${Math.round(progress * 100)}% roads explored`}</div>
+            <div style={{ fontSize: 12, marginTop: 4 }}>{progress === null ? 'Territory coverage unavailable' : `${Math.round(progress * 100)}% roads explored`}</div>
             {!owned && <button style={{ marginTop: 7 }} disabled={!canBuy} onClick={() => purchase(id)}>
               Unlock · €25,000 + 1 credit
             </button>}

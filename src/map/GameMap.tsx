@@ -825,6 +825,8 @@ function GameMapView({
         if (instance.getLayer("administrative-region-unowned")) instance.moveLayer("administrative-region-unowned");
         if (instance.getLayer("administrative-region-owned")) instance.moveLayer("administrative-region-owned");
         if (instance.getLayer("administrative-region-outlines")) instance.moveLayer("administrative-region-outlines");
+        // Taxi-discovered areas remain visible above the ownership tint.
+        if (instance.getLayer("service-coverage-line")) instance.moveLayer("service-coverage-line");
       }
     };
     instance.on("style.load", syncLegacyFog);

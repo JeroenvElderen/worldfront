@@ -1683,6 +1683,32 @@ const generationTaxi = selectJobGenerationTaxi(state)
 }))
 
 
+// Process exploration after mission settlement has been persisted. Retry failed
+// geometry on later ticks and after rehydration, without losing the route.
+let explorationTimer: ReturnType<typeof setTimeout> | null = null
+const scheduleExploration = () => {
+  if (explorationTimer) return
+  explorationTimer = setTimeout(() => {
+    explorationTimer = null
+    const state = useGameStore.getState()
+    if (!state.hasHydrated || !(state.pendingExploration?.length)) return
+    const result = processExplorationQueue(state)
+    useGameStore.setState(result)
+    if (result.pendingExploration?.length) {
+      // A transient geometry failure must not create a tight retry loop.
+      explorationTimer = setTimeout(() => {
+        explorationTimer = null
+        scheduleExploration()
+      }, 15_000)
+    }
+  }, 0)
+}
+useGameStore.subscribe((state, previous) => {
+  if (!state.hasHydrated || !(state.pendingExploration?.length)) return
+  if (state.pendingExploration !== previous.pendingExploration || !previous.hasHydrated) scheduleExploration()
+})
+if (useGameStore.getState().hasHydrated && useGameStore.getState().pendingExploration?.length) scheduleExploration()
+
 // Refill the offer board after a job is accepted, declined or expires.
 // Debouncing coalesces several changes into one generation pass, while the
 // cooldown prevents repeated API calls when suitable roads cannot be found.

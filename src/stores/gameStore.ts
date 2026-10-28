@@ -1751,8 +1751,9 @@ const startRemoteExploration = () => {
     // Earlier versions removed pendingExploration immediately after local
     // geometry processing, before the remote queue could acknowledge them.
     const completed = state.jobs
-      .filter((job) => job.status === 'completed')
-      .map((job) => completedExploration(job, job.completedAt ?? state.updatedAt))
+      .filter((job) => job.status === 'complete')
+      .map((job) => completedExploration(job,
+        (state.vehicleJourneys ?? []).find((trip) => trip.jobId === job.id)?.completedAt ?? state.updatedAt))
       .filter((item): item is PendingExploration => item !== null)
     const outstanding = [...(state.pendingExploration ?? []), ...completed]
     void submitExplorationQueue(outstanding)

@@ -15,7 +15,9 @@ export async function reversePlace([longitude, latitude]: Coordinates): Promise<
     const name = (feature?.properties?.feature_type === 'country' ? undefined : feature?.properties?.name) ?? context?.place?.name ?? context?.region?.name ?? context?.country?.name
     const countryCode = (context?.country?.country_code ?? (feature?.properties?.feature_type === 'country' ? feature.properties.short_code : undefined))?.toUpperCase()
     if (!countryCode) throw new Error('Select a location on land within a country.')
-    return { name, region: context?.region?.name ?? name, regionCode: context?.region?.region_code ?? context?.region?.name ?? name, country: context?.country?.name ?? countryCode, countryCode }
+    const resolvedName = name ?? context?.country?.name ?? countryCode
+    const resolvedRegion = context?.region?.name ?? resolvedName
+    return { name: resolvedName, region: resolvedRegion, regionCode: context?.region?.region_code ?? resolvedRegion, country: context?.country?.name ?? countryCode, countryCode }
   }
   const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`, { headers: { 'Accept-Language': 'en' } })
   if (!response.ok) throw new Error('We could not identify that place. Try another point.')

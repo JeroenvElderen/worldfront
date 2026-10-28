@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { indexedDbStorage } from "../../services/saveDatabase";
 import { loadCompanyFromCloud, saveCompanyToCloud, signInWithEmail, signUpWithEmail } from "../../services/cloudSaves";
 import { useGameStore } from "../../stores/gameStore";
 import { snapshotTaxiPositions, persistTaxiPositions } from "../../services/liveTaxiPositions";
@@ -113,6 +114,30 @@ export function CloudSavePanel({ open, onClose }: { open: boolean; onClose: () =
         <button disabled={busy} onClick={() => void execute(async () => { await signInWithEmail(email, password); setMessage("Signed in."); })}>Sign in</button>
         <button disabled={busy} onClick={() => void execute(async () => { await signUpWithEmail(email, password); setMessage("Account created. Check your email if confirmation is enabled."); })}>Register</button>
       </>}
+      <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #6b3434' }}>
+        <p style={{ fontWeight: 700, color: '#fca5a5' }}>Danger zone</p>
+        <p>Delete this browser's WorldFront company, taxis, missions and explored map. This cannot be undone. Cloud database records are not deleted.</p>
+        <button disabled={busy} style={{ background: '#9f2525', color: 'white', padding: '12px 16px', borderRadius: 8 }}
+          onClick={() => void (async () => {
+            if (!window.confirm('Permanently delete this browser\'s WorldFront game and start over?')) return;
+            if (window.prompt('Type RESET to confirm deletion') !== 'RESET') return;
+            setBusy(true);
+            try {
+              setAutoBackup(false);
+              await indexedDbStorage.removeItem('save:autosave');
+              for (const key of Object.keys(window.localStorage)) {
+                if (key.startsWith('worldfront-') || key.startsWith('travel-empire') || key === 'save:autosave') {
+                  window.localStorage.removeItem(key);
+                }
+              }
+              if (supabase) await supabase.auth.signOut({ scope: 'local' });
+              window.location.replace(window.location.origin + window.location.pathname);
+            } catch (error) {
+              setMessage('Reset failed: ' + String(error));
+              setBusy(false);
+            }
+          })()}>Reset this device's game</button>
+      </div>
       {message && <p role="status">{message}</p>}
       <p style={{ opacity: 0.7 }}>Local progress remains your primary save. Automatic backups require opt-in each session.</p>
     </section>

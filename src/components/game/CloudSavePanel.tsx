@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
-import { indexedDbStorage } from "../../services/saveDatabase";
+import { wipeLocalGameSave } from "../../services/saveDatabase";
 import { loadCompanyFromCloud, saveCompanyToCloud, signInWithEmail, signUpWithEmail } from "../../services/cloudSaves";
 import { useGameStore } from "../../stores/gameStore";
 import { snapshotTaxiPositions, persistTaxiPositions } from "../../services/liveTaxiPositions";
@@ -135,9 +135,9 @@ export function CloudSavePanel({ open, onClose }: { open: boolean; onClose: () =
                   if (error) throw new Error('Cloud reset failed (install the reset SQL migration first): ' + error.message);
                 }
               }
-              await indexedDbStorage.removeItem('save:autosave');
+              await wipeLocalGameSave();
               for (const key of Object.keys(window.localStorage)) {
-                if (key.startsWith('worldfront-') || key.startsWith('travel-empire') || key === 'save:autosave') {
+                if ((key.startsWith('worldfront-') && key !== 'worldfront-reset-pending-v1') || key.startsWith('travel-empire') || key === 'save:autosave') {
                   window.localStorage.removeItem(key);
                 }
               }

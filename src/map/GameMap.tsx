@@ -806,6 +806,18 @@ function GameMapView({
       if (instance.getSource(sourceId)) instance.removeSource(sourceId);
     };
   }, [administrativeBoundaries, ownedAdministrativeRegionIds, mapInitialized]);
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    const syncLegacyFog = () => {
+      if (instance.getLayer("locked-territory-fill")) {
+        instance.setPaintProperty("locked-territory-fill", "fill-opacity", administrativeBoundaries ? 0 : 0.24);
+      }
+    };
+    instance.on("style.load", syncLegacyFog);
+    syncLegacyFog();
+    return () => { instance.off("style.load", syncLegacyFog); };
+  }, [administrativeBoundaries, mapInitialized]);
   const pickupJobIds = useRef(new Set<string>());
   const pickupHandlers = useRef(
     new Map<

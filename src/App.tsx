@@ -58,25 +58,37 @@ export default function App() {
       setAdministrativeBoundaries(null)
       return
     }
-    void fetchAdministrativeBoundaries(adminCountryCode, adminCountryName)
-      .then((data) => {
-        if (cancelled) return
-        setAdministrativeBoundaries(data)
-        const state = useGameStore.getState()
-        const startingCity = getCity(state.startingCityId, state.customCities ?? [])
-        if (startingCity && toGeoBoundariesCountryCode(startingCity.countryCode) === adminCountryCode) {
-          const startingRegion = regionAtCoordinates(data, startingCity.coordinates)
-          if (startingRegion) state.registerStartingAdministrativeRegion(startingRegion.properties.gameRegionId)
-        }
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setAdministrativeBoundaries(null)
-          console.warn('[WorldFront] GADM boundaries unavailable', error)
-        }
-      })
-    return () => { cancelled = true }
+    let retryTimer: number | undefined
+    const loadBoundaries = (attempt: number) => {
+      void fetchAdministrativeBoundaries(adminCountryCode, adminCountryName)
+        .then((data) => {
+          if (cancelled) return
+          setAdministrativeBoundaries(data)
+          const state = useGameStore.getState()
+          const startingCity = getCity(state.startingCityId, state.customCities ?? [])
+          if (startingCity && toGeoBoundariesCountryCode(startingCity.countryCode) === adminCountryCode) {
+            const startingRegion = regionAtCoordinates(data, startingCity.coordinates)
+            if (startingRegion) state.registerStartingAdministrativeRegion(startingRegion.properties.gameRegionId)
+          }
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return
+          console.warn('[WorldFront] GADM boundary load failed', attempt + 1, error)
+          // Mobile refresh can briefly interrupt a large GADM download.
+          // Retry rather than permanently dropping the gold region borders.
+          if (attempt < 3) {
+            retryTimer = window.setTimeout(() => loadBoundaries(attempt + 1), 1500 * (attempt + 1))
+          }
+        })
+    }
+    loadBoundaries(0)
+    return () => { cancelled = true; if (retryTimer !== undefined) window.clearTimeout(retryTimer) }
   }, [Boolean(game.company), adminCountryCode, adminCountryName])
+  const startingCityForRegion = getCity(game.startingCityId, game.customCities ?? [])
+  const startingRegionId = administrativeBoundaries && startingCityForRegion &&
+    toGeoBoundariesCountryCode(startingCityForRegion.countryCode) === administrativeBoundaries.metadata.countryCode
+    ? regionAtCoordinates(administrativeBoundaries, startingCityForRegion.coordinates)?.properties.gameRegionId ?? null
+    : null
   const money = moneyFormatterForCity(activeCity)
   const maintenanceAlert = (game.maintenanceAlerts ?? []).find((alert) => !alert.dismissed)
   const territoryExpansionPrice = territoryExpansionCost === 0 ? 'Free' : money.format(territoryExpansionCost)
@@ -192,6 +204,21 @@ export default function App() {
     addRandomJob,
     game.hasHydrated,
   ])
+
+  // Starting a company must activate already available taxi work immediately.
+  // Previously automation was only invoked after a newly generated offer;
+  // on the first render it could miss the company/driver setup and only
+  // recover after a page refresh.
+  useEffect(() => {
+    if (!company || !hasHydrated) return
+    const start = window.setTimeout(() => {
+      const state = useGameStore.getState()
+      if (!state.company) return
+      state.runAutomation()
+      state.tickJobs()
+    }, 0)
+    return () => window.clearTimeout(start)
+  }, [company, hasHydrated, game.vehicles.length, game.drivers.length, game.automation.enabled])
 
   /**
    * Schedule tickJobs for the next game event.
@@ -403,7 +430,7 @@ export default function App() {
       <Suspense fallback={<div className="map-loading" aria-label="Loading map" />}><GameMap
         onSelectStartingLocation={!game.company ? setStartingCoordinates : undefined}
         administrativeBoundaries={administrativeBoundaries}
-        ownedAdministrativeRegionIds={game.territoryLicenses ?? []}
+        ownedAdministrativeRegionIds={startingRegionId && !(game.administrativeExpansionLedger?.purchasedRegionIds?.length) ? [...new Set([...(game.territoryLicenses ?? []), startingRegionId])] : (game.territoryLicenses ?? [])}
         layoutKey={game.activeSection}
         cityId={game.activeCityId ?? game.startingCityId}
         customCities={game.customCities ?? []}

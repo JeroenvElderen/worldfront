@@ -42,8 +42,7 @@ const OVERRIDES: Record<string, [AdministrativeLevel, string]> = {
 type RawFeature = { type: 'Feature'; properties?: Record<string, unknown>; geometry: GeoJSON.Geometry }
 type RawCollection = { type: 'FeatureCollection'; features: RawFeature[] }
 const cache = new Map<string, Promise<AdministrativeBoundaries>>()
-const levelsFor = (code: string): AdministrativeLevel[] =>
-  [...new Set([OVERRIDES[code]?.[0] ?? 'ADM1', 'ADM1', 'ADM2', 'ADM3'])] as AdministrativeLevel[]
+const levelsFor = (_code: string): AdministrativeLevel[] => ['ADM3', 'ADM2', 'ADM1']
 
 async function fetchLevel(code: string, level: AdministrativeLevel): Promise<RawCollection | null> {
   // Browser requests go through our own origin, avoiding geoBoundaries CORS.

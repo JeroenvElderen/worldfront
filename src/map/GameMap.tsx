@@ -399,6 +399,20 @@ const mapVehicleColor = (vehicle: Vehicle, standardColor: string) =>
 
 // Screen-independent heading derived from the direction of travel.
 const vehicleHeadingState = new Map<string, { position: Coordinates; heading: number }>();
+// Dispatch-style rendering: journeys continue to simulate offscreen, while
+// Mapbox only receives marker updates for vehicles inside the visible map.
+const updateVisibleVehicleMarker = (
+  instance: mapboxgl.Map,
+  sourceId: string,
+  position: Coordinates,
+  properties: Record<string, unknown> = {},
+) => {
+  const source = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+  if (!source) return;
+  if (!instance.getBounds().contains(position as [number, number])) return;
+  source.setData(movingVehiclePoint(sourceId, position, properties));
+};
+
 const movingVehiclePoint = (id: string, position: Coordinates, properties: Record<string, unknown> = {}) => {
   const previous = vehicleHeadingState.get(id);
   let heading = previous?.heading ?? 0;
@@ -2823,16 +2837,14 @@ function GameMapView({
           }
         }
         if (!ferryState) recordJourneyCheckpoint(job.id, vehicle.id, currentPosition);
-        (instance.getSource(taxiSourceId) as mapboxgl.GeoJSONSource).setData(
-          movingVehiclePoint(taxiSourceId, currentPosition, {
-            ferryStatus:
-              ferryState === "waiting"
-                ? "Waiting for ferry"
-                : ferryState === "aboard"
-                  ? "On ferry"
-                  : "",
-          }),
-        );
+        updateVisibleVehicleMarker(instance, taxiSourceId, currentPosition, {
+          ferryStatus:
+            ferryState === "waiting"
+              ? "Waiting for ferry"
+              : ferryState === "aboard"
+                ? "On ferry"
+                : "",
+        });
         if (
           SHOW_DRIVING_ROUTE_LINES && (now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS ||
           time >= journey.arrivesAt)

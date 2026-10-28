@@ -198,6 +198,21 @@ export default function App() {
     game.hasHydrated,
   ])
 
+  // Starting a company must activate already available taxi work immediately.
+  // Previously automation was only invoked after a newly generated offer;
+  // on the first render it could miss the company/driver setup and only
+  // recover after a page refresh.
+  useEffect(() => {
+    if (!company || !hasHydrated) return
+    const start = window.setTimeout(() => {
+      const state = useGameStore.getState()
+      if (!state.company) return
+      state.runAutomation()
+      state.tickJobs()
+    }, 0)
+    return () => window.clearTimeout(start)
+  }, [company, hasHydrated, game.vehicles.length, game.drivers.length, game.automation.enabled])
+
   /**
    * Schedule tickJobs for the next game event.
    *

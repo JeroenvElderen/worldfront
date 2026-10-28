@@ -279,14 +279,22 @@ export const useGameStore = create<GameState & GameActions>()(persist((set, get)
     // free region on later country switches or save restores.
     const hasRealRegion = (state.territoryLicenses ?? []).some((id) => /:[Aa][Dd][Mm][123]:/.test(id))
     if ((state.territoryLicenses ?? []).includes(regionId)) return state
-    // Upgrade the previous free Greece ADM1 licence to the smaller ADM2
-    // starting municipality without granting additional territory.
-    const legacyGreek = (state.territoryLicenses ?? []).filter((id) => /^GRC:ADM1:/.test(id))
-    const canMigrateGreek = /^GRC:ADM[23]:/.test(regionId) &&
-      legacyGreek.length === 1 && !ledger.purchasedRegionIds.length
-    if ((hasRealRegion && !canMigrateGreek) || ledger.purchasedRegionIds.length) return state
+    // Replace only a legacy free broad starting region with its smaller
+    // GADM district; never replace a purchased region.
+    const currentLicenses = state.territoryLicenses ?? []
+    const target = regionId.match(/^([A-Z]{3}):ADM([123]):/)
+    const legacy = currentLicenses.filter((id) => {
+      const match = id.match(/^([A-Z]{3}):ADM([123]):/)
+      return !!target && !!match && match[1] === target[1] &&
+        Number(match[2]) < Number(target[2]) &&
+        !ledger.purchasedRegionIds.includes(id)
+    })
+    const canMigrate = legacy.length === 1 &&
+      currentLicenses.filter((id) => /:ADM[123]:/.test(id)).length === 1 &&
+      ledger.purchasedRegionIds.length === 0
+    if (hasRealRegion && !canMigrate) return state
     return {
-      territoryLicenses: [...new Set([...(state.territoryLicenses ?? []).filter((id) => !canMigrateGreek || !legacyGreek.includes(id)), regionId])],
+      territoryLicenses: [...new Set([...currentLicenses.filter((id) => !canMigrate || !legacy.includes(id)), regionId])],
       updatedAt: new Date().toISOString(),
     }
   }),

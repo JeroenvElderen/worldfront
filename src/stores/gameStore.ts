@@ -7,6 +7,7 @@ import { getPostVehicleModel } from '../data/postVehicles'
 import type { AutomationRole, BrandStrategy, City, CleaningService, Company, Coordinates, DepotFacility, Difficulty, DispatcherStrategy, Driver, DriverCertification, ExteriorAccessory, FerryRouteOption, FinancialTransaction, GameSave, IncidentResponse, MaintenanceKind, PostalDepot, PostalRoutePlan, RefuelStrategy, ResearchId, Specialization, TaxiFerryCrossing, TerritoryExpansion, TireType, TransactionCategory, TransportMode, Vehicle, PendingExploration, VehicleUpgrade } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
 import { explorationDiagnostic, loadRemoteExploration, submitExplorationQueue, subscribeRemoteExploration } from '../services/remoteExploration'
+import { mergeVillageTerritories } from '../services/territoryGeometry'
 import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import {
   generateJobOffers,
@@ -22,7 +23,7 @@ import { canResearch, hasResearch, researchNodes } from '../services/research'
 import { calculateJobOutcome, createDriverCandidates, createGoals, energyMultiplier, jobOfferCapacity, pickupSpeedMultiplier, updateGoals, upgradeAppliesToVehicle, upgradeDetails, upgradeFareMultiplier, vehicleCanTakeJob, vehicleComfortScore } from '../services/earlyGameEngine'
 import { cityDemandMultiplier, createCityEconomy, growCityPopulation, HOTEL_PURCHASE_COST, hotelUpgradeCost, pendingHotelRevenue } from '../services/hotelEconomy'
 import { competitorGrowth, createCompetitors, createWorldCondition, defaultBrandStrategy, fareMultiplier, marketingDemandMultiplier } from '../services/worldSystems'
-import { compactLegacyDiscoveries, isInsideVillageTerritories, type VillageTerritoryCenter } from '../services/territoryGeometry'
+import { compactLegacyDiscoveries, extendExploredTerritorySegments, isInsideVillageTerritories, type VillageTerritoryCenter } from '../services/territoryGeometry'
 import { createTrafficIncident, trafficImpactForJob } from '../services/operationsIncidents'
 import { cleaningDetails, createAutomationEmployee, createCustomerReview, createStarterDispatcher, createStarterMechanic, maintenanceAdvisories, maintenanceQuote, recruitDispatcher, recruitMechanic, tireDetails, tireWearForDistance } from '../services/fleetOperations'
 import { ferryCrossingsHaveActiveService } from '../services/ferryService'
@@ -193,21 +194,27 @@ const completedExploration = (job: GameSave['jobs'][number], completedAt: string
   }
   return segments.length ? { jobId: job.id, vehicleId: job.assignedVehicleId, completedAt, segments, attempts: 0 } : null
 }
-// Route geometry is processed by Railway. The browser only records journey
-// metadata and clears its local pending queue after durable submission to the
-// remote outbox (which retries independently when offline).
-const processExplorationQueue = (state: GameState): Pick<GameSave, 'pendingExploration' | 'vehicleJourneys'> => {
+const processExplorationQueue = (state: GameState): Pick<GameSave, 'exploredTerritory' | 'pendingExploration' | 'vehicleJourneys'> => {
+  let exploredTerritory = state.exploredTerritory
+  const pendingExploration: PendingExploration[] = []
   const vehicleJourneys = [...(state.vehicleJourneys ?? [])]
   for (const pending of state.pendingExploration ?? []) {
     if (vehicleJourneys.some((journey) => journey.jobId === pending.jobId)) continue
-    const points = pending.segments.flat()
-    const distanceKm = pending.segments.reduce((total, route) => total + route.slice(1).reduce(
-      (sum, point, index) => sum + distanceKmBetween(route[index], point), 0,
-    ), 0)
-    vehicleJourneys.push({ id: crypto.randomUUID(), vehicleId: pending.vehicleId, jobId: pending.jobId, completedAt: pending.completedAt, coordinates: points, distanceKm })
+    try {
+      const next = extendExploredTerritorySegments(exploredTerritory, pending.segments, pending.jobId)
+      if (!next) throw new Error('Exploration union returned no territory')
+      exploredTerritory = next
+      const points = pending.segments.flat()
+      const distanceKm = pending.segments.reduce((total, route) => total + route.slice(1).reduce(
+        (sum, point, index) => sum + distanceKmBetween(route[index], point), 0,
+      ), 0)
+      vehicleJourneys.push({ id: crypto.randomUUID(), vehicleId: pending.vehicleId, jobId: pending.jobId, completedAt: pending.completedAt, coordinates: points, distanceKm })
+    } catch (error) {
+      console.warn('[exploration] Retaining completed route for retry', pending.jobId, error)
+      pendingExploration.push({ ...pending, attempts: pending.attempts + 1 })
+    }
   }
-  void submitExplorationQueue(state.pendingExploration ?? [])
-  return { pendingExploration: [], vehicleJourneys: vehicleJourneys.slice(-1000) }
+  return { exploredTerritory, pendingExploration, vehicleJourneys: vehicleJourneys.slice(-1000) }
 }
 const advanceContracts = (contracts: GameSave['contracts'], category: GameSave['contracts'][number]['category']) => contracts.map((contract) => {
   if (!contract.accepted || contract.completed || contract.category !== category) return contract
@@ -1720,13 +1727,14 @@ const syncRemoteExploration = async () => {
   remoteSyncBusy = true
   try {
     const remote = await loadRemoteExploration()
-    if (remote) {
-      const geometryKey = JSON.stringify(remote.geometry)
-      if (geometryKey !== lastRemoteGeometry) {
-        lastRemoteGeometry = geometryKey
-        // The worker owns exploration geometry; never union it on the UI thread.
-        useGameStore.setState({ exploredTerritory: remote })
-      }
+    if (remote && JSON.stringify(remote.geometry) !== lastRemoteGeometry) {
+      lastRemoteGeometry = JSON.stringify(remote.geometry)
+      const latest = useGameStore.getState()
+      const merged = mergeVillageTerritories([
+        ...(latest.exploredTerritory ? [latest.exploredTerritory] : []),
+        remote,
+      ])
+      if (merged) useGameStore.setState({ exploredTerritory: merged })
     }
   } catch (error) { console.warn('[exploration] Remote sync failed', error) }
   finally { remoteSyncBusy = false }

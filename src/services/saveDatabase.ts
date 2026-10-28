@@ -65,7 +65,10 @@ const localBackup = {
 
 export const indexedDbStorage: StateStorage = {
   async getItem(name) {
-    if (window.localStorage.getItem(RESET_MARKER) === '1') return null
+    if (window.localStorage.getItem(RESET_MARKER) === '1') {
+      window.localStorage.removeItem(RESET_MARKER)
+      return null
+    }
     try {
       const saved = await withTimeout(database.then((db) => db.get('saves', name)))
       if (saved) localBackup.set(name, saved)

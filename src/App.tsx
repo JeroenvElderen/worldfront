@@ -77,6 +77,11 @@ export default function App() {
       })
     return () => { cancelled = true }
   }, [Boolean(game.company), adminCountryCode, adminCountryName])
+  const startingCityForRegion = getCity(game.startingCityId, game.customCities ?? [])
+  const startingRegionId = administrativeBoundaries && startingCityForRegion &&
+    toGeoBoundariesCountryCode(startingCityForRegion.countryCode) === administrativeBoundaries.metadata.countryCode
+    ? regionAtCoordinates(administrativeBoundaries, startingCityForRegion.coordinates)?.properties.gameRegionId ?? null
+    : null
   const money = moneyFormatterForCity(activeCity)
   const maintenanceAlert = (game.maintenanceAlerts ?? []).find((alert) => !alert.dismissed)
   const territoryExpansionPrice = territoryExpansionCost === 0 ? 'Free' : money.format(territoryExpansionCost)
@@ -403,7 +408,7 @@ export default function App() {
       <Suspense fallback={<div className="map-loading" aria-label="Loading map" />}><GameMap
         onSelectStartingLocation={!game.company ? setStartingCoordinates : undefined}
         administrativeBoundaries={administrativeBoundaries}
-        ownedAdministrativeRegionIds={game.territoryLicenses ?? []}
+        ownedAdministrativeRegionIds={startingRegionId && !(game.administrativeExpansionLedger?.purchasedRegionIds?.length) ? [...new Set([...(game.territoryLicenses ?? []), startingRegionId])] : (game.territoryLicenses ?? [])}
         layoutKey={game.activeSection}
         cityId={game.activeCityId ?? game.startingCityId}
         customCities={game.customCities ?? []}

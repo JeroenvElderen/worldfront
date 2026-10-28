@@ -39,7 +39,6 @@ const OVERRIDES: Record<string, [AdministrativeLevel, string]> = {
   BRA: ['ADM1', 'State'], IND: ['ADM1', 'State / Territory'],
   CHN: ['ADM1', 'Province-level Division'],
 }
-type BoundaryMetadata = { simplifiedGeometryGeoJSON?: string; gjDownloadURL?: string }
 type RawFeature = { type: 'Feature'; properties?: Record<string, unknown>; geometry: GeoJSON.Geometry }
 type RawCollection = { type: 'FeatureCollection'; features: RawFeature[] }
 const cache = new Map<string, Promise<AdministrativeBoundaries>>()

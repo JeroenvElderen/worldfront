@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { AdministrativeBoundaries } from "../services/administrativeBoundaries";
+import { canPurchaseRegion, REGION_PURCHASE_COST, availableRegionCredits } from "../services/administrativeProgression";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { featureCollection, lineString, point } from "@turf/helpers";
@@ -814,6 +815,66 @@ function GameMapView({
       if (instance.getSource(sourceId)) instance.removeSource(sourceId);
     };
   }, [administrativeBoundaries, ownedAdministrativeRegionIds, mapInitialized]);
+  // Tap a locked municipality to purchase it directly on the map.
+  // Eligibility is checked again against the live store when the button is pressed.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance || !administrativeBoundaries || !mapInitialized) return;
+    const layerId = "administrative-region-unowned";
+    let popup: mapboxgl.Popup | null = null;
+    const handleRegionTap = (event: mapboxgl.MapLayerMouseEvent) => {
+      if (onSelectStartingLocation || placingStation || placingTerritory || placingHotel || placingHarbour || placingPostalDepot) return;
+      const properties = event.features?.[0]?.properties;
+      const id = typeof properties?.gameRegionId === "string" ? properties.gameRegionId : null;
+      if (!id) return;
+      const state = useGameStore.getState();
+      const ledger = state.administrativeExpansionLedger ?? { creditedRegionIds: [], purchasedRegionIds: [] };
+      const eligible = canPurchaseRegion(id, state.territoryLicenses ?? [], state.company?.cash ?? 0, ledger);
+      popup?.remove();
+      const content = document.createElement("div");
+      content.style.cssText = "color:#123038;min-width:160px;font:14px system-ui";
+      const title = document.createElement("strong");
+      title.textContent = String(properties?.shapeName ?? "Administrative region");
+      content.append(title);
+      const detail = document.createElement("div");
+      detail.style.marginTop = "6px";
+      detail.textContent = eligible
+        ? `Ready to unlock · €${REGION_PURCHASE_COST.toLocaleString()} + 1 credit`
+        : `Locked · €${REGION_PURCHASE_COST.toLocaleString()} + 1 credit (available credits: ${availableRegionCredits(ledger)})`;
+      content.append(detail);
+      if (eligible) {
+        const buy = document.createElement("button");
+        buy.type = "button";
+        buy.textContent = "Buy region";
+        buy.style.cssText = "margin-top:9px;padding:9px 12px;border:0;border-radius:8px;background:#087c70;color:white;font-weight:700;cursor:pointer";
+        buy.addEventListener("click", () => {
+          const latest = useGameStore.getState();
+          const latestLedger = latest.administrativeExpansionLedger ?? { creditedRegionIds: [], purchasedRegionIds: [] };
+          if (canPurchaseRegion(id, latest.territoryLicenses ?? [], latest.company?.cash ?? 0, latestLedger)) {
+            latest.purchaseAdministrativeRegion(id);
+          }
+          popup?.remove();
+        });
+        content.append(buy);
+      }
+      popup = new mapboxgl.Popup({ closeOnClick: true, maxWidth: "260px" })
+        .setLngLat(event.lngLat).setDOMContent(content).addTo(instance);
+    };
+    const attach = () => {
+      if (instance.getLayer(layerId)) instance.on("click", layerId, handleRegionTap);
+    };
+    const detach = () => {
+      if (instance.getLayer(layerId)) instance.off("click", layerId, handleRegionTap);
+    };
+    instance.on("style.load", attach);
+    attach();
+    return () => {
+      instance.off("style.load", attach);
+      detach();
+      popup?.remove();
+    };
+  }, [administrativeBoundaries, mapInitialized, onSelectStartingLocation, placingStation, placingTerritory, placingHotel, placingHarbour, placingPostalDepot]);
+
   useEffect(() => {
     const instance = map.current;
     if (!instance) return;

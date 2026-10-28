@@ -1,4 +1,4 @@
-import type { AdministrativeBoundaries } from './services/administrativeBoundaries'
+import { fetchAdministrativeBoundaries, toGeoBoundariesCountryCode, type AdministrativeBoundaries } from './services/administrativeBoundaries'
 import { AdministrativeRegions } from './components/AdministrativeRegions'
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
@@ -50,6 +50,24 @@ export default function App() {
   const researchFleetSlots = (hasResearch(game.completedResearch ?? [], 'autonomous-operations') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'global-network') ? 4 : 0) + (hasResearch(game.completedResearch ?? [], 'regional-hubs') ? game.branches.length : 0)
   const stationFleetFull = game.vehicles.filter((vehicle) => vehicle.type !== 'post').length >= fleetSlotCapacity(game.company?.level ?? 1, game.garageLevel ?? 0, game.branches) + researchFleetSlots
   const activeCity = getCity(game.activeCityId ?? game.startingCityId, game.customCities ?? [])
+  const adminCountryCode = activeCity ? toGeoBoundariesCountryCode(activeCity.countryCode) : null
+  const adminCountryName = activeCity?.countryName ?? ''
+  useEffect(() => {
+    let cancelled = false
+    if (!game.company || !adminCountryCode) {
+      setAdministrativeBoundaries(null)
+      return
+    }
+    void fetchAdministrativeBoundaries(adminCountryCode, adminCountryName)
+      .then((data) => { if (!cancelled) setAdministrativeBoundaries(data) })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setAdministrativeBoundaries(null)
+          console.warn('[WorldFront] GADM boundaries unavailable', error)
+        }
+      })
+    return () => { cancelled = true }
+  }, [Boolean(game.company), adminCountryCode, adminCountryName])
   const money = moneyFormatterForCity(activeCity)
   const maintenanceAlert = (game.maintenanceAlerts ?? []).find((alert) => !alert.dismissed)
   const territoryExpansionPrice = territoryExpansionCost === 0 ? 'Free' : money.format(territoryExpansionCost)
@@ -376,6 +394,7 @@ export default function App() {
       <Suspense fallback={<div className="map-loading" aria-label="Loading map" />}><GameMap
         onSelectStartingLocation={!game.company ? setStartingCoordinates : undefined}
         administrativeBoundaries={administrativeBoundaries}
+        ownedAdministrativeRegionIds={game.territoryLicenses ?? []}
         layoutKey={game.activeSection}
         cityId={game.activeCityId ?? game.startingCityId}
         customCities={game.customCities ?? []}
@@ -409,7 +428,7 @@ export default function App() {
         onTaxiArrived={handleTaxiArrived}
       /></Suspense>
 
-      {game.company && activeCity && showAdministrativeRegions && <AdministrativeRegions city={activeCity} onBoundaries={setAdministrativeBoundaries} onClose={() => setShowAdministrativeRegions(false)} />}
+      {game.company && activeCity && showAdministrativeRegions && <AdministrativeRegions city={activeCity} onClose={() => setShowAdministrativeRegions(false)} />}
 
       {game.company ? (
         <>

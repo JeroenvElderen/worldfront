@@ -4,6 +4,21 @@ import { mergeVillageTerritories } from './territoryGeometry'
 
 const OUTBOX_KEY = 'worldfront-exploration-outbox-v1'
 let inFlight = false
+const DIAGNOSTIC_KEY = 'worldfront-exploration-diagnostic-v1'
+const diagnose = (status: string, details = '') => {
+  try {
+    localStorage.setItem(DIAGNOSTIC_KEY, JSON.stringify({
+      time: new Date().toISOString(), status, details,
+      outbox: readOutbox().length,
+    }))
+  } catch { /* Diagnostics must never block gameplay. */ }
+}
+export function explorationDiagnostic(): string {
+  try {
+    return localStorage.getItem(DIAGNOSTIC_KEY) ?? 'No exploration submission attempted'
+  } catch { return 'Browser storage unavailable' }
+}
+
 const readOutbox = (): PendingExploration[] => {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(OUTBOX_KEY) ?? '[]')
@@ -24,7 +39,10 @@ export async function submitExplorationQueue(queue: PendingExploration[]) {
     ids.add(item.jobId)
   }
   if (queue.length) writeOutbox(outstanding)
-  if (!supabase || inFlight || !outstanding.length) return
+  diagnose('submission-check', `incoming=${queue.length}`)
+  if (!supabase) { diagnose('supabase-not-configured'); return }
+  if (inFlight) { diagnose('submission-already-running'); return }
+  if (!outstanding.length) { diagnose('no-routes-to-submit'); return }
   inFlight = true
   try {
     let { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -34,6 +52,7 @@ export async function submitExplorationQueue(queue: PendingExploration[]) {
       authError = result.error
     }
     if (authError || !user) {
+      diagnose('authentication-failed', authError?.message ?? 'No user returned')
       console.warn('[exploration] Authentication unavailable', authError?.message)
       return
     }
@@ -45,13 +64,16 @@ export async function submitExplorationQueue(queue: PendingExploration[]) {
         p_segments: item.segments,
       })
       if (error) {
+        diagnose('rpc-failed', `${error.code ?? 'unknown'}: ${error.message}`)
         console.warn('[exploration] Remote queue submission failed', item.jobId, error.message)
         break
       }
       writeOutbox(readOutbox().filter((pending) => pending.jobId !== item.jobId))
+      diagnose('queued-successfully', item.jobId)
       console.info('[exploration] Journey queued on server', item.jobId)
     }
   } catch (error) {
+    diagnose('unexpected-error', String(error))
     console.warn('[exploration] Remote queue unavailable; will retry', error)
   } finally { inFlight = false }
 }

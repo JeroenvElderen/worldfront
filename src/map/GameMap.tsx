@@ -3236,7 +3236,7 @@ function GameMapView({
           properties: { name: route.name },
           geometry: {
             type: "LineString" as const,
-            coordinates: route.routeCoordinates,
+            coordinates: route.routeCoordinates!,
           },
         }));
       const data = { type: "FeatureCollection" as const, features };

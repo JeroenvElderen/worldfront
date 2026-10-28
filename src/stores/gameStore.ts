@@ -4,7 +4,7 @@ import { cities, countries, getCity } from '../data/cities'
 import { transportModels } from '../data/transport'
 import { getTaxiModel } from '../data/taxis'
 import { getPostVehicleModel } from '../data/postVehicles'
-import type { AutomationRole, BrandStrategy, City, CleaningService, Company, Coordinates, DepotFacility, Difficulty, DispatcherStrategy, Driver, DriverCertification, ExteriorAccessory, FerryRouteOption, FinancialTransaction, GameSave, IncidentResponse, MaintenanceKind, PostalDepot, PostalRoutePlan, RefuelStrategy, ResearchId, Specialization, TaxiFerryCrossing, TerritoryExpansion, TireType, TransactionCategory, TransportMode, Vehicle, VehicleJourney, VehicleUpgrade } from '../models/game'
+import type { AutomationRole, BrandStrategy, City, CleaningService, Company, Coordinates, DepotFacility, Difficulty, DispatcherStrategy, Driver, DriverCertification, ExteriorAccessory, FerryRouteOption, FinancialTransaction, GameSave, IncidentResponse, MaintenanceKind, PostalDepot, PostalRoutePlan, RefuelStrategy, ResearchId, Specialization, TaxiFerryCrossing, TerritoryExpansion, TireType, TransactionCategory, TransportMode, Vehicle, VehicleJourney, PendingExploration, VehicleUpgrade } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
 import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import {
@@ -153,15 +153,9 @@ const unlockedTerritoryCenters = (state: Pick<GameState, 'branches' | 'territory
     source: source === 'ferry-discovery' ? 'ferry-discovery' as const : 'village' as const,
   })),
 ]
-const finishRecordedJourney = (
-  explored: GameSave['exploredTerritory'],
-  history: VehicleJourney[],
-  job: GameSave['jobs'][number],
-  completedAt: string,
-): { explored: GameSave['exploredTerritory']; history: VehicleJourney[] } => {
-  // Resolve each navigation leg independently: joining the pickup and
-  // passenger routes can create a false connector when one leg is missing.
-  // Directions geometry is authoritative even when its vertices are sparse.
+// Preserve navigation geometry before attempting expensive polygon unions.
+const completedExploration = (job: GameSave['jobs'][number], completedAt: string): PendingExploration | null => {
+  if (!job.assignedVehicleId) return null
   const pickup = job.pickupRouteCoordinates ?? []
   const passenger = job.routeCoordinates ?? []
   const recorded = job.recordedRoute ?? []
@@ -200,15 +194,29 @@ const finishRecordedJourney = (
     }
     if (segment.length > 1) segments.push(segment)
   }
-  if (!segments.length) return { explored, history }
-  const nextExplored = extendExploredTerritorySegments(explored, segments, job.id)
-  const distanceKm = segments.reduce((total, route) => total + route.slice(1).reduce(
-    (sum, point, index) => sum + distanceKmBetween(route[index], point), 0,
-  ), 0)
-  return {
-    explored: nextExplored,
-    history: [...history, { id: crypto.randomUUID(), vehicleId: job.assignedVehicleId, jobId: job.id, completedAt, coordinates: points, distanceKm }].slice(-1000),
+  return segments.length ? { jobId: job.id, vehicleId: job.assignedVehicleId, completedAt, segments, attempts: 0 } : null
+}
+const processExplorationQueue = (state: GameState): Pick<GameSave, 'exploredTerritory' | 'pendingExploration' | 'vehicleJourneys'> => {
+  let exploredTerritory = state.exploredTerritory
+  const pendingExploration: PendingExploration[] = []
+  const vehicleJourneys = [...(state.vehicleJourneys ?? [])]
+  for (const pending of state.pendingExploration ?? []) {
+    if (vehicleJourneys.some((journey) => journey.jobId === pending.jobId)) continue
+    try {
+      const next = extendExploredTerritorySegments(exploredTerritory, pending.segments, pending.jobId)
+      if (!next) throw new Error('Exploration union returned no territory')
+      exploredTerritory = next
+      const points = pending.segments.flat()
+      const distanceKm = pending.segments.reduce((total, route) => total + route.slice(1).reduce(
+        (sum, point, index) => sum + distanceKmBetween(route[index], point), 0,
+      ), 0)
+      vehicleJourneys.push({ id: crypto.randomUUID(), vehicleId: pending.vehicleId, jobId: pending.jobId, completedAt: pending.completedAt, coordinates: points, distanceKm })
+    } catch (error) {
+      console.warn('[exploration] Retaining completed route for retry', pending.jobId, error)
+      pendingExploration.push({ ...pending, attempts: pending.attempts + 1 })
+    }
   }
+  return { exploredTerritory, pendingExploration, vehicleJourneys: vehicleJourneys.slice(-1000) }
 }
 const advanceContracts = (contracts: GameSave['contracts'], category: GameSave['contracts'][number]['category']) => contracts.map((contract) => {
   if (!contract.accepted || contract.completed || contract.category !== category) return contract
@@ -852,7 +860,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
     let drivers = state.drivers
     let financialTransactions = state.financialTransactions ?? []
     let exploredTerritory = state.exploredTerritory
-    let vehicleJourneys = state.vehicleJourneys ?? []
+    let vehicleJourneys = state.vehicleJourneys ?? []\n    let pendingExploration = state.pendingExploration ?? []
     let territoryExpansions = state.territoryExpansions ?? []
     let customerReviews = state.customerReviews ?? []
     let postalPerformance = state.postalPerformance ?? blankSave.postalPerformance
@@ -1158,7 +1166,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
       return { ...vehicle, queuedService: undefined, status: 'maintenance' as const, maintenanceJob: { kind: queued.kind, mechanicId: mechanic?.id, startedAt, completesAt: new Date(now + quote.durationMs).toISOString(), cost: quote.cost }, lifetimeExpenses: (vehicle.lifetimeExpenses ?? 0) + quote.cost }
     })
     const maintenanceAlerts = maintenanceAdvisories(vehicles, state.maintenanceAlerts ?? [], now)
-    return { company, jobs: result?.jobs ?? jobs, vehicles, postalPerformance, transportAssets, territoryExpansions, drivers, goals, contracts, driverCandidates, loans, financialTransactions, exploredTerritory, vehicleJourneys, activeEvent, nextEventAt, nextOperatingPaymentAt, worldCondition, competitors, incidents, trafficIncidents, nextTrafficIncidentAt, cityEconomies, lastPopulationGrowthAt: nextPopulationGrowthAt, passengers, customerReviews, maintenanceAlerts, focusedJobId: result ? null : (jobs.some((job) => job.id === state.focusedJobId) ? state.focusedJobId : null), updatedAt: new Date().toISOString() }
+    return { company, jobs: result?.jobs ?? jobs, vehicles, postalPerformance, transportAssets, territoryExpansions, drivers, goals, contracts, driverCandidates, loans, financialTransactions, exploredTerritory, vehicleJourneys, pendingExploration, activeEvent, nextEventAt, nextOperatingPaymentAt, worldCondition, competitors, incidents, trafficIncidents, nextTrafficIncidentAt, cityEconomies, lastPopulationGrowthAt: nextPopulationGrowthAt, passengers, customerReviews, maintenanceAlerts, focusedJobId: result ? null : (jobs.some((job) => job.id === state.focusedJobId) ? state.focusedJobId : null), updatedAt: new Date().toISOString() }
   }),
   cleanTaxi: (vehicleId) => set((state) => {
     const vehicle = state.vehicles.find((candidate) => candidate.id === vehicleId && candidate.type === 'taxi')
@@ -1655,7 +1663,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
       postalDepotAssignments.set(vehicle.id, depot.id)
       postalDepotLoads.set(depot.id, (postalDepotLoads.get(depot.id) ?? 0) + 1)
     }
-    return { ...current, ...saved, version: 28, taxiTravelSpeed: 8, company, customCities, territoryExpansions, exploredTerritory, vehicleJourneys: saved.vehicleJourneys ?? [], hotels, cityEconomies, lastPopulationGrowthAt: saved.lastPopulationGrowthAt ?? Date.now(), territoryLicenses: saved.territoryLicenses ?? [], countryLicenses: saved.countryLicenses ?? [], discoveredFerryRoutes, purchasedHarbours, jobs, postalDepots, postalPerformance, completedResearch: saved.completedResearch ?? [], competitors: saved.competitors ?? [], difficulty: saved.difficulty ?? 'standard', worldCondition: saved.worldCondition ?? createWorldCondition(), incidents: saved.incidents ?? [], mechanics: saved.mechanics ?? [], dispatchers: saved.dispatchers ?? [], automationEmployees: saved.automationEmployees ?? [], maintenanceAlerts: saved.maintenanceAlerts ?? [], customerReviews: saved.customerReviews ?? [], brandStrategy: { ...defaultBrandStrategy, ...(saved.brandStrategy ?? {}) }, automation: { ...current.automation, ...(saved.automation ?? {}), activity: saved.automation?.activity ?? [] }, vehicles: (saved.vehicles ?? []).map((vehicle) => ({ cleanliness: 100, tireCondition: 100, tireType: 'touring' as const, tireInstalledAtKm: vehicle.odometerKm ?? 0, ...vehicle, postalDepotId: postalDepots.some((depot) => depot.id === vehicle.postalDepotId) ? vehicle.postalDepotId : postalDepotAssignments.get(vehicle.id), status: strandedJobVehicleIds.has(vehicle.id) ? 'available' as const : vehicle.status })), drivers: (saved.drivers ?? []).map((driver) => ({ experience: 0, morale: 80, certifications: [], completedTrips: 0, careerEarnings: 0, ...driver, status: strandedDriverIds.has(driver.id) ? 'available' as const : driver.status })), branches: (saved.branches ?? []).map((branch, index) => ({ ...branch, name: branch.isHeadquarters ? `Station ${index + 1}` : branch.name, isHeadquarters: undefined, coordinates: branch.coordinates ?? getCity(branch.cityId, saved.customCities ?? [])?.coordinates })) }
+    return { ...current, ...saved, version: 28, taxiTravelSpeed: 8, company, customCities, territoryExpansions, exploredTerritory, vehicleJourneys: saved.vehicleJourneys ?? [], pendingExploration: saved.pendingExploration ?? [], hotels, cityEconomies, lastPopulationGrowthAt: saved.lastPopulationGrowthAt ?? Date.now(), territoryLicenses: saved.territoryLicenses ?? [], countryLicenses: saved.countryLicenses ?? [], discoveredFerryRoutes, purchasedHarbours, jobs, postalDepots, postalPerformance, completedResearch: saved.completedResearch ?? [], competitors: saved.competitors ?? [], difficulty: saved.difficulty ?? 'standard', worldCondition: saved.worldCondition ?? createWorldCondition(), incidents: saved.incidents ?? [], mechanics: saved.mechanics ?? [], dispatchers: saved.dispatchers ?? [], automationEmployees: saved.automationEmployees ?? [], maintenanceAlerts: saved.maintenanceAlerts ?? [], customerReviews: saved.customerReviews ?? [], brandStrategy: { ...defaultBrandStrategy, ...(saved.brandStrategy ?? {}) }, automation: { ...current.automation, ...(saved.automation ?? {}), activity: saved.automation?.activity ?? [] }, vehicles: (saved.vehicles ?? []).map((vehicle) => ({ cleanliness: 100, tireCondition: 100, tireType: 'touring' as const, tireInstalledAtKm: vehicle.odometerKm ?? 0, ...vehicle, postalDepotId: postalDepots.some((depot) => depot.id === vehicle.postalDepotId) ? vehicle.postalDepotId : postalDepotAssignments.get(vehicle.id), status: strandedJobVehicleIds.has(vehicle.id) ? 'available' as const : vehicle.status })), drivers: (saved.drivers ?? []).map((driver) => ({ experience: 0, morale: 80, certifications: [], completedTrips: 0, careerEarnings: 0, ...driver, status: strandedDriverIds.has(driver.id) ? 'available' as const : driver.status })), branches: (saved.branches ?? []).map((branch, index) => ({ ...branch, name: branch.isHeadquarters ? `Station ${index + 1}` : branch.name, isHeadquarters: undefined, coordinates: branch.coordinates ?? getCity(branch.cityId, saved.customCities ?? [])?.coordinates })) }
   },
   partialize: ({ activeSection, focusedJobId, hasHydrated, jobsLoading, jobsError, ...save }) => {
     void activeSection

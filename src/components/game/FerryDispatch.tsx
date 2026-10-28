@@ -9,6 +9,7 @@ interface FerryDispatchProps {
   discoveredRoutes: FerryRouteOption[]
   transportAssets: TransportAsset[]
   transportRoutes: TransportRoute[]
+  onRefreshRoutes: () => void
   onPlaceHarbour: () => void
   onBuyFerry: () => void
   onCreateRoute: (route: FerryRouteOption) => void
@@ -19,7 +20,7 @@ interface FerryDispatchProps {
 
 const HARBOUR_PRICE = 5_000
 
-export function FerryDispatch({ company, purchasedHarbours, discoveredRoutes, transportAssets, transportRoutes, onPlaceHarbour, onBuyFerry, onCreateRoute, onDispatch, onSetTimetable, onClose }: FerryDispatchProps) {
+export function FerryDispatch({ company, purchasedHarbours, discoveredRoutes, transportAssets, transportRoutes, onPlaceHarbour, onRefreshRoutes, onBuyFerry, onCreateRoute, onDispatch, onSetTimetable, onClose }: FerryDispatchProps) {
   const { money } = useCurrency()
   const ownedHarbourIds = new Set(purchasedHarbours.map((harbour) => harbour.id))
   const routeHarbourId = (route: FerryRouteOption) => route.harbourId ?? harbourId(route.originCoordinates)
@@ -60,6 +61,7 @@ export function FerryDispatch({ company, purchasedHarbours, discoveredRoutes, tr
     </article>
 
     <h3>Destinations from owned harbours</h3>
+    <button type="button" onClick={onRefreshRoutes} disabled={!purchasedHarbours.length}>Discover / refresh ferry destinations</button>
     <div className="ferry-destinations">
       {availableRoutes.length ? availableRoutes.map((route) => {
         const owned = routeAlreadyOwned(route)

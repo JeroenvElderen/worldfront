@@ -23,7 +23,7 @@ import { canResearch, hasResearch, researchNodes } from '../services/research'
 import { calculateJobOutcome, createDriverCandidates, createGoals, energyMultiplier, jobOfferCapacity, pickupSpeedMultiplier, updateGoals, upgradeAppliesToVehicle, upgradeDetails, upgradeFareMultiplier, vehicleCanTakeJob, vehicleComfortScore } from '../services/earlyGameEngine'
 import { cityDemandMultiplier, createCityEconomy, growCityPopulation, HOTEL_PURCHASE_COST, hotelUpgradeCost, pendingHotelRevenue } from '../services/hotelEconomy'
 import { competitorGrowth, createCompetitors, createWorldCondition, defaultBrandStrategy, fareMultiplier, marketingDemandMultiplier } from '../services/worldSystems'
-import { compactLegacyDiscoveries, extendExploredTerritorySegments, isInsideVillageTerritories, type VillageTerritoryCenter } from '../services/territoryGeometry'
+import { compactLegacyDiscoveries, isInsideVillageTerritories, type VillageTerritoryCenter } from '../services/territoryGeometry'
 import { createTrafficIncident, trafficImpactForJob } from '../services/operationsIncidents'
 import { cleaningDetails, createAutomationEmployee, createCustomerReview, createStarterDispatcher, createStarterMechanic, maintenanceAdvisories, maintenanceQuote, recruitDispatcher, recruitMechanic, tireDetails, tireWearForDistance } from '../services/fleetOperations'
 import { ferryCrossingsHaveActiveService } from '../services/ferryService'
@@ -194,27 +194,23 @@ const completedExploration = (job: GameSave['jobs'][number], completedAt: string
   }
   return segments.length ? { jobId: job.id, vehicleId: job.assignedVehicleId, completedAt, segments, attempts: 0 } : null
 }
-const processExplorationQueue = (state: GameState): Pick<GameSave, 'exploredTerritory' | 'pendingExploration' | 'vehicleJourneys'> => {
-  let exploredTerritory = state.exploredTerritory
-  const pendingExploration: PendingExploration[] = []
+// Railway is authoritative for exploration polygons. The browser records trip
+// metadata and sends routes to the durable outbox without Turf polygon unions.
+const processExplorationQueue = (state: GameState): Pick<GameSave, 'pendingExploration' | 'vehicleJourneys'> => {
+  const pending = state.pendingExploration ?? []
+  if (!pending.length) return { pendingExploration: [], vehicleJourneys: state.vehicleJourneys ?? [] }
+  // submitExplorationQueue persists the outbox synchronously before awaiting auth.
+  void submitExplorationQueue(pending)
   const vehicleJourneys = [...(state.vehicleJourneys ?? [])]
-  for (const pending of state.pendingExploration ?? []) {
-    if (vehicleJourneys.some((journey) => journey.jobId === pending.jobId)) continue
-    try {
-      const next = extendExploredTerritorySegments(exploredTerritory, pending.segments, pending.jobId)
-      if (!next) throw new Error('Exploration union returned no territory')
-      exploredTerritory = next
-      const points = pending.segments.flat()
-      const distanceKm = pending.segments.reduce((total, route) => total + route.slice(1).reduce(
-        (sum, point, index) => sum + distanceKmBetween(route[index], point), 0,
-      ), 0)
-      vehicleJourneys.push({ id: crypto.randomUUID(), vehicleId: pending.vehicleId, jobId: pending.jobId, completedAt: pending.completedAt, coordinates: points, distanceKm })
-    } catch (error) {
-      console.warn('[exploration] Retaining completed route for retry', pending.jobId, error)
-      pendingExploration.push({ ...pending, attempts: pending.attempts + 1 })
-    }
+  for (const journey of pending) {
+    if (vehicleJourneys.some((existing) => existing.jobId === journey.jobId)) continue
+    const points = journey.segments.flat()
+    const distanceKm = journey.segments.reduce((total, route) => total + route.slice(1).reduce(
+      (sum, point, index) => sum + distanceKmBetween(route[index], point), 0,
+    ), 0)
+    vehicleJourneys.push({ id: crypto.randomUUID(), vehicleId: journey.vehicleId, jobId: journey.jobId, completedAt: journey.completedAt, coordinates: points, distanceKm })
   }
-  return { exploredTerritory, pendingExploration, vehicleJourneys: vehicleJourneys.slice(-1000) }
+  return { pendingExploration: [], vehicleJourneys: vehicleJourneys.slice(-1000) }
 }
 const advanceContracts = (contracts: GameSave['contracts'], category: GameSave['contracts'][number]['category']) => contracts.map((contract) => {
   if (!contract.accepted || contract.completed || contract.category !== category) return contract

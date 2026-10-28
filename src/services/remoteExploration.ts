@@ -1,6 +1,5 @@
 import { supabase } from '../lib/supabase'
 import type { PendingExploration, TerritoryFeature } from '../models/game'
-import { mergeVillageTerritories } from './territoryGeometry'
 
 const OUTBOX_KEY = 'worldfront-exploration-outbox-v1'
 let inFlight = false
@@ -87,7 +86,16 @@ export async function loadRemoteExploration(): Promise<TerritoryFeature | null> 
   if (error) { console.warn('[exploration] Remote load failed', error.message); return null }
   const features = (data ?? []).map((row) => row.territory as TerritoryFeature)
     .filter((feature) => feature?.type === 'Feature' && feature.geometry)
-  return mergeVillageTerritories(features)
+  // A GeoJSON MultiPolygon can contain overlapping polygons; no Turf union
+  // is needed on the mobile main thread for rendering.
+  if (!features.length) return null
+  if (features.length === 1) return features[0]
+  const coordinates: number[][][][] = []
+  for (const feature of features) {
+    if (feature.geometry.type === 'Polygon') coordinates.push(feature.geometry.coordinates)
+    else if (feature.geometry.type === 'MultiPolygon') coordinates.push(...feature.geometry.coordinates)
+  }
+  return { type: 'Feature', geometry: { type: 'MultiPolygon', coordinates }, properties: { id: 'taxi-exploration', unlocked: true } } as TerritoryFeature
 }
 
 export function subscribeRemoteExploration(onChange: () => void) {

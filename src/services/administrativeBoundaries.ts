@@ -53,14 +53,13 @@ const levelsFor = (code: string): AdministrativeLevel[] =>
   [...new Set([OVERRIDES[code]?.[0] ?? 'ADM1', 'ADM1', 'ADM2'])] as AdministrativeLevel[]
 
 async function fetchLevel(code: string, level: AdministrativeLevel): Promise<RawCollection | null> {
-  const response = await fetch(`https://www.geoboundaries.org/api/current/gbOpen/${code}/${level}/`)
-  if (!response.ok) return null
-  const metadata = await response.json() as BoundaryMetadata
-  const geometryUrl = metadata.simplifiedGeometryGeoJSON || metadata.gjDownloadURL
-  if (!geometryUrl) return null
-  const geometryResponse = await fetch(geometryUrl)
-  if (!geometryResponse.ok) return null
-  const data = await geometryResponse.json() as RawCollection
+  // Browser requests go through our own origin, avoiding geoBoundaries CORS.
+  const response = await fetch(`/api/boundaries?country=${encodeURIComponent(code)}&level=${level}`)
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({})) as { error?: string }
+    throw new Error(detail.error ?? `Boundary service returned ${response.status}`)
+  }
+  const data = await response.json() as RawCollection
   return data.type === 'FeatureCollection' && Array.isArray(data.features) ? data : null
 }
 
@@ -73,7 +72,7 @@ export async function fetchAdministrativeBoundaries(countryCode3: string, countr
   const task = (async () => {
     for (const level of levelsFor(code)) {
       let data: RawCollection | null
-      try { data = await fetchLevel(code, level) } catch { continue }
+      try { data = await fetchLevel(code, level) } catch (error) { console.warn('[WorldFront] Region boundary request failed', code, level, error); continue }
       if (!data) continue
       const features: AdministrativeRegionFeature[] = data.features.flatMap((feature, index) => {
         if (feature.geometry.type !== 'Polygon' && feature.geometry.type !== 'MultiPolygon') return []

@@ -93,24 +93,24 @@ export default function App() {
   const setSection = game.setSection
   const handlePlaceHarbour = useCallback(async (coordinates: Parameters<typeof placeHarbour>[0]) => {
     setPlacingHarbour(false)
+    const harbourCount = useGameStore.getState().purchasedHarbours.length
+    // A third-party route lookup must never prevent harbour purchase.
+    placeHarbour(coordinates, [])
+    if (useGameStore.getState().purchasedHarbours.length === harbourCount) {
+      const current = useGameStore.getState()
+      const reason = !current.company ? 'Create a company first.'
+        : current.company.cash < 5_000 ? 'You need 5,000 to purchase a harbour.'
+        : 'This harbour is outside your unlocked territory, or has already been purchased.'
+      window.alert(`Harbour not placed: ${reason}`)
+      setPlacingHarbour(true)
+      return
+    }
+    setSection('ferries')
     try {
       const routes = await discoverFerryRoutes(coordinates)
-      const harbourCount = useGameStore.getState().purchasedHarbours.length
-      placeHarbour(coordinates, routes)
-      if (useGameStore.getState().purchasedHarbours.length === harbourCount) {
-        const current = useGameStore.getState()
-        const reason = !current.company ? 'Create a company first.'
-          : current.company.cash < 5_000 ? 'You need 5,000 to purchase a harbour.'
-          : 'This harbour is outside your unlocked territory, or has already been purchased.'
-        window.alert(`Harbour not placed: ${reason}`)
-        setPlacingHarbour(true)
-        return
-      }
-      setSection('ferries')
+      useGameStore.getState().addHarbourFerryRoutes(coordinates, routes)
     } catch (error) {
-      console.warn('Unable to discover routes from this harbour point', error)
-      window.alert('Ferry route lookup is unavailable. Try again later or choose a harbour with a curated route.')
-      setPlacingHarbour(true)
+      console.warn('Harbour purchased; ferry route discovery failed', error)
     }
   }, [placeHarbour, setSection])
 

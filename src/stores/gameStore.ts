@@ -6,7 +6,7 @@ import { getTaxiModel } from '../data/taxis'
 import { getPostVehicleModel } from '../data/postVehicles'
 import type { AutomationRole, BrandStrategy, City, CleaningService, Company, Coordinates, DepotFacility, Difficulty, DispatcherStrategy, Driver, DriverCertification, ExteriorAccessory, FerryRouteOption, FinancialTransaction, GameSave, IncidentResponse, MaintenanceKind, PostalDepot, PostalRoutePlan, RefuelStrategy, ResearchId, Specialization, TaxiFerryCrossing, TerritoryExpansion, TireType, TransactionCategory, TransportMode, Vehicle, PendingExploration, VehicleUpgrade } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
-import { loadRemoteExploration, submitExplorationQueue, subscribeRemoteExploration } from '../services/remoteExploration'
+import { explorationDiagnostic, loadRemoteExploration, submitExplorationQueue, subscribeRemoteExploration } from '../services/remoteExploration'
 import { mergeVillageTerritories } from '../services/territoryGeometry'
 import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import {
@@ -1755,6 +1755,20 @@ const startRemoteExploration = () => {
     void submitExplorationQueue([...(state.pendingExploration ?? []), ...completed])
   }
   retrySubmission()
+  // Mobile-friendly diagnostics: append ?explorationDebug=1 to the game URL.
+  if (new URLSearchParams(window.location.search).has('explorationDebug')) {
+    const show = () => {
+      const state = useGameStore.getState()
+      const completed = state.jobs.filter((job) => job.status === 'complete')
+      const recoverable = completed.filter((job) => completedExploration(job, state.updatedAt))
+      window.alert('WorldFront exploration diagnostics\\n' +
+        'Completed jobs in save: ' + completed.length + '\\n' +
+        'Recoverable completed routes: ' + recoverable.length + '\\n' +
+        'Pending local routes: ' + (state.pendingExploration?.length ?? 0) + '\\n' +
+        'Submission: ' + explorationDiagnostic())
+    }
+    window.setTimeout(show, 5000)
+  }
   window.addEventListener('online', retrySubmission)
   setInterval(() => {
     const state = useGameStore.getState()

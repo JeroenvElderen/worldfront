@@ -20,7 +20,7 @@ function routePolygon(segments, jobId) {
       point.every((coordinate) => Number.isFinite(coordinate)))
     if (valid.length < 2) continue
     const path = lineString(valid)
-    const shape = buffer(path, 0.05, { steps: 8, units: 'kilometers' })
+    const shape = buffer(path, 0.15, { steps: 8, units: 'kilometers' })
     if (shape) polygons.push(shape)
   }
   if (!polygons.length) throw new Error('No usable land route segments')

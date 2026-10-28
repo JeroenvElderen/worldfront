@@ -4,7 +4,7 @@ import { cities, countries, getCity } from '../data/cities'
 import { transportModels } from '../data/transport'
 import { getTaxiModel } from '../data/taxis'
 import { getPostVehicleModel } from '../data/postVehicles'
-import type { AutomationRole, BrandStrategy, City, CleaningService, Company, Coordinates, DepotFacility, Difficulty, DispatcherStrategy, Driver, DriverCertification, ExteriorAccessory, FerryRouteOption, FinancialTransaction, GameSave, IncidentResponse, MaintenanceKind, PostalDepot, PostalRoutePlan, RefuelStrategy, ResearchId, Specialization, TaxiFerryCrossing, TerritoryExpansion, TireType, TransactionCategory, TransportMode, Vehicle, VehicleJourney, PendingExploration, VehicleUpgrade } from '../models/game'
+import type { AutomationRole, BrandStrategy, City, CleaningService, Company, Coordinates, DepotFacility, Difficulty, DispatcherStrategy, Driver, DriverCertification, ExteriorAccessory, FerryRouteOption, FinancialTransaction, GameSave, IncidentResponse, MaintenanceKind, PostalDepot, PostalRoutePlan, RefuelStrategy, ResearchId, Specialization, TaxiFerryCrossing, TerritoryExpansion, TireType, TransactionCategory, TransportMode, Vehicle, PendingExploration, VehicleUpgrade } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
 import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import {
@@ -166,10 +166,6 @@ const completedExploration = (job: GameSave['jobs'][number], completedAt: string
         { points: passenger, ferries: job.ferryCrossings ?? [] },
       ]
     : [{ points: recorded, ferries: [] }]
-  const points = hasNavigation ? [...pickup, ...passenger] : recorded
-  if (!job.assignedVehicleId || history.some((trip) => trip.jobId === job.id)) {
-    return { explored, history }
-  }
   const segments: Coordinates[][] = []
   for (const leg of legs) {
     if (leg.points.length < 2) continue
@@ -833,8 +829,9 @@ const generationTaxi = selectJobGenerationTaxi(state)
     const job = state.jobs.find((candidate) => candidate.id === jobId)
     const result = completeJobState(state.company, state.jobs, state.vehicles, jobId)
     if (!result || !job) return state
-    const completed = finishRecordedJourney(state.exploredTerritory, state.vehicleJourneys ?? [], job, new Date().toISOString())
-    return { ...result, exploredTerritory: completed.explored, vehicleJourneys: completed.history, updatedAt: new Date().toISOString() }
+    const pending = completedExploration(job, new Date().toISOString())
+    const alreadyRecorded = (state.vehicleJourneys ?? []).some((journey) => journey.jobId === job.id) || (state.pendingExploration ?? []).some((item) => item.jobId === job.id)
+    return { ...result, pendingExploration: pending && !alreadyRecorded ? [...(state.pendingExploration ?? []), pending] : state.pendingExploration ?? [], updatedAt: new Date().toISOString() }
   }),
   tickJobs: () => set((state) => {
     if (!state.company) return state
@@ -880,9 +877,8 @@ const generationTaxi = selectJobGenerationTaxi(state)
         // enough for both journeys to finish, the service trip can settle in
         // this same tick instead of leaving the taxi unavailable after launch.
         const completedAt = getJobJourney(job, previousVehicle).arrivesAt
-        const completedJourney = finishRecordedJourney(exploredTerritory, vehicleJourneys, originalJob, new Date(completedAt).toISOString())
-        exploredTerritory = completedJourney.explored
-        vehicleJourneys = completedJourney.history
+        const pending = completedExploration(originalJob, new Date(completedAt).toISOString())
+        if (pending && !pendingExploration.some((item) => item.jobId === pending.jobId) && !vehicleJourneys.some((item) => item.jobId === pending.jobId)) pendingExploration = [...pendingExploration, pending]
         const outcome = calculateJobOutcome(job, previousVehicle, driver)
         const emptyDistanceKm = previousVehicle.position ? distanceKmBetween(previousVehicle.position, jobPickup(job)) : 0
         const journeyDistanceKm = emptyDistanceKm + job.distanceKm

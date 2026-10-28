@@ -63,22 +63,39 @@ const localBackup = {
   },
 }
 
+// A malformed or obsolete save must never prevent Zustand from hydrating.
+// Keep the invalid payload in a separate backup key for troubleshooting.
+const validateSave = (name: string, value: string | null): string | null => {
+  if (!value) return null
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!parsed || typeof parsed !== 'object' || !('state' in parsed) ||
+        !parsed.state || typeof parsed.state !== 'object') throw new Error('Invalid save envelope')
+    return value
+  } catch (error) {
+    console.warn('[WorldFront] Invalid local save; starting a new game', error)
+    try { window.localStorage.setItem(name + ':invalid-backup', value) } catch { /* unavailable */ }
+    return null
+  }
+}
+
 export const indexedDbStorage: StateStorage = {
   async getItem(name) {
-    if (window.localStorage.getItem(RESET_MARKER) === '1') {
-      window.localStorage.removeItem(RESET_MARKER)
+    if (localBackup.get(RESET_MARKER) === '1') {
+      localBackup.remove(RESET_MARKER)
       return null
     }
     try {
       const saved = await withTimeout(database.then((db) => db.get('saves', name)))
-      if (saved) localBackup.set(name, saved)
-      return saved ?? localBackup.get(name)
+      const valid = validateSave(name, saved ?? null)
+      if (valid) localBackup.set(name, valid)
+      return valid ?? validateSave(name, localBackup.get(name))
     } catch {
-      return localBackup.get(name)
+      return validateSave(name, localBackup.get(name))
     }
   },
   async setItem(name, value) {
-    if (resettingGame || window.localStorage.getItem(RESET_MARKER) === '1') return
+    if (resettingGame || localBackup.get(RESET_MARKER) === '1') return
     // Coalesce the fallback copy so serializing frequent game updates does not
     // repeatedly block the UI thread; backgrounding always flushes it at once.
     localBackup.set(name, value)

@@ -780,8 +780,13 @@ function GameMapView({
         if (job.status !== "accepted" || job.cityId !== cityId) continue;
         const layerId = jobRouteSourceId(job.id);
         if (!instance.getLayer(layerId)) continue;
-        instance.setPaintProperty(layerId, "line-color", trafficColorForJob(job.id));
-        instance.setPaintProperty(layerId, "line-width", 3);
+        const nextColor = trafficColorForJob(job.id);
+        if (instance.getPaintProperty(layerId, "line-color") !== nextColor) {
+          instance.setPaintProperty(layerId, "line-color", nextColor);
+        }
+        if (instance.getPaintProperty(layerId, "line-width") !== 3) {
+          instance.setPaintProperty(layerId, "line-width", 3);
+        }
       }
     };
     instance.on("style.load", refresh);

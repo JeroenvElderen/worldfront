@@ -1,3 +1,4 @@
+import type { AdministrativeBoundaries } from './services/administrativeBoundaries'
 import { AdministrativeRegions } from './components/AdministrativeRegions'
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
@@ -42,6 +43,7 @@ export default function App() {
   const [placingPostalDepot, setPlacingPostalDepot] = useState(false)
   const [showExpansionMenu, setShowExpansionMenu] = useState(false)
   const [showAdministrativeRegions, setShowAdministrativeRegions] = useState(false)
+  const [administrativeBoundaries, setAdministrativeBoundaries] = useState<AdministrativeBoundaries | null>(null)
   const purchasedTerritories = (game.territoryExpansions ?? []).filter((area) => area.source !== 'taxi-discovery' && area.source !== 'ferry-discovery').length
   const territoryExpansionCost = 5_000 * purchasedTerritories
   const stationPackageCost = Math.round(15_000 * (game.specialization === 'mobility' ? .9 : 1) * (hasResearch(game.completedResearch ?? [], 'prefab-depots') ? .8 : 1)) + getTaxiModel('toyota-corolla').price
@@ -369,6 +371,7 @@ export default function App() {
     <div className="game-shell">
       <Suspense fallback={<div className="map-loading" aria-label="Loading map" />}><GameMap
         onSelectStartingLocation={!game.company ? setStartingCoordinates : undefined}
+        administrativeBoundaries={administrativeBoundaries}
         layoutKey={game.activeSection}
         cityId={game.activeCityId ?? game.startingCityId}
         customCities={game.customCities ?? []}
@@ -402,7 +405,7 @@ export default function App() {
         onTaxiArrived={handleTaxiArrived}
       /></Suspense>
 
-      {game.company && activeCity && showAdministrativeRegions && <AdministrativeRegions city={activeCity} onClose={() => setShowAdministrativeRegions(false)} />}
+      {game.company && activeCity && showAdministrativeRegions && <AdministrativeRegions city={activeCity} onBoundaries={setAdministrativeBoundaries} onClose={() => setShowAdministrativeRegions(false)} />}
 
       {game.company ? (
         <>

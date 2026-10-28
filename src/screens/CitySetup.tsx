@@ -1,14 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
-import mapboxgl from 'mapbox-gl'
-import 'mapbox-gl/dist/mapbox-gl.css'
+import { useEffect, useState } from 'react'
 import { mapboxAccessToken } from '../config/mapbox'
 import type { City, Coordinates } from '../models/game'
 
-const fallbackStyle: mapboxgl.StyleSpecification = { version: 8, sources: { osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'osm', type: 'raster', source: 'osm' }] }
 type ReversePlace = { name: string; region: string; regionCode: string; country: string; countryCode: string }
 const slug = (value: string) => value.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 
-async function reversePlace([longitude, latitude]: Coordinates): Promise<ReversePlace> {
+export async function reversePlace([longitude, latitude]: Coordinates): Promise<ReversePlace> {
   if (mapboxAccessToken) {
     const response = await fetch(`https://api.mapbox.com/search/geocode/v6/reverse?longitude=${longitude}&latitude=${latitude}&types=place,locality,region,country&access_token=${mapboxAccessToken}`)
     if (!response.ok) throw new Error('We could not identify that place. Try another point.')
@@ -30,39 +27,43 @@ async function reversePlace([longitude, latitude]: Coordinates): Promise<Reverse
   return { name, region, regionCode: region, country: address.country ?? address.country_code.toUpperCase(), countryCode: address.country_code.toUpperCase() }
 }
 
-function SelectionMap({ onSelect }: { onSelect: (city: City | null) => void }) {
-  const container = useRef<HTMLDivElement>(null)
-  const [status, setStatus] = useState('Tap anywhere to place Station 1')
-  useEffect(() => {
-    if (!container.current) return
-    if (mapboxAccessToken) mapboxgl.accessToken = mapboxAccessToken
-    const map = new mapboxgl.Map({ container: container.current, style: mapboxAccessToken ? 'mapbox://styles/mapbox/streets-v12' : fallbackStyle, center: [0, 25], zoom: 1.7, attributionControl: false })
-    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right')
-    let marker: mapboxgl.Marker | undefined
-    map.on('click', async ({ lngLat }) => {
-      const coordinates: Coordinates = [lngLat.lng, lngLat.lat]
-      marker?.remove(); marker = new mapboxgl.Marker({ color: '#43ddb5' }).setLngLat(lngLat).addTo(map)
-      setStatus('Finding this place…')
-      try {
-        const place = await reversePlace(coordinates)
-        const city: City = { id: `custom-${slug(place.countryCode)}-${slug(place.regionCode)}-${slug(place.name)}-${Math.abs(Math.round(lngLat.lng * 1000))}`, name: place.name, countryCode: place.countryCode, countryName: place.country, regionCode: place.regionCode, regionName: place.region, coordinates, mapZoom: 12 }
-        onSelect(city); setStatus(`${place.name} · ${place.region}, ${place.country}`)
-      } catch (error) { onSelect(null); setStatus((error as Error).message) }
-    })
-    return () => { marker?.remove(); map.remove() }
-  }, [onSelect])
-  return <div className="place-picker"><div ref={container} className="place-picker-map"/><div className="place-picker-status">⌖ {status}</div></div>
-}
 
-export function CitySetup({ onStart }: { onStart: (city: City) => void }) {
+export function CitySetup({ onStart, coordinates }: { onStart: (city: City) => void; coordinates: Coordinates | null }) {
   const [selected, setSelected] = useState<City | null>(null)
-  return <div className="setup-backdrop"><main className="setup-sheet game-panel">
-    <small className="eyebrow">CHOOSE ANY PLACE IN THE WORLD</small>
-    <h1>Where will your<br/><em>empire begin?</em></h1>
-    <p>Tap a town or city on the map. Station 1 and its first taxi are included; build more stations from the map as your company grows.</p>
-    <SelectionMap onSelect={setSelected}/>
-    <div className="license-preview"><span>📜</span><div><small>INCLUDED OPERATING LICENSE</small><strong>{selected ? `${selected.regionName}, ${selected.countryName}` : 'Select a place to continue'}</strong></div><b>{selected ? 'Included' : '—'}</b></div>
-    <div className="starter"><span>🚕</span><div><small>STATION 1 + STARTER VEHICLE</small><strong>First station · Compact Taxi</strong></div><b>Included</b></div>
-    <button className="start-button" disabled={!selected} onClick={() => selected && onStart(selected)}>Start in {selected?.name ?? 'your city'} <span>→</span></button>
-  </main></div>
+  const [status, setStatus] = useState('Tap anywhere on the world map to place Station 1')
+  useEffect(() => {
+    if (!coordinates) return
+    let cancelled = false
+    setSelected(null)
+    setStatus('Finding your starting city…')
+    void reversePlace(coordinates).then((place) => {
+      if (cancelled) return
+      const city: City = {
+        id: `custom-${slug(place.countryCode)}-${slug(place.regionCode)}-${slug(place.name)}-${Math.abs(Math.round(coordinates[0] * 1000))}`,
+        name: place.name, countryCode: place.countryCode, countryName: place.country,
+        regionCode: place.regionCode, regionName: place.region, coordinates, mapZoom: 12,
+      }
+      setSelected(city)
+      setStatus(`${place.name} · ${place.region}, ${place.country}`)
+    }).catch((error: unknown) => {
+      if (!cancelled) setStatus(error instanceof Error ? error.message : 'Choose a town or city on land.')
+    })
+    return () => { cancelled = true }
+  }, [coordinates])
+  return <aside className="worldfront-start-overlay" style={{
+    position: 'absolute', zIndex: 30, bottom: 'max(20px, env(safe-area-inset-bottom))',
+    left: 16, right: 16, maxWidth: 480, marginInline: 'auto', padding: 20,
+    borderRadius: 22, background: 'rgba(3, 27, 38, 0.94)', color: '#f4ffff',
+    border: '1px solid rgba(67,221,181,.35)', boxShadow: '0 18px 60px #0008',
+    backdropFilter: 'blur(16px)',
+  }}>
+    <small style={{ color: '#43ddb5', letterSpacing: 2, fontWeight: 700 }}>WELCOME TO WORLDFRONT</small>
+    <h1 style={{ fontSize: 25, lineHeight: 1.15, margin: '10px 0' }}>Where will your empire begin?</h1>
+    <p style={{ fontSize: 13, color: '#a6c1c4', margin: '0 0 12px' }}>Explore the actual game map and tap a city to establish your first station.</p>
+    <div role="status" style={{ fontSize: 14, marginBottom: 12 }}>⌖ {status}</div>
+    <div style={{ fontSize: 13, color: '#c9e4df', marginBottom: 14 }}>📜 Operating licence included · 🚕 Station 1 + Compact Taxi included</div>
+    <button className="start-button" style={{ width: '100%' }} disabled={!selected} onClick={() => selected && onStart(selected)}>
+      {selected ? `Start in ${selected.name}` : 'Select a city to continue'} <span>→</span>
+    </button>
+  </aside>
 }

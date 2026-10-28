@@ -12,6 +12,7 @@ import { hasResearch } from './services/research'
 import { getTaxiModel } from './data/taxis'
 import { jobOfferCapacity } from './services/earlyGameEngine'
 import { getCity } from './data/cities'
+import type { Coordinates } from './models/game'
 import { moneyFormatterForCity } from './services/localization'
 import { HOTEL_PURCHASE_COST } from './services/hotelEconomy'
 import { CurrencyProvider } from './components/game/CurrencyContext'
@@ -32,6 +33,7 @@ const MaintenancePopup = lazy(() => import('./components/game/MaintenancePopup')
 
 export default function App() {
   const game = useGameStore()
+  const [startingCoordinates, setStartingCoordinates] = useState<Coordinates | null>(null)
   const [placingStation, setPlacingStation] = useState(false)
   const [placingTerritory, setPlacingTerritory] = useState(false)
   const [placingHotel, setPlacingHotel] = useState(false)
@@ -364,6 +366,7 @@ export default function App() {
     <CurrencyProvider city={activeCity}>
     <div className="game-shell">
       <Suspense fallback={<div className="map-loading" aria-label="Loading map" />}><GameMap
+        onSelectStartingLocation={!game.company ? setStartingCoordinates : undefined}
         layoutKey={game.activeSection}
         cityId={game.activeCityId ?? game.startingCityId}
         customCities={game.customCities ?? []}
@@ -623,6 +626,7 @@ export default function App() {
         </>
       ) : (
         <Suspense fallback={<div className="loading">LOADING WORLD</div>}><CitySetup
+          coordinates={startingCoordinates}
           onStart={game.initializeCompany}
         /></Suspense>
       )}

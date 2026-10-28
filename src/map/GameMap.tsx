@@ -56,6 +56,7 @@ import { recordTaxiPosition, taxiPosition, persistTaxiPositions } from "../servi
 
 interface GameMapProps {
   layoutKey: string;
+  onSelectStartingLocation?: (coordinates: Coordinates) => void;
   cityId: string | null;
   customCities: import("../models/game").City[];
   branches: Branch[];
@@ -697,6 +698,7 @@ const missionColor = (jobId: string) => {
 
 function GameMapView({
   layoutKey,
+  onSelectStartingLocation,
   cityId,
   customCities,
   branches,
@@ -1044,7 +1046,8 @@ function GameMapView({
       );
     const handlePlacement = (event: mapboxgl.MapMouseEvent) => {
       const coordinates: Coordinates = [event.lngLat.lng, event.lngLat.lat];
-      if (placingStation) onBuildStation(coordinates);
+      if (onSelectStartingLocation) onSelectStartingLocation(coordinates);
+      else if (placingStation) onBuildStation(coordinates);
       else if (placingTerritory) onExpandTerritory(coordinates);
       else if (placingHotel) onBuildHotel(coordinates);
       else if (placingHarbour) onPlaceHarbour(coordinates);
@@ -1061,6 +1064,7 @@ function GameMapView({
     placingHotel,
     placingHarbour,
     placingPostalDepot,
+    onSelectStartingLocation,
     onBuildStation,
     onExpandTerritory,
     onBuildHotel,
@@ -3521,6 +3525,7 @@ export const GameMap = memo(
   GameMapView,
   (previous, next) =>
     previous.layoutKey === next.layoutKey &&
+    previous.onSelectStartingLocation === next.onSelectStartingLocation &&
     previous.cityId === next.cityId &&
     previous.customCities === next.customCities &&
     previous.branches === next.branches &&

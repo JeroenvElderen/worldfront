@@ -106,7 +106,12 @@ export async function resolveRoadRoute(
   const key = signal ? null : routeCacheKey(from, to, profiles, options)
   if (key) {
     const cached = roadRouteCache.get(key)
-    if (cached && cached.expiresAt > Date.now()) return cached.route
+    if (cached && cached.expiresAt > Date.now()) {
+      // Refresh recency on reads so frequently used routes survive eviction.
+      roadRouteCache.delete(key)
+      roadRouteCache.set(key, cached)
+      return cached.route
+    }
     if (cached) roadRouteCache.delete(key)
     const pending = inFlightRoadRoutes.get(key)
     if (pending) return pending

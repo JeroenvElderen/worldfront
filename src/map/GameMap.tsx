@@ -1262,20 +1262,14 @@ function GameMapView({
                 currentPosition = ferryPosition.position;
                 ferryState = ferryPosition.state;
               }
-              (
-                instance.getSource(sourceId) as
-                  | mapboxgl.GeoJSONSource
-                  | undefined
-              )?.setData(
-                movingVehiclePoint(sourceId, currentPosition, {
+              updateVisibleVehicleMarker(instance, sourceId, currentPosition, {
                   ferryStatus:
                     ferryState === "waiting"
                       ? "Waiting for ferry"
                       : ferryState === "aboard"
                         ? "On ferry"
                         : "",
-                }),
-              );
+                });
               if (ferryState !== lastFerryState) {
                 instance.setPaintProperty(
                   sourceId,
@@ -1391,20 +1385,14 @@ function GameMapView({
                 currentPosition = ferryPosition.position;
                 ferryState = ferryPosition.state;
               }
-              (
-                instance.getSource(sourceId) as
-                  | mapboxgl.GeoJSONSource
-                  | undefined
-              )?.setData(
-                movingVehiclePoint(sourceId, currentPosition, {
+              updateVisibleVehicleMarker(instance, sourceId, currentPosition, {
                   ferryStatus:
                     ferryState === "waiting"
                       ? "Waiting for ferry"
                       : ferryState === "aboard"
                         ? "On ferry"
                         : "",
-                }),
-              );
+                });
               if (ferryState !== lastFerryState) {
                 instance.setPaintProperty(
                   sourceId,
@@ -1761,18 +1749,14 @@ function GameMapView({
                 );
               }
             }
-            (
-              instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined
-            )?.setData(
-              movingVehiclePoint(sourceId, currentPosition, {
+            updateVisibleVehicleMarker(instance, sourceId, currentPosition, {
                 ferryStatus:
                   ferryState === "waiting"
                     ? "Waiting for ferry"
                     : ferryState === "aboard"
                       ? "On ferry"
                       : "",
-              }),
-            );
+              });
             recordTaxiPosition(vehicle.id, currentPosition);
             if (!ferryState) recordJourneyCheckpoint(job.id, vehicle.id, currentPosition);
             // Check active OSM closure edges while driving. Persist the new route
@@ -3054,7 +3038,7 @@ function GameMapView({
           currentPosition = ferryPosition.position;
           ferryState = ferryPosition.state;
         }
-        (instance.getSource(vehicleId) as mapboxgl.GeoJSONSource | undefined)?.setData(movingVehiclePoint(vehicleId, currentPosition, { ferryStatus: ferryState === "waiting" ? "Waiting for ferry" : ferryState === "aboard" ? "On ferry" : "" }));
+        updateVisibleVehicleMarker(instance, vehicleId, currentPosition, { ferryStatus: ferryState === "waiting" ? "Waiting for ferry" : ferryState === "aboard" ? "On ferry" : "" });
         if (ferryState !== lastFerryState && instance.getLayer(vehicleId)) {
           instance.setPaintProperty(vehicleId, "circle-color", ferryState === "waiting" ? vehicleColor.waitingForFerry : ferryState === "aboard" ? vehicleColor.onFerry : vehicleColor.postal);
           lastFerryState = ferryState;

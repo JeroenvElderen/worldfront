@@ -7,7 +7,6 @@ import { getPostVehicleModel } from '../data/postVehicles'
 import type { AutomationRole, BrandStrategy, City, CleaningService, Company, Coordinates, DepotFacility, Difficulty, DispatcherStrategy, Driver, DriverCertification, ExteriorAccessory, FerryRouteOption, FinancialTransaction, GameSave, IncidentResponse, MaintenanceKind, PostalDepot, PostalRoutePlan, RefuelStrategy, ResearchId, Specialization, TaxiFerryCrossing, TerritoryExpansion, TireType, TransactionCategory, TransportMode, Vehicle, PendingExploration, VehicleUpgrade } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
 import { explorationDiagnostic, loadRemoteExploration, submitExplorationQueue, subscribeRemoteExploration } from '../services/remoteExploration'
-import { mergeVillageTerritories } from '../services/territoryGeometry'
 import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import {
   generateJobOffers,
@@ -23,7 +22,7 @@ import { canResearch, hasResearch, researchNodes } from '../services/research'
 import { calculateJobOutcome, createDriverCandidates, createGoals, energyMultiplier, jobOfferCapacity, pickupSpeedMultiplier, updateGoals, upgradeAppliesToVehicle, upgradeDetails, upgradeFareMultiplier, vehicleCanTakeJob, vehicleComfortScore } from '../services/earlyGameEngine'
 import { cityDemandMultiplier, createCityEconomy, growCityPopulation, HOTEL_PURCHASE_COST, hotelUpgradeCost, pendingHotelRevenue } from '../services/hotelEconomy'
 import { competitorGrowth, createCompetitors, createWorldCondition, defaultBrandStrategy, fareMultiplier, marketingDemandMultiplier } from '../services/worldSystems'
-import { compactLegacyDiscoveries, isInsideVillageTerritories, type VillageTerritoryCenter } from '../services/territoryGeometry'
+import { isInsideVillageTerritories, type VillageTerritoryCenter } from '../services/territoryGeometry'
 import { createTrafficIncident, trafficImpactForJob } from '../services/operationsIncidents'
 import { cleaningDetails, createAutomationEmployee, createCustomerReview, createStarterDispatcher, createStarterMechanic, maintenanceAdvisories, maintenanceQuote, recruitDispatcher, recruitMechanic, tireDetails, tireWearForDistance } from '../services/fleetOperations'
 import { ferryCrossingsHaveActiveService } from '../services/ferryService'
@@ -1565,7 +1564,7 @@ const generationTaxi = selectJobGenerationTaxi(state)
       const route = routeId ? (saved.transportRoutes ?? []).find((candidate) => candidate.id === routeId) : undefined
       return route?.routeCoordinates?.length ? { ...area, routeCoordinates: route.routeCoordinates } : area
     })
-    const exploredTerritory = compactLegacyDiscoveries(saved.exploredTerritory, legacyDiscoveries)
+    const exploredTerritory = saved.exploredTerritory ?? null
     const licensedCities = [...customCities, ...cities.filter((city) => (saved.countryLicenses ?? []).includes(city.countryCode))]
     const cityEconomies = [...(saved.cityEconomies ?? [])]
     licensedCities.forEach((city) => { if (!cityEconomies.some((economy) => economy.cityId === city.id)) cityEconomies.push(createCityEconomy(city)) })
@@ -1725,12 +1724,9 @@ const syncRemoteExploration = async () => {
     const remote = await loadRemoteExploration()
     if (remote && JSON.stringify(remote.geometry) !== lastRemoteGeometry) {
       lastRemoteGeometry = JSON.stringify(remote.geometry)
-      const latest = useGameStore.getState()
-      const merged = mergeVillageTerritories([
-        ...(latest.exploredTerritory ? [latest.exploredTerritory] : []),
-        remote,
-      ])
-      if (merged) useGameStore.setState({ exploredTerritory: merged })
+      // Railway owns the completed exploration geometry; replace rather than
+      // union it on Safari's main thread.
+      useGameStore.setState({ exploredTerritory: remote })
     }
   } catch (error) { console.warn('[exploration] Remote sync failed', error) }
   finally { remoteSyncBusy = false }

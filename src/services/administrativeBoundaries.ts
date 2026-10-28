@@ -33,7 +33,7 @@ const OVERRIDES: Record<string, [AdministrativeLevel, string]> = {
   IRL: ['ADM2', 'County'], NLD: ['ADM1', 'Province'],
   DEU: ['ADM1', 'Federal State'], USA: ['ADM1', 'State'],
   GBR: ['ADM2', 'Administrative Area'], FRA: ['ADM2', 'Department'],
-  GRC: ['ADM1', 'Region'], SWE: ['ADM1', 'County'],
+  GRC: ['ADM2', 'Municipality'], SWE: ['ADM1', 'County'],
   JPN: ['ADM1', 'Prefecture'], POL: ['ADM1', 'Voivodeship'],
   CAN: ['ADM1', 'Province / Territory'], AUS: ['ADM1', 'State / Territory'],
   BRA: ['ADM1', 'State'], IND: ['ADM1', 'State / Territory'],

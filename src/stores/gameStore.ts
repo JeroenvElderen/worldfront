@@ -1744,6 +1744,18 @@ const startRemoteExploration = () => {
   remoteSyncStarted = true
   subscribeRemoteExploration(() => { void syncRemoteExploration() })
   void syncRemoteExploration()
+  const retrySubmission = () => {
+    const state = useGameStore.getState()
+    if (!state.hasHydrated || !state.company) return
+    const completed = state.jobs
+      .filter((job) => job.status === 'complete')
+      .map((job) => completedExploration(job,
+        (state.vehicleJourneys ?? []).find((trip) => trip.jobId === job.id)?.completedAt ?? state.updatedAt))
+      .filter((item): item is PendingExploration => item !== null)
+    void submitExplorationQueue([...(state.pendingExploration ?? []), ...completed])
+  }
+  retrySubmission()
+  window.addEventListener('online', retrySubmission)
   setInterval(() => {
     const state = useGameStore.getState()
     if (!state.hasHydrated || !state.company) return

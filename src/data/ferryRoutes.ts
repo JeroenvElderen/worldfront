@@ -27,6 +27,9 @@ export const curatedFerryRoutes: CuratedFerryRoute[] = [
   { id: 'plymouth-santander', name: 'Plymouth–Santander', originName: 'Plymouth Ferry Port', destinationName: 'Port of Santander', durationMinutes: 1260, coordinates: [[-4.153, 50.368], [-4.5, 48.8], [-4.75, 46.8], [-4.45, 44.8], [-3.807, 43.456]] },
   { id: 'setubal-troia', name: 'Setúbal–Tróia', originName: 'Setúbal Ferry Terminal', destinationName: 'Tróia Ferry Terminal', durationMinutes: 25, coordinates: [[-8.896, 38.521], [-8.91, 38.5], [-8.901, 38.488]] },
   { id: 'cuxhaven-helgoland', name: 'Cuxhaven–Heligoland', originName: 'Port of Cuxhaven', destinationName: 'Heligoland South Harbour', durationMinutes: 150, coordinates: [[8.707, 53.868], [8.35, 54.0], [7.95, 54.08], [7.891, 54.174]] },
+  // Vasiliki (Lefkada) to Fiskardo (Kefalonia). Approximate playable
+  // sea corridor fallback when OpenStreetMap's Overpass service is offline.
+  { id: 'vasiliki-fiskardo', name: 'Vasiliki–Fiskardo', originName: 'Vasiliki Harbour', destinationName: 'Fiskardo Harbour', durationMinutes: 60, coordinates: [[20.602, 38.624], [20.595, 38.60], [20.579, 38.54], [20.575, 38.46], [20.576, 38.458]] },
   // Mediterranean and Baltic passenger gateways
   { id: 'barcelona-palma', name: 'Barcelona–Palma', originName: 'Port of Barcelona', destinationName: 'Port of Palma', durationMinutes: 450, coordinates: [[2.171, 41.352], [2.45, 40.55], [2.63, 39.57]] },
   { id: 'genoa-olbia', name: 'Genoa–Olbia', originName: 'Port of Genoa', destinationName: 'Port of Olbia', durationMinutes: 660, coordinates: [[8.921, 44.407], [9.42, 42.7], [9.51, 40.92]] },

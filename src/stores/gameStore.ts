@@ -1764,16 +1764,11 @@ const startRemoteExploration = () => {
   setInterval(() => {
     const state = useGameStore.getState()
     if (!state.hasHydrated || !state.company) return
-    // Reconstruct completed mission routes from the saved job records too.
-    // Earlier versions removed pendingExploration immediately after local
-    // geometry processing, before the remote queue could acknowledge them.
-    const completed = state.jobs
-      .filter((job) => job.status === 'complete')
-      .map((job) => completedExploration(job,
-        (state.vehicleJourneys ?? []).find((trip) => trip.jobId === job.id)?.completedAt ?? state.updatedAt))
-      .filter((item): item is PendingExploration => item !== null)
-    const outstanding = [...(state.pendingExploration ?? []), ...completed]
-    void submitExplorationQueue(outstanding)
+    // Historical missions are recovered once at startup. On each periodic sync,
+    // retry only pending routes to avoid an ever-growing completed-job scan.
+    if (state.pendingExploration?.length) {
+      void submitExplorationQueue(state.pendingExploration)
+    }
     void syncRemoteExploration()
   }, 30_000)
 }

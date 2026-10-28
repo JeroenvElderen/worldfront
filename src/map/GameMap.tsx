@@ -1037,7 +1037,7 @@ function GameMapView({
   }, [branches, customCities, territoryExpansions]);
   useEffect(() => {
     const instance = map.current;
-    if (!instance) return;
+    if (!instance || !containerReady) return;
     instance
       .getCanvas()
       .classList.toggle(
@@ -1059,6 +1059,7 @@ function GameMapView({
       instance.getCanvas().classList.remove("placing-depot");
     };
   }, [
+    containerReady,
     placingStation,
     placingTerritory,
     placingHotel,

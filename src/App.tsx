@@ -430,7 +430,7 @@ export default function App() {
       <Suspense fallback={<div className="map-loading" aria-label="Loading map" />}><GameMap
         onSelectStartingLocation={!game.company ? setStartingCoordinates : undefined}
         administrativeBoundaries={administrativeBoundaries}
-        ownedAdministrativeRegionIds={startingRegionId && !(game.administrativeExpansionLedger?.purchasedRegionIds?.length) ? [...new Set([...(game.territoryLicenses ?? []), startingRegionId])] : (game.territoryLicenses ?? [])}
+        ownedAdministrativeRegionIds={(() => { const base = startingRegionId && !(game.administrativeExpansionLedger?.purchasedRegionIds?.length) ? [...new Set([...(game.territoryLicenses ?? []), startingRegionId])] : (game.territoryLicenses ?? []); return administrativeBoundaries && (game.administrativeExpansionLedger?.purchasedCountryIds ?? []).includes(administrativeBoundaries.metadata.countryCode) ? administrativeBoundaries.features.map((feature) => feature.properties.gameRegionId) : base })()}
         layoutKey={game.activeSection}
         cityId={game.activeCityId ?? game.startingCityId}
         customCities={game.customCities ?? []}

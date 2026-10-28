@@ -410,6 +410,7 @@ export default function App() {
                    discoveredRoutes={game.discoveredFerryRoutes ?? []}
               transportAssets={game.transportAssets ?? []}
               transportRoutes={game.transportRoutes ?? []}
+         purchasedHarbours={[]}
               onRefreshRoutes={() => {
                 void (async () => {
                   const harbours = useGameStore.getState().purchasedHarbours ?? []

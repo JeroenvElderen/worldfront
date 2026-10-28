@@ -6,6 +6,7 @@ import { getTaxiModel } from '../data/taxis'
 import { getPostVehicleModel } from '../data/postVehicles'
 import type { AutomationRole, BrandStrategy, City, CleaningService, Company, Coordinates, DepotFacility, Difficulty, DispatcherStrategy, Driver, DriverCertification, ExteriorAccessory, FerryRouteOption, FinancialTransaction, GameSave, IncidentResponse, MaintenanceKind, PostalDepot, PostalRoutePlan, RefuelStrategy, ResearchId, Specialization, TaxiFerryCrossing, TerritoryExpansion, TireType, TransactionCategory, TransportMode, Vehicle, PendingExploration, VehicleUpgrade } from '../models/game'
 import { indexedDbStorage } from '../services/saveDatabase'
+import { loadRemoteExploration, submitExplorationQueue, subscribeRemoteExploration } from '../services/remoteExploration'
 import { addReputation, DEPOT_FACILITY_MAX_LEVEL, depotFacilityLevel, depotFacilityUpgradeCost, fleetSlotCapacity, garageUpgradeCost, LEASING_UNLOCK_LEVEL, levelForReputation, maxJobDistanceForFleet } from '../services/companyProgression'
 import {
   generateJobOffers,
@@ -1711,6 +1712,53 @@ useGameStore.subscribe((state, previous) => {
   if (state.pendingExploration !== previous.pendingExploration || !previous.hasHydrated) scheduleExploration()
 })
 if (useGameStore.getState().hasHydrated && useGameStore.getState().pendingExploration?.length) scheduleExploration()
+
+
+// Mirror completed journeys to the durable Railway queue before local processing.
+// Keep local processing as a fallback until mission settlement is server-authoritative.
+let remoteSyncStarted = false
+let remoteSyncBusy = false
+const syncRemoteExploration = async () => {
+  if (remoteSyncBusy) return
+  const state = useGameStore.getState()
+  if (!state.hasHydrated || !state.company) return
+  remoteSyncBusy = true
+  try {
+    const remote = await loadRemoteExploration()
+    if (remote) {
+      const latest = useGameStore.getState()
+      const merged = mergeVillageTerritories([
+        ...(latest.exploredTerritory ? [latest.exploredTerritory] : []),
+        remote,
+      ])
+      if (merged) useGameStore.setState({ exploredTerritory: merged })
+    }
+  } catch (error) { console.warn('[exploration] Remote sync failed', error) }
+  finally { remoteSyncBusy = false }
+}
+const startRemoteExploration = () => {
+  if (remoteSyncStarted) return
+  remoteSyncStarted = true
+  subscribeRemoteExploration(() => { void syncRemoteExploration() })
+  void syncRemoteExploration()
+  setInterval(() => {
+    const state = useGameStore.getState()
+    if (!state.hasHydrated || !state.company) return
+    const outstanding = (state.pendingExploration ?? []).filter(
+      (item) => !(state.vehicleJourneys ?? []).some((trip) => trip.jobId === item.jobId),
+    )
+    void submitExplorationQueue(outstanding)
+    void syncRemoteExploration()
+  }, 30_000)
+}
+useGameStore.subscribe((state, previous) => {
+  if (!state.hasHydrated) return
+  if (!previous.hasHydrated) startRemoteExploration()
+  if (state.pendingExploration !== previous.pendingExploration && state.pendingExploration?.length) {
+    void submitExplorationQueue(state.pendingExploration)
+  }
+})
+if (useGameStore.getState().hasHydrated) startRemoteExploration()
 
 // Refill the offer board after a job is accepted, declined or expires.
 // Debouncing coalesces several changes into one generation pass, while the

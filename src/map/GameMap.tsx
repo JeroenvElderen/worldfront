@@ -409,7 +409,8 @@ const updateVisibleVehicleMarker = (
 ) => {
   const source = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
   if (!source) return;
-  if (!instance.getBounds().contains(position as [number, number])) return;
+  const bounds = instance.getBounds();
+  if (!bounds || !bounds.contains(position as [number, number])) return;
   source.setData(movingVehiclePoint(sourceId, position, properties));
 };
 

@@ -151,6 +151,19 @@ export default function App() {
     }
   }, [placeHarbour, setSection])
 
+  // The starter taxi should dispatch itself; automation employees are optional.
+  // The store validates passenger capacity and driver availability on accept.
+  const dispatchStarterTaxi = () => {
+    const state = useGameStore.getState()
+    if (!state.company || state.vehicles.filter((vehicle) => vehicle.type === 'taxi').length !== 1) return
+    const taxi = state.vehicles.find((vehicle) => vehicle.type === 'taxi' && vehicle.status === 'available')
+    if (!taxi || !taxi.driverId || !state.drivers.some((driver) => driver.id === taxi.driverId && driver.status === 'available')) return
+    for (const offer of state.jobs.filter((job) => job.status === 'offered' && job.cityId === taxi.cityId)) {
+      state.acceptJob(offer.id, false)
+      if (useGameStore.getState().jobs.some((job) => job.id === offer.id && job.status !== 'offered')) break
+    }
+  }
+
   const availableOfferCapacity = jobOfferCapacity(game.vehicles, game.drivers)
 
   const offeredJobCount = game.jobs.filter(
@@ -176,7 +189,7 @@ export default function App() {
 
       // Smart roof signs attract an additional request for their taxi.
       if (availableOffers > offered) {
-        void addRandomJob().then(() => useGameStore.getState().runAutomation())
+        void addRandomJob().then(() => { useGameStore.getState().runAutomation(); dispatchStarterTaxi() })
       }
     }
 
@@ -215,6 +228,7 @@ export default function App() {
       const state = useGameStore.getState()
       if (!state.company) return
       state.runAutomation()
+      dispatchStarterTaxi()
       state.tickJobs()
     }, 0)
     return () => window.clearTimeout(start)
@@ -394,7 +408,7 @@ export default function App() {
     const recover = () => {
       if (document.visibilityState === 'hidden') return
       tickJobs()
-      void useGameStore.getState().addRandomJob().then(() => useGameStore.getState().runAutomation())
+      void useGameStore.getState().addRandomJob().then(() => { useGameStore.getState().runAutomation(); dispatchStarterTaxi() })
     }
 
     recover()
@@ -464,6 +478,18 @@ export default function App() {
         onTaxiArrived={handleTaxiArrived}
       /></Suspense>
 
+      {game.company && game.activeSection === 'map' && game.jobsError && !game.jobsLoading && (
+        <aside role="alert" style={{ position: 'absolute', zIndex: 31, top: 242, left: 14, right: 14,
+          maxWidth: 460, padding: '9px 12px', borderRadius: 10, background: 'rgba(8,34,42,.95)',
+          color: '#fff', border: '1px solid #d9a454', fontSize: 12 }}>
+          <strong>Taxi requests unavailable</strong>
+          <div style={{ marginTop: 3 }}>{game.jobsError}</div>
+          <button type="button" style={{ marginTop: 6, padding: '5px 10px', borderRadius: 7 }}
+            onClick={() => void useGameStore.getState().addRandomJob()}>
+            Retry jobs
+          </button>
+        </aside>
+      )}
       {game.company && activeCity && showAdministrativeRegions && <AdministrativeRegions city={activeCity} onClose={() => setShowAdministrativeRegions(false)} />}
 
       {game.company ? (

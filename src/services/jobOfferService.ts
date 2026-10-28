@@ -12,7 +12,7 @@ import { ferryCrossingsHaveActiveService } from './ferryService'
 
 // Short local trips keep the board useful even when the player's first owned
 // village has a compact administrative boundary.
-export const MIN_JOB_DISTANCE_KM = 1
+export const MIN_JOB_DISTANCE_KM = 0.25
 const passengerNames = [
   'Aoife Murphy', 'Cian Kelly', 'Niamh Byrne', 'Oisín Walsh', 'Saoirse Doyle', 'Fionn Ryan',
   'Ella O’Brien', 'Jack McCarthy', 'Maya Khan', 'Noah Chen', 'Sofia Rossi', 'Daniel Silva',

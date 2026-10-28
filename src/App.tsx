@@ -464,6 +464,18 @@ export default function App() {
         onTaxiArrived={handleTaxiArrived}
       /></Suspense>
 
+      {game.company && game.activeSection === 'map' && game.jobsError && !game.jobsLoading && (
+        <aside role="alert" style={{ position: 'absolute', zIndex: 31, top: 242, left: 14, right: 14,
+          maxWidth: 460, padding: '9px 12px', borderRadius: 10, background: 'rgba(8,34,42,.95)',
+          color: '#fff', border: '1px solid #d9a454', fontSize: 12 }}>
+          <strong>Taxi requests unavailable</strong>
+          <div style={{ marginTop: 3 }}>{game.jobsError}</div>
+          <button type="button" style={{ marginTop: 6, padding: '5px 10px', borderRadius: 7 }}
+            onClick={() => void useGameStore.getState().addRandomJob()}>
+            Retry jobs
+          </button>
+        </aside>
+      )}
       {game.company && activeCity && showAdministrativeRegions && <AdministrativeRegions city={activeCity} onClose={() => setShowAdministrativeRegions(false)} />}
 
       {game.company ? (

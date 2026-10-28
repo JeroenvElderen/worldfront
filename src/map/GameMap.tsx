@@ -449,6 +449,8 @@ const VEHICLE_MARKER_RADIUS = 4;
 const VEHICLE_MARKER_STROKE_WIDTH = 1.5;
 const ROUTE_GLOW_WIDTH = 10;
 const ROUTE_GEOMETRY_UPDATE_INTERVAL_MS = 500;
+// Route geometry remains available for navigation and exploration, but is not rendered.
+const SHOW_DRIVING_ROUTE_LINES = false;
 
 const ensureFerryWaitLabel = (instance: mapboxgl.Map, sourceId: string) => {
   const layerId = `${sourceId}-ferry-wait`;
@@ -1578,7 +1580,7 @@ function GameMapView({
 
           const routeSourceId = jobRouteSourceId(job.id);
 
-          instance.addSource(routeSourceId, {
+          if (SHOW_DRIVING_ROUTE_LINES) instance.addSource(routeSourceId, {
             type: "geojson",
             data: lineString([
               ...pickupRoute.coordinates,
@@ -1791,8 +1793,8 @@ function GameMapView({
             }
 
             if (
-              now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS ||
-              time >= Math.max(currentJourney.arrivesAt, rerouteArrivesAt)
+              SHOW_DRIVING_ROUTE_LINES && (now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS ||
+              time >= Math.max(currentJourney.arrivesAt, rerouteArrivesAt))
             ) {
               const routeAhead = pickingUp
                 ? [
@@ -2490,7 +2492,7 @@ function GameMapView({
       // Restore missing route layers after style reloads without restarting
       // an already running journey animation.
       if (liveJobIds.current.has(job.id)) {
-        if (!instance.getSource(routeSourceId)) {
+        if (SHOW_DRIVING_ROUTE_LINES && !instance.getSource(routeSourceId)) {
           instance.addSource(routeSourceId, {
             type: "geojson",
             data: lineString(job.pickupRouteCoordinates?.length
@@ -2498,7 +2500,7 @@ function GameMapView({
               : [start, jobPickup(job), jobDestination(job)]),
           });
         }
-        if (!instance.getLayer(routeSourceId)) {
+        if (SHOW_DRIVING_ROUTE_LINES && !instance.getLayer(routeSourceId)) {
           instance.addLayer({
             id: routeSourceId,
             type: "line",
@@ -2511,11 +2513,11 @@ function GameMapView({
             },
           }, instance.getLayer(taxiSourceId) ? taxiSourceId : undefined);
         }
-        if (instance.getLayer(taxiSourceId)) instance.moveLayer(routeSourceId, taxiSourceId);
+        if (SHOW_DRIVING_ROUTE_LINES && instance.getLayer(taxiSourceId)) instance.moveLayer(routeSourceId, taxiSourceId);
         continue;
       }
 
-      if (!instance.getSource(routeSourceId)) instance.addSource(routeSourceId, {
+      if (SHOW_DRIVING_ROUTE_LINES && !instance.getSource(routeSourceId)) instance.addSource(routeSourceId, {
         type: "geojson",
         data: lineString([
           start,
@@ -2525,7 +2527,7 @@ function GameMapView({
 
       // A restrained, road-following route replaces the destination text label.
       // The animation loop updates this source to show only the road ahead.
-      if (!instance.getLayer(routeSourceId)) {
+      if (SHOW_DRIVING_ROUTE_LINES && !instance.getLayer(routeSourceId)) {
         instance.addLayer({
           id: routeSourceId,
           type: "line",
@@ -2540,7 +2542,7 @@ function GameMapView({
       }
       // Layer order can change after a style reload or vehicle re-creation.
       // Keep the live route behind its taxi, including on subsequent updates.
-      if (instance.getLayer(routeSourceId) && instance.getLayer(taxiSourceId)) {
+      if (SHOW_DRIVING_ROUTE_LINES && instance.getLayer(routeSourceId) && instance.getLayer(taxiSourceId)) {
         instance.moveLayer(routeSourceId, taxiSourceId);
       }
 
@@ -2832,8 +2834,8 @@ function GameMapView({
           }),
         );
         if (
-          now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS ||
-          time >= journey.arrivesAt
+          SHOW_DRIVING_ROUTE_LINES && (now - lastRouteUpdateAt >= ROUTE_GEOMETRY_UPDATE_INTERVAL_MS ||
+          time >= journey.arrivesAt)
         ) {
           const routeAhead = pickingUp
             ? [
@@ -3009,8 +3011,8 @@ function GameMapView({
 
       if (!instance.getSource(routeSourceId)) {
         instance.addSource(routeSourceId, { type: "geojson", data: lineString([depotPosition, depotPosition]) });
-        instance.addLayer({ id: `${routeSourceId}-glow`, type: "line", source: routeSourceId, paint: { "line-color": vehicleColor.postal, "line-width": 8, "line-opacity": 0.13, "line-blur": 5 } });
-        instance.addLayer({ id: routeSourceId, type: "line", source: routeSourceId, paint: { "line-color": vehicleColor.postal, "line-width": 2.4, "line-opacity": 0.75, "line-dasharray": [1.5, 1.2] } });
+        if (SHOW_DRIVING_ROUTE_LINES) instance.addLayer({ id: `${routeSourceId}-glow`, type: "line", source: routeSourceId, paint: { "line-color": vehicleColor.postal, "line-width": 8, "line-opacity": 0.13, "line-blur": 5 } });
+        if (SHOW_DRIVING_ROUTE_LINES) instance.addLayer({ id: routeSourceId, type: "line", source: routeSourceId, paint: { "line-color": vehicleColor.postal, "line-width": 2.4, "line-opacity": 0.75, "line-dasharray": [1.5, 1.2] } });
         ownedOverlaySources.add(routeSourceId);
       }
 
@@ -3377,6 +3379,7 @@ function GameMapView({
     const abortController = new AbortController();
 
     const drawRoute = (coordinates: number[][]) => {
+      if (!SHOW_DRIVING_ROUTE_LINES) return;
       if (abortController.signal.aborted || !instanceIsUsable()) return;
 
       removeFocusedRoute();

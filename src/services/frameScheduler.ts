@@ -3,6 +3,8 @@ type FrameTask = () => void
 const FAST_FRAME_MS = 1000 / 60
 const SLOW_FRAME_MS = 1000 / 30
 let frameIntervalMs = FAST_FRAME_MS
+let slowSamples = 0
+let fastSamples = 0
 let nextTaskId = 1
 let timer: number | undefined
 let lastFlushAt = 0
@@ -34,7 +36,22 @@ const flush = () => {
     }
   }
   const elapsed = performance.now() - startedAt
-  frameIntervalMs = elapsed > FAST_FRAME_MS ? SLOW_FRAME_MS : FAST_FRAME_MS
+  // Hysteresis avoids oscillating between 30 and 60 FPS on a single
+  // unusually expensive frame, particularly during long mobile sessions.
+  if (elapsed > FAST_FRAME_MS) {
+    slowSamples++
+    fastSamples = 0
+  } else {
+    fastSamples++
+    slowSamples = 0
+  }
+  if (frameIntervalMs === FAST_FRAME_MS && slowSamples >= 8) {
+    frameIntervalMs = SLOW_FRAME_MS
+    slowSamples = 0
+  } else if (frameIntervalMs === SLOW_FRAME_MS && fastSamples >= 120) {
+    frameIntervalMs = FAST_FRAME_MS
+    fastSamples = 0
+  }
   scheduleFlush()
 }
 

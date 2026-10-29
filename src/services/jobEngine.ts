@@ -162,11 +162,14 @@ export function acceptJobState(
 
   const job = jobs.find((candidate) => candidate.id === jobId && candidate.status === 'offered')
   const vehicle = (job && vehicles
-    .filter((candidate) => candidate.type === 'taxi' && (candidate.status === 'available' || candidate.status === 'on-job') && candidate.position && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
+    .filter((candidate) => candidate.type === 'taxi' && candidate.status === 'available' && candidate.position && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
     .sort((left, right) => distanceSquared(left.position!, jobPickup(job)) - distanceSquared(right.position!, jobPickup(job)))[0])
-    ?? vehicles.find((candidate) => candidate.type === 'taxi' && (candidate.status === 'available' || candidate.status === 'on-job') && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
+    ?? vehicles.find((candidate) => candidate.type === 'taxi' && candidate.status === 'available' && (!eligibleVehicleIds || eligibleVehicleIds.has(candidate.id)))
   if (!vehicle || !job) return null
 
+  // The vehicle's persisted position is its last completed drop-off.
+  // Never dispatch a second job from a taxi that is still travelling:
+  // its previous destination is not yet its actual starting point.
   return {
     jobs: jobs.map((candidate) => candidate.id === jobId
       ? { ...candidate, status: 'accepted' as const, assignedVehicleId: vehicle.id, acceptedAt: new Date().toISOString(), estimatedFare: candidate.fare }

@@ -786,6 +786,7 @@ function GameMapView({
   const arrivedJobIds = useRef(new Set<string>());
   const incidentMarkers = useRef<mapboxgl.Marker[]>([]);
   const territoryWorkers = useRef(new Set<Worker>());
+  const territoryDisplayCache = useRef<{ key: string; coverage: GeoJSON.FeatureCollection; locked: GeoJSON.FeatureCollection } | null>(null);
   const harbourMarkers = useRef<mapboxgl.Marker[]>([]);
   const hotelMarkers = useRef<mapboxgl.Marker[]>([]);
   const postalDepotMarkers = useRef<mapboxgl.Marker[]>([]);
@@ -2040,6 +2041,13 @@ function GameMapView({
       const coverageSource = instance.getSource("service-coverage") as mapboxgl.GeoJSONSource | undefined;
       const lockedSource = instance.getSource("locked-territory") as mapboxgl.GeoJSONSource | undefined;
       const existingSources = Boolean(source && coverageSource && lockedSource);
+      const geometryKey = JSON.stringify(territoryInputs);
+      const cachedGeometry = territoryDisplayCache.current;
+      if (existingSources && cachedGeometry?.key === geometryKey) {
+        source!.setData(data);
+        // No exploration change: keep existing Mapbox sources untouched.
+        return;
+      }
       if (existingSources) {
         source!.setData(data);
         // Geometry computation is asynchronous and cancelled on effect cleanup.
@@ -2058,6 +2066,7 @@ function GameMapView({
           const coverage = instance.getSource("service-coverage") as mapboxgl.GeoJSONSource | undefined;
           const locked = instance.getSource("locked-territory") as mapboxgl.GeoJSONSource | undefined;
           if (coverage && locked && event.data.coverage && event.data.locked) {
+            territoryDisplayCache.current = { key: geometryKey, coverage: event.data.coverage, locked: event.data.locked };
             coverage.setData(event.data.coverage);
             locked.setData(event.data.locked);
           }

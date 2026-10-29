@@ -1,5 +1,5 @@
 import { featureCollection } from "@turf/helpers";
-import simplify from "@turf/simplify";
+import { simplify } from "@turf/turf";
 import { lockedTerritoryMask, mergeVillageTerritories } from "../services/territoryGeometry";
 
 self.onmessage = (event: MessageEvent<{ id: number; territories: Parameters<typeof mergeVillageTerritories>[0] }>) => {

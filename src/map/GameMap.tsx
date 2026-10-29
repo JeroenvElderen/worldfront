@@ -2049,7 +2049,12 @@ function GameMapView({
         worker.onmessage = (event: MessageEvent<{ coverage?: GeoJSON.FeatureCollection; locked?: GeoJSON.FeatureCollection; error?: string }>) => {
           territoryWorkers.current.delete(worker);
           worker.terminate();
-          if (cancelled || map.current !== instance || event.data.error) return;
+          if (cancelled || map.current !== instance) return;
+          // A worker failure must not silently leave exploration hidden after refresh.
+          if (event.data.error) {
+            console.warn("[WorldFront] Exploration worker failed; retaining existing coverage", event.data.error);
+            return;
+          }
           const coverage = instance.getSource("service-coverage") as mapboxgl.GeoJSONSource | undefined;
           const locked = instance.getSource("locked-territory") as mapboxgl.GeoJSONSource | undefined;
           if (coverage && locked && event.data.coverage && event.data.locked) {

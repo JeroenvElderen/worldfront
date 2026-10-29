@@ -402,17 +402,37 @@ const mapVehicleColor = (vehicle: Vehicle, standardColor: string) =>
 const vehicleHeadingState = new Map<string, { position: Coordinates; heading: number }>();
 // Dispatch-style rendering: journeys continue to simulate offscreen, while
 // Mapbox only receives marker updates for vehicles inside the visible map.
+// Coalesce map-source writes within a single browser frame without changing
+// the existing vehicle routing, source ownership, or job lifecycle.
+const pendingVehicleUpdates = new WeakMap<mapboxgl.Map, Map<string, GeoJSON.Feature<GeoJSON.Point>>>()
+const pendingVehicleFlushes = new WeakMap<mapboxgl.Map, number>()
 const updateVisibleVehicleMarker = (
   instance: mapboxgl.Map,
   sourceId: string,
   position: Coordinates,
   properties: Record<string, unknown> = {},
 ) => {
-  const source = instance.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
-  if (!source) return;
+  if (!instance.getSource(sourceId)) return;
   const bounds = instance.getBounds();
   if (!bounds || !bounds.contains(position as [number, number])) return;
-  source.setData(movingVehiclePoint(sourceId, position, properties));
+  let updates = pendingVehicleUpdates.get(instance);
+  if (!updates) {
+    updates = new Map();
+    pendingVehicleUpdates.set(instance, updates);
+  }
+  updates.set(sourceId, movingVehiclePoint(sourceId, position, properties));
+  if (pendingVehicleFlushes.has(instance)) return;
+  const frame = window.requestAnimationFrame(() => {
+    pendingVehicleFlushes.delete(instance);
+    const queued = pendingVehicleUpdates.get(instance);
+    pendingVehicleUpdates.delete(instance);
+    if (!queued || !instance.isStyleLoaded()) return;
+    for (const [id, feature] of queued) {
+      const source = instance.getSource(id) as mapboxgl.GeoJSONSource | undefined;
+      if (source) source.setData(feature);
+    }
+  });
+  pendingVehicleFlushes.set(instance, frame);
 };
 
 const movingVehiclePoint = (id: string, position: Coordinates, properties: Record<string, unknown> = {}) => {

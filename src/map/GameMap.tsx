@@ -2405,9 +2405,9 @@ function GameMapView({
 
     // Keep accepted calls and the offer currently being previewed legible
     // without cluttering the map with every dispatch-board offer.
-    const visibleJobs = jobs.filter(
-      (job) => job.status !== "complete",
-    );
+    // Jobs are fully automated: render vehicles only. Keep the cleanup
+    // below so markers from an older map state are removed as well.
+    const visibleJobs: typeof jobs = [];
     const visibleIds = new Set(visibleJobs.map((job) => job.id));
 
     for (const jobId of pickupJobIds.current) {

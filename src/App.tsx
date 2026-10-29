@@ -219,7 +219,7 @@ export default function App() {
     if (!Number.isFinite(nextJobEvent)) return
 
     const delay =
-      Math.max(0, nextJobEvent - Date.now()) + 50
+      Math.max(1_000, nextJobEvent - Date.now() + 50)
 
     const timeout = window.setTimeout(() => {
       tickJobs()

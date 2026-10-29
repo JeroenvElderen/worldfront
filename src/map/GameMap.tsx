@@ -785,6 +785,7 @@ function GameMapView({
   const liveJobRunners = useRef(new Map<string, () => void>());
   const arrivedJobIds = useRef(new Set<string>());
   const incidentMarkers = useRef<mapboxgl.Marker[]>([]);
+  const territoryWorkers = useRef(new Set<Worker>());
   const harbourMarkers = useRef<mapboxgl.Marker[]>([]);
   const hotelMarkers = useRef<mapboxgl.Marker[]>([]);
   const postalDepotMarkers = useRef<mapboxgl.Marker[]>([]);
@@ -2031,33 +2032,37 @@ function GameMapView({
       // Taxi exploration is already buffered, simplified, and compacted by the
       // territory engine when a trip completes. Rendering performs one union
       // with village coverage and never replays historical routes.
-      const unlockedTerritory = mergeVillageTerritories([
+      const territoryInputs = [
         ...ownedTerritories,
         ...(liveExploredTerritory ? [liveExploredTerritory] : []),
-      ]);
-      const coverageData = featureCollection(
-        unlockedTerritory ? [unlockedTerritory] : [],
-      );
-      const lockedData = featureCollection([
-        lockedTerritoryMask(unlockedTerritory),
-      ]);
-      const source = instance.getSource("depot-network") as
-        | mapboxgl.GeoJSONSource
-        | undefined;
-      const coverageSource = instance.getSource("service-coverage") as
-        | mapboxgl.GeoJSONSource
-        | undefined;
-      const lockedSource = instance.getSource("locked-territory") as
-        | mapboxgl.GeoJSONSource
-        | undefined;
-      if (source && coverageSource && lockedSource) {
-        source.setData(data);
-        coverageSource.setData(coverageData);
-        lockedSource.setData(lockedData);
-
-        instance.triggerRepaint();
+      ];
+      const source = instance.getSource("depot-network") as mapboxgl.GeoJSONSource | undefined;
+      const coverageSource = instance.getSource("service-coverage") as mapboxgl.GeoJSONSource | undefined;
+      const lockedSource = instance.getSource("locked-territory") as mapboxgl.GeoJSONSource | undefined;
+      const existingSources = Boolean(source && coverageSource && lockedSource);
+      if (existingSources) {
+        source!.setData(data);
+        // Geometry computation is asynchronous and cancelled on effect cleanup.
+        // Never block taxi animation with synchronous Turf union/difference.
+        const worker = new Worker(new URL("./territoryGeometry.worker.ts", import.meta.url), { type: "module" });
+        territoryWorkers.current.add(worker);
+        worker.onmessage = (event: MessageEvent<{ coverage?: GeoJSON.FeatureCollection; locked?: GeoJSON.FeatureCollection; error?: string }>) => {
+          territoryWorkers.current.delete(worker);
+          worker.terminate();
+          if (cancelled || map.current !== instance || event.data.error) return;
+          const coverage = instance.getSource("service-coverage") as mapboxgl.GeoJSONSource | undefined;
+          const locked = instance.getSource("locked-territory") as mapboxgl.GeoJSONSource | undefined;
+          if (coverage && locked && event.data.coverage && event.data.locked) {
+            coverage.setData(event.data.coverage);
+            locked.setData(event.data.locked);
+          }
+        };
+        worker.postMessage({ id: 0, territories: territoryInputs });
         return;
       }
+      const unlockedTerritory = mergeVillageTerritories(territoryInputs);
+      const coverageData = featureCollection(unlockedTerritory ? [unlockedTerritory] : []);
+      const lockedData = featureCollection([lockedTerritoryMask(unlockedTerritory)]);
       instance.addSource("locked-territory", {
         type: "geojson",
         data: lockedData,
@@ -2162,6 +2167,8 @@ function GameMapView({
 
     return () => {
       cancelled = true;
+      for (const worker of territoryWorkers.current) worker.terminate();
+      territoryWorkers.current.clear();
       instance.off("styledata", applyTerritoryUpdate);
       instance.off("idle", applyTerritoryUpdate);
     };

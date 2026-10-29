@@ -1829,6 +1829,28 @@ useGameStore.subscribe((state, previous) => {
 })
 
 
+// Check for new missions once per minute. The existing generation engine
+// scales offer capacity with available, staffed taxis and limits the board.
+// This timer only fills missing slots; it never changes taxi movement.
+const MISSION_GENERATION_INTERVAL_MS = 60_000
+if (typeof window !== 'undefined') {
+  window.setInterval(() => {
+    const state = useGameStore.getState()
+    if (!state.hasHydrated || !state.company || state.pausedAt || state.jobsLoading) return
+    if (!jobGeneratingTaxis(state).length) return
+    const target = Math.min(MAX_JOB_OFFERS, availableJobOfferCapacity(state))
+    const offered = state.jobs.filter((job) => job.status === 'offered').length
+    if (offered >= target) return
+    // Avoid overlapping a scheduled replenishment with the periodic check.
+    if (replenishTimer) {
+      clearTimeout(replenishTimer)
+      replenishTimer = null
+    }
+    lastReplenishAttempt = Date.now()
+    void state.addRandomJob()
+  }, MISSION_GENERATION_INTERVAL_MS)
+}
+
 // Taxi missions are dispatched automatically, without requiring an operations
 // manager, an automation toggle, or the player to open the mission board.
 // Defer dispatch until the current Zustand update finishes; accepting a job
